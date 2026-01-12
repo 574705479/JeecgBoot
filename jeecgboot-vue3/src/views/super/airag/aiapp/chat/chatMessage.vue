@@ -1,12 +1,21 @@
 <template>
-  <div class="chat" :class="[inversion === 'user' ? 'self' : 'chatgpt']" v-if="getText || (props.presetQuestion && props.presetQuestion.length>0)">
-    <div class="avatar" v-if="showAvatar !== 'no'">
+  <!-- 系统消息样式 - 居中显示，无头像 -->
+  <div class="chat system-message" v-if="inversion === 'system' && getText">
+    <div class="system-content">
+      <span class="system-text">{{ getText }}</span>
+    </div>
+  </div>
+  <!-- 普通消息样式 -->
+  <div class="chat" :class="getChatClass()" v-else-if="getText || (props.presetQuestion && props.presetQuestion.length>0)">
+    <div class="avatar" :class="getAvatarClass()" v-if="showAvatar !== 'no' && showAvatar !== false">
       <img v-if="inversion === 'user'" :src="avatar()" />
+      <img v-else-if="inversion === 'assistant'" :src="getAgentAvatar()" />
       <img v-else :src="getAiImg()" />
     </div>
     <div class="content">
       <p class="date" v-if="showAvatar !== 'no'">
-        <span v-if="inversion === 'ai'" style="margin-right: 10px">{{appData.name || 'AI助手'}}</span>
+        <span v-if="inversion === 'ai'" class="sender-name sender-ai">{{appData.name || 'AI助手'}}</span>
+        <span v-if="inversion === 'assistant'" class="sender-name sender-agent">{{ senderName || '客服' }}</span>
         <span>{{ dateTime }}</span>
       </p>
       <div v-if="inversion === 'user' && images && images.length>0" class="images">
@@ -59,7 +68,7 @@
   import { createImgPreview } from "@/components/Preview";
   import { computed } from "vue";
 
-  const props = defineProps(['dateTime', 'text', 'inversion', 'error', 'loading','appData','presetQuestion','images','retrievalText', 'referenceKnowledge', 'eventType', 'showAvatar']);
+  const props = defineProps(['dateTime', 'text', 'inversion', 'error', 'loading','appData','presetQuestion','images','retrievalText', 'referenceKnowledge', 'eventType', 'showAvatar', 'senderName', 'senderAvatar']);
   
   const uuid = ref<any>(buildUUID());
   const activeKey = ref<any>(uuid.value);
@@ -86,6 +95,26 @@
   const emit = defineEmits(['send']);
   const getAiImg = () => {
     return getFileAccessHttpUrl(props.appData?.icon) || defaultImg;
+  };
+  
+  // 获取客服头像
+  import agentDefaultAvatar from "@/assets/images/ai/avatar.jpg"; // 复用默认头像或可以换一个
+  const getAgentAvatar = () => {
+    return getFileAccessHttpUrl(props.senderAvatar) || agentDefaultAvatar;
+  };
+  
+  // 获取聊天样式类
+  const getChatClass = () => {
+    if (props.inversion === 'user') return 'self';
+    if (props.inversion === 'assistant') return 'chatgpt agent-message';
+    return 'chatgpt';
+  };
+  
+  // 获取头像样式类
+  const getAvatarClass = () => {
+    if (props.inversion === 'assistant') return 'avatar-agent';
+    if (props.inversion === 'ai') return 'avatar-ai';
+    return '';
   };
 
   /**
@@ -307,6 +336,68 @@
   @media (max-width: 600px) {
     .content{
       width: 100%;
+    }
+  }
+  
+  /* 系统消息样式 - 居中显示 */
+  .system-message {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 8px 0;
+    margin: 8px 0;
+    
+    .system-content {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 6px 16px;
+      background: rgba(0, 0, 0, 0.04);
+      border-radius: 16px;
+      max-width: 80%;
+      
+      .system-text {
+        font-size: 12px;
+        color: #909399;
+        line-height: 1.5;
+        text-align: center;
+        word-break: break-word;
+      }
+    }
+  }
+  
+  /* 客服消息样式 */
+  .agent-message {
+    :deep(.chatTextArea) {
+      background: linear-gradient(135deg, #667eea, #764ba2) !important;
+      color: #fff !important;
+    }
+  }
+  
+  /* 发送者名称样式 */
+  .sender-name {
+    margin-right: 10px;
+    font-weight: 500;
+  }
+  
+  .sender-ai {
+    color: #52c41a;
+  }
+  
+  .sender-agent {
+    color: #667eea;
+  }
+  
+  /* 头像样式 */
+  .avatar-agent {
+    img {
+      border: 2px solid #667eea;
+    }
+  }
+  
+  .avatar-ai {
+    img {
+      border: 2px solid #52c41a;
     }
   }
 </style>

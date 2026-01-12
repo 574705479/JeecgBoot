@@ -1,7 +1,40 @@
 <template>
-  <div ref="chatContainerRef" class="chat-container" :style="chatContainerStyle">
-    <template v-if="dataSource">
-      <div v-if="isMultiSession" class="leftArea" :class="[expand ? 'expand' : 'shrink']">
+  <div ref="chatContainerRef" class="chat-container" :class="{ 'cs-mode': isCustomerServiceMode }" :style="chatContainerStyle">
+    <!-- 在线客服模式：简洁的聊天头部 -->
+    <div v-if="isCustomerServiceMode" class="cs-header">
+      <div class="cs-header-left">
+        <img v-if="appData?.icon" :src="appData.icon" class="cs-app-icon" />
+        <div v-else class="cs-app-icon cs-app-icon-default">
+          <Icon icon="ant-design:customer-service-outlined" :size="24" />
+        </div>
+        <div class="cs-header-info">
+          <span class="cs-app-name">{{ appData?.name || '在线客服' }}</span>
+          <span class="cs-status">在线</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 欢迎页（仅非客服模式显示） -->
+    <WelcomePage
+      v-if="showWelcomePage && !hasStartedChat && !isCustomerServiceMode"
+      :appName="appData?.name"
+      :appIcon="appData?.icon"
+      :welcomeTitle="externalParams.welcomeTitle"
+      :welcomeDesc="externalParams.welcomeDesc"
+      :prologue="prologue"
+      :quickQuestions="quickCommandData"
+      :externalUserName="externalParams.externalUserName"
+      :primaryColor="externalParams.primaryColor"
+      :showTransferHuman="false"
+      @start-chat="handleWelcomeStartChat"
+      @question-click="handleWelcomeQuestionClick"
+      @transfer-human="handleTransferHuman"
+    />
+    
+    <!-- 聊天区域 -->
+    <template v-else-if="dataSource">
+      <!-- 左侧会话列表（仅多会话非客服模式显示） -->
+      <div v-if="isMultiSession && !isCustomerServiceMode" class="leftArea" :class="[expand ? 'expand' : 'shrink']">
         <div class="content">
           <slide :source="source" v-if="uuid" :dataSource="dataSource" @save="handleSave" :prologue="prologue" :appData="appData" @click="handleChatClick"></slide>
         </div>
@@ -16,7 +49,7 @@
           </span>
         </div>
       </div>
-      <div class="rightArea" :class="[expand ? 'expand' : 'shrink']">
+      <div class="rightArea" :class="[expand ? 'expand' : 'shrink', { 'cs-full-width': !isMultiSession || isCustomerServiceMode }]">
         <chat
           url="/airag/chat/send"
           v-if="uuid && chatVisible"
@@ -30,9 +63,11 @@
           @reload-message-title="reloadMessageTitle"
           :chatTitle="chatTitle"
           :quickCommandData="quickCommandData"
-          :showAdvertising = "showAdvertising"
+          :showAdvertising="showAdvertising"
           :hasExtraFlowInputs="hasExtraFlowInputs"
           :conversationSettings="getCurrentSettings"
+          :externalParams="externalParams"
+          :showHeader="isMultiSession"
           @edit-settings="handleEditSettings"
           ref="chatRef"
         ></chat>
@@ -54,14 +89,16 @@
   import slide from './slide.vue';
   import chat from './chat.vue';
   import ConversationSettingsModal from './components/ConversationSettingsModal.vue';
+  import WelcomePage from './components/WelcomePage.vue';
   import { Spin, message } from 'ant-design-vue';
-  import { ref, watch, nextTick, onUnmounted, onMounted, computed } from 'vue';
+  import { ref, watch, nextTick, onUnmounted, onMounted, computed, reactive } from 'vue';
   import { useUserStore } from '/@/store/modules/user';
   import { JEECG_CHAT_KEY } from '/@/enums/cacheEnum';
   import { defHttp } from '/@/utils/http/axios';
   import { useRouter } from 'vue-router';
   import { useAppInject } from "@/hooks/web/useAppInject";
   import Loading from '@/components/Loading/src/Loading.vue';
+  import { Icon } from '/@/components/Icon';
 
   const router = useRouter();
   const userId = useUserStore().getUserInfo?.id;
@@ -83,6 +120,38 @@
   const presetQuestion = ref<string>('');
   //加载
   const loading = ref<any>(true);
+
+  // ==================== 第三方接入参数 ====================
+  // 第三方参数对象
+  const externalParams = reactive({
+    externalUserId: '',
+    externalUserName: '',
+    sessionMode: 'temp',
+    token: '',
+    timestamp: '',
+    welcomeTitle: '',
+    welcomeDesc: '',
+    primaryColor: '',
+  });
+  
+  // 是否显示欢迎页
+  const showWelcomePage = ref(false);
+  // 是否已开始聊天（用于控制欢迎页显示）
+  const hasStartedChat = ref(false);
+  
+  // ==================== 在线客服模式 ====================
+  // 用户访问默认始终为客服模式（通过URL参数source=chatJs或iframe嵌入时）
+  const isCustomerServiceMode = computed(() => {
+    // 以下情况启用在线客服模式：
+    // 1. 有外部用户ID
+    // 2. 来源为chatJs（脚本/iframe嵌入）
+    // 3. URL包含csMode=true参数
+    const query = router.currentRoute.value.query;
+    return !!externalParams.externalUserId 
+        || source.value === 'chatJs'
+        || query.csMode === 'true'
+        || query.source === 'embed';  // iframe嵌入时也启用
+  });
 
   const handleToggle = () => {
     expand.value = !expand.value;
@@ -286,8 +355,8 @@
     );
   };
 
-  //是否为多会话模式
-  const isMultiSession = ref<boolean>(true);
+  //是否为多会话模式（默认单会话模式，不显示左侧边栏）
+  const isMultiSession = ref<boolean>(false);
   //是否为手机
   const { getIsMobile } = useAppInject();
   //来源
@@ -298,11 +367,18 @@
    * @param appId
    */
   function initChartData(appId = '') {
+    // 构建查询参数，包括外部用户信息
+    const params: any = { appId: appId };
+    if (externalParams.externalUserId) {
+      params.externalUserId = externalParams.externalUserId;
+      params.sessionMode = externalParams.sessionMode || 'temp';
+    }
+    
     defHttp
       .get(
         {
           url: '/airag/chat/conversations',
-          params: { appId: appId },
+          params: params,
         },
         { isTransformResponse: false }
       )
@@ -327,6 +403,11 @@
   onMounted(() => {
     loading.value = true;
     let params: any = router.currentRoute.value.params;
+    let query: any = router.currentRoute.value.query;
+    
+    // 解析第三方接入参数
+    parseExternalParams(query);
+    
     if (params.appId) {
       appId.value = params.appId;
       getApplicationData(params.appId);
@@ -338,7 +419,7 @@
           { name: 'JEECG有哪些优势？', descr: "JEECG有哪些优势？" },
           { name: 'JEECG可以做哪些事情？', descr: "JEECG可以做哪些事情？" },];
     }
-    let query: any = router.currentRoute.value.query;
+    
     source.value = query.source;
     if(query.source){
       showAdvertising.value = query.source === 'chatJs';
@@ -346,6 +427,71 @@
       showAdvertising.value = false;
     }
   });
+
+  /**
+   * 解析第三方接入参数
+   */
+  function parseExternalParams(query: any) {
+    if (query.externalUserId) {
+      externalParams.externalUserId = query.externalUserId;
+    }
+    if (query.externalUserName) {
+      externalParams.externalUserName = decodeURIComponent(query.externalUserName);
+    }
+    if (query.sessionMode) {
+      externalParams.sessionMode = query.sessionMode;
+    }
+    if (query.token) {
+      externalParams.token = query.token;
+    }
+    if (query.timestamp) {
+      externalParams.timestamp = query.timestamp;
+    }
+    if (query.welcomeTitle) {
+      externalParams.welcomeTitle = decodeURIComponent(query.welcomeTitle);
+    }
+    if (query.welcomeDesc) {
+      externalParams.welcomeDesc = decodeURIComponent(query.welcomeDesc);
+    }
+    if (query.primaryColor) {
+      externalParams.primaryColor = decodeURIComponent(query.primaryColor);
+    }
+    // 显示欢迎页的条件：URL参数指定 或 有外部用户ID
+    if (query.showWelcomePage === 'true' || externalParams.externalUserId) {
+      showWelcomePage.value = true;
+    }
+  }
+
+  /**
+   * 欢迎页：开始对话
+   */
+  function handleWelcomeStartChat() {
+    hasStartedChat.value = true;
+  }
+
+  /**
+   * 欢迎页：点击快捷问题
+   */
+  function handleWelcomeQuestionClick(question: any) {
+    hasStartedChat.value = true;
+    // 等待聊天组件加载完成后发送消息
+    nextTick(() => {
+      const chatRef = document.querySelector('.chat-container');
+      if (chatRef) {
+        // 触发发送消息（如果chat组件支持的话）
+        const questionText = typeof question === 'string' ? question : (question.descr || question.name);
+        // 这里可以通过事件或ref来触发chat组件发送消息
+        console.log('发送快捷问题:', questionText);
+      }
+    });
+  }
+
+  /**
+   * 欢迎页：转人工客服
+   */
+  function handleTransferHuman() {
+    message.info('转人工客服功能开发中...');
+  }
 
   onUnmounted(() => {
     chatData.value = [];
@@ -385,15 +531,18 @@
             let metadata = JSON.parse(res.result.metadata);
             //判斷是否为手机模式
             if(!getIsMobile.value){
-              //是否为多会话模式
-              if((metadata.multiSession && metadata.multiSession === '1') || !metadata.multiSession) {
+              //是否为多会话模式（默认单会话，只有明确配置为1才开启多会话）
+              if(metadata.multiSession && metadata.multiSession === '1') {
                 isMultiSession.value = true;
+                expand.value = true;
               } else {
+                // 默认单会话模式，不显示左侧边栏
                 isMultiSession.value = false;
                 expand.value = false;
               }
             }
           }
+          // 手机模式或默认都使用单会话
           if(getIsMobile.value){
             isMultiSession.value = false;
             expand.value = false;
@@ -546,5 +695,90 @@
 
     flex: 1;
     min-width: 0;
+    
+    // 在线客服模式：全宽显示
+    &.cs-full-width {
+      margin-left: 0;
+    }
+  }
+
+  // ==================== 在线客服模式样式 ====================
+  .chat-container.cs-mode {
+    flex-direction: column;
+    border: none;
+    background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%);
+    
+    .rightArea {
+      flex: 1;
+      margin-left: 0;
+      min-height: 0;
+    }
+  }
+  
+  // 客服模式头部
+  .cs-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
+    color: white;
+    flex-shrink: 0;
+    box-shadow: 0 2px 8px rgba(24, 144, 255, 0.3);
+    
+    .cs-header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    
+    .cs-app-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      object-fit: cover;
+      background: rgba(255, 255, 255, 0.2);
+      
+      &.cs-app-icon-default {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+      }
+    }
+    
+    .cs-header-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    
+    .cs-app-name {
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+    
+    .cs-status {
+      font-size: 12px;
+      opacity: 0.9;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      
+      &::before {
+        content: '';
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #52c41a;
+        animation: pulse 2s infinite;
+      }
+    }
+  }
+  
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
   }
 </style>

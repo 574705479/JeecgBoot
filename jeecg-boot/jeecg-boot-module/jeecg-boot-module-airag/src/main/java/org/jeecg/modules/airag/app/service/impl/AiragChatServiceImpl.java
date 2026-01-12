@@ -17,6 +17,7 @@ import org.jeecg.common.system.util.JwtUtil;
 import org.jeecg.common.util.*;
 import org.jeecg.modules.airag.app.consts.AiAppConsts;
 import org.jeecg.modules.airag.app.entity.AiragApp;
+import org.jeecg.modules.airag.app.entity.AiragAppSecret;
 import org.jeecg.modules.airag.app.mapper.AiragAppMapper;
 import org.jeecg.modules.airag.app.service.IAiragChatService;
 import org.jeecg.modules.airag.app.vo.AppDebugParams;
@@ -86,6 +87,18 @@ public class AiragChatServiceImpl implements IAiragChatService {
     @Autowired
     AiragModelMapper airagModelMapper;
 
+    @Autowired
+    org.jeecg.modules.airag.app.service.IAiragAppSecretService airagAppSecretService;
+
+    @Autowired(required = false)
+    org.jeecg.modules.airag.chat.service.IChatMessageService chatMessageService;
+
+    /**
+     * 会话模式常量
+     */
+    private static final String SESSION_MODE_TEMP = "temp";
+    private static final String SESSION_MODE_PERSIST = "persist";
+
     /**
      * 重新接收消息
      */
@@ -97,6 +110,38 @@ public class AiragChatServiceImpl implements IAiragChatService {
         String userMessage = chatSendParams.getContent();
         AssertUtils.assertNotEmpty("至少发送一条消息", userMessage);
 
+        // 第三方接入签名验证（仅对外部用户生效，登录用户无需验证）
+        // 判断是否是外部用户访问（有externalUserId参数）
+        boolean isExternalUser = oConvertUtils.isNotEmpty(chatSendParams.getExternalUserId());
+        if (isExternalUser) {
+            // 检查应用是否配置了密钥
+            AiragAppSecret appSecret = null;
+            if (oConvertUtils.isNotEmpty(chatSendParams.getAppId())) {
+                appSecret = airagAppSecretService.getEnabledByAppId(chatSendParams.getAppId());
+            }
+            // 如果应用配置了密钥（secretKey不为空），则必须验证签名
+            if (appSecret != null && oConvertUtils.isNotEmpty(appSecret.getSecretKey())) {
+                // 必须提供 token 和 timestamp
+                if (oConvertUtils.isEmpty(chatSendParams.getToken()) || chatSendParams.getTimestamp() == null) {
+                    throw new JeecgBootBizTipException("该应用已启用签名验证，请提供有效的签名参数");
+                }
+                String referer = null;
+                try {
+                    HttpServletRequest request = SpringContextUtils.getHttpServletRequest();
+                    referer = request.getHeader("Referer");
+                } catch (Exception ignore) {}
+                boolean valid = airagAppSecretService.validateToken(
+                        chatSendParams.getAppId(),
+                        chatSendParams.getToken(),
+                        chatSendParams.getTimestamp(),
+                        referer
+                );
+                if (!valid) {
+                    throw new JeecgBootBizTipException("接入签名验证失败");
+                }
+            }
+        }
+
         // 获取会话信息
         String conversationId = chatSendParams.getConversationId();
         String topicId = oConvertUtils.getString(chatSendParams.getTopicId(), UUIDGenerator.generate());
@@ -105,7 +150,7 @@ public class AiragChatServiceImpl implements IAiragChatService {
         if (oConvertUtils.isNotEmpty(chatSendParams.getAppId())) {
             app = airagAppMapper.getByIdIgnoreTenant(chatSendParams.getAppId());
         }
-        ChatConversation chatConversation = getOrCreateChatConversation(app, conversationId);
+        ChatConversation chatConversation = getOrCreateChatConversationWithExternal(app, conversationId, chatSendParams);
         // 更新标题
         if (oConvertUtils.isEmpty(chatConversation.getTitle())) {
             chatConversation.setTitle(userMessage.length() > 5 ? userMessage.substring(0, 5) : userMessage);
@@ -195,12 +240,27 @@ public class AiragChatServiceImpl implements IAiragChatService {
     }
 
     @Override
-    public Result<?> getConversations(String appId) {
+    public Result<?> getConversations(String appId, String externalUserId, String sessionMode) {
         if (oConvertUtils.isEmpty(appId)) {
             appId = AiAppConsts.DEFAULT_APP_ID;
         }
-        String key = getConversationDirCacheKey(null);
-        key = key + ":*";
+        
+        String key;
+        // 根据是否有外部用户ID决定使用哪种key格式
+        if (oConvertUtils.isNotEmpty(externalUserId)) {
+            // 临时会话模式不返回历史对话列表
+            if (SESSION_MODE_TEMP.equals(sessionMode)) {
+                return Result.ok(Collections.emptyList());
+            }
+            // 外部用户使用新格式: airag:chat:{sessionMode}:{appId}:{externalUserId}:*
+            String mode = oConvertUtils.getString(sessionMode, SESSION_MODE_PERSIST);
+            key = String.format("airag:chat:%s:%s:%s:*", mode, appId, externalUserId);
+        } else {
+            // 内部用户使用旧格式
+            key = getConversationDirCacheKey(null);
+            key = key + ":*";
+        }
+        
         List<String> keys = redisUtil.scan(key);
         // 如果键集合为空，返回空列表
         if (keys.isEmpty()) {
@@ -209,6 +269,7 @@ public class AiragChatServiceImpl implements IAiragChatService {
 
         // 遍历键集合，获取对应的 ChatConversation 对象
         List<ChatConversation> conversations = new ArrayList<>();
+        final String finalAppId = appId;
         for (Object k : keys) {
             ChatConversation conversation = (ChatConversation) redisTemplate.boundValueOps(k).get();
 
@@ -218,7 +279,7 @@ public class AiragChatServiceImpl implements IAiragChatService {
                     continue;
                 }
                 String conversationAppId = app.getId();
-                if (appId.equals(conversationAppId)) {
+                if (finalAppId.equals(conversationAppId)) {
                     conversation.setApp(null);
                     conversation.setMessages(null);
                     conversations.add(conversation);
@@ -249,55 +310,63 @@ public class AiragChatServiceImpl implements IAiragChatService {
     @Override
     public Result<?> getMessages(String conversationId) {
         AssertUtils.assertNotEmpty("请先选择会话", conversationId);
-        String key = getConversationCacheKey(conversationId, null);
-        if (oConvertUtils.isEmpty(key)) {
-            return Result.ok(Collections.emptyList());
-        }
-        ChatConversation chatConversation = (ChatConversation) redisTemplate.boundValueOps(key).get();
-        if (oConvertUtils.isObjectEmpty(chatConversation)) {
-            return Result.ok(Collections.emptyList());
-        }
-        //update-begin---author:chenrui ---date:20251106  for：[issues/8545]新建AI应用的时候只能选择没有自定义参数的AI流程------------
-        // 返回消息列表和会话设置信息
+        
+        // 【核心变更】从MongoDB获取消息，不再从Redis的chatConversation.messages获取
         Map<String, Object> result = new HashMap<>();
-        // 过滤掉工具调用相关的消息（前端不需要展示）
-        List<MessageHistory> messages = chatConversation.getMessages();
-        if (oConvertUtils.isObjectNotEmpty(messages)) {
-            messages = messages.stream()
-                    .filter(msg -> !AiragConsts.MESSAGE_ROLE_TOOL.equals(msg.getRole()))
-                    .map(msg -> {
-                        // 克隆消息对象，移除工具执行请求信息（前端不需要）
-                        MessageHistory displayMsg = MessageHistory.builder()
-                                .conversationId(msg.getConversationId())
-                                .topicId(msg.getTopicId())
-                                .role(msg.getRole())
-                                .content(msg.getContent())
-                                .images(msg.getImages())
-                                .datetime(msg.getDatetime())
-                                .build();
-                        // 不设置toolExecutionRequests和toolExecutionResult
-                        return displayMsg;
-                    })
-                    .collect(Collectors.toList());
+        
+        // 从MongoDB获取消息
+        List<MessageHistory> messages = new ArrayList<>();
+        if (chatMessageService != null) {
+            List<org.jeecg.modules.airag.chat.entity.ChatMessage> chatMessages = 
+                    chatMessageService.getMessages(conversationId);
+            if (oConvertUtils.isObjectNotEmpty(chatMessages)) {
+                messages = chatMessages.stream()
+                        .filter(msg -> msg.getSenderType() != org.jeecg.modules.airag.chat.entity.ChatMessage.SENDER_SYSTEM)
+                        .map(this::convertToMessageHistory)
+                        .collect(Collectors.toList());
+            }
         }
+        
+        // 获取会话的flowInputs配置（仍从Redis获取会话元信息）
+        ChatConversation chatConversation = findConversationById(conversationId);
+        if (chatConversation != null) {
+            result.put("flowInputs", chatConversation.getFlowInputs());
+        }
+        
         result.put("messages", messages);
-        result.put("flowInputs", chatConversation.getFlowInputs());
         return Result.ok(result);
-        //update-end---author:chenrui ---date:20251106  for：[issues/8545]新建AI应用的时候只能选择没有自定义参数的AI流程------------
+    }
+    
+    /**
+     * 将MongoDB的ChatMessage转换为MessageHistory
+     */
+    private MessageHistory convertToMessageHistory(org.jeecg.modules.airag.chat.entity.ChatMessage chatMessage) {
+        MessageHistory history = MessageHistory.builder()
+                .conversationId(chatMessage.getConversationId())
+                .datetime(chatMessage.getCreateTime() != null ? 
+                        new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(chatMessage.getCreateTime()) : null)
+                .content(chatMessage.getContent())
+                .build();
+        
+        // 根据senderType设置role
+        if (chatMessage.getSenderType() == org.jeecg.modules.airag.chat.entity.ChatMessage.SENDER_USER) {
+            history.setRole(AiragConsts.MESSAGE_ROLE_USER);
+        } else if (chatMessage.getSenderType() == org.jeecg.modules.airag.chat.entity.ChatMessage.SENDER_AI) {
+            history.setRole(AiragConsts.MESSAGE_ROLE_AI);
+        }
+        
+        return history;
     }
 
     @Override
     public Result<?> clearMessage(String conversationId) {
         AssertUtils.assertNotEmpty("请先选择会话", conversationId);
-        String key = getConversationCacheKey(conversationId, null);
-        if (oConvertUtils.isEmpty(key)) {
-            return Result.ok(Collections.emptyList());
+        
+        // 【核心变更】清除MongoDB中的消息
+        if (chatMessageService != null) {
+            chatMessageService.clearMessages(conversationId);
         }
-        ChatConversation chatConversation = (ChatConversation) redisTemplate.boundValueOps(key).get();
-        if (null != chatConversation && oConvertUtils.isObjectNotEmpty(chatConversation.getMessages())) {
-            chatConversation.getMessages().clear();
-            saveChatConversation(chatConversation);
-        }
+        
         return Result.ok();
     }
 
@@ -445,10 +514,11 @@ public class AiragChatServiceImpl implements IAiragChatService {
     @Override
     public Result<?> deleteConversation(String conversationId) {
         AssertUtils.assertNotEmpty("请选择要删除的会话", conversationId);
-        String key = getConversationCacheKey(conversationId, null);
+        // 使用通用方法查找缓存key（支持内部用户和外部用户）
+        String key = findConversationKeyById(conversationId);
         if (oConvertUtils.isNotEmpty(key)) {
             Boolean delete = redisTemplate.delete(key);
-            if (delete) {
+            if (Boolean.TRUE.equals(delete)) {
                 return Result.ok();
             } else {
                 return Result.error("删除会话失败");
@@ -463,14 +533,14 @@ public class AiragChatServiceImpl implements IAiragChatService {
         AssertUtils.assertNotEmpty("请先选择会话", updateTitleParams);
         AssertUtils.assertNotEmpty("请先选择会话", updateTitleParams.getId());
         AssertUtils.assertNotEmpty("请输入会话标题", updateTitleParams.getTitle());
-        String key = getConversationCacheKey(updateTitleParams.getId(), null);
-        if (oConvertUtils.isEmpty(key)) {
-            log.warn("[ai-chat]删除会话:未找到会话:{}", updateTitleParams.getId());
+        // 使用通用方法查找会话（支持内部用户和外部用户）
+        ChatConversation chatConversation = findConversationById(updateTitleParams.getId());
+        if (oConvertUtils.isObjectEmpty(chatConversation)) {
+            log.warn("[ai-chat]更新会话标题:未找到会话:{}", updateTitleParams.getId());
             return Result.ok();
         }
-        ChatConversation chatConversation = (ChatConversation) redisTemplate.boundValueOps(key).get();
         chatConversation.setTitle(updateTitleParams.getTitle());
-        saveChatConversation(chatConversation);
+        saveChatConversation(chatConversation, false, null);
         return Result.ok();
     }
 
@@ -518,6 +588,84 @@ public class AiragChatServiceImpl implements IAiragChatService {
     }
 
     /**
+     * 根据conversationId查找会话（支持内部用户和外部用户）
+     * 
+     * @param conversationId 会话ID
+     * @return 会话对象，找不到返回null
+     */
+    private ChatConversation findConversationById(String conversationId) {
+        if (oConvertUtils.isEmpty(conversationId)) {
+            return null;
+        }
+        
+        // 1. 先尝试内部用户的key格式
+        try {
+            String key = getConversationCacheKey(conversationId, null);
+            if (oConvertUtils.isNotEmpty(key)) {
+                ChatConversation conversation = (ChatConversation) redisTemplate.boundValueOps(key).get();
+                if (conversation != null) {
+                    // 确保设置cacheKey
+                    if (oConvertUtils.isEmpty(conversation.getCacheKey())) {
+                        conversation.setCacheKey(key);
+                    }
+                    return conversation;
+                }
+            }
+        } catch (Exception e) {
+            log.debug("内部用户key格式查找失败，尝试外部用户格式: {}", e.getMessage());
+        }
+        
+        // 2. 尝试外部用户的key格式（通过扫描）
+        String scanPattern = "airag:chat:*:" + conversationId;
+        List<String> keys = redisUtil.scan(scanPattern);
+        if (oConvertUtils.isObjectNotEmpty(keys) && !keys.isEmpty()) {
+            for (Object k : keys) {
+                ChatConversation conversation = (ChatConversation) redisTemplate.boundValueOps(k).get();
+                if (conversation != null && conversationId.equals(conversation.getId())) {
+                    // 确保设置cacheKey
+                    if (oConvertUtils.isEmpty(conversation.getCacheKey())) {
+                        conversation.setCacheKey(k.toString());
+                    }
+                    return conversation;
+                }
+            }
+        }
+        
+        return null;
+    }
+
+    /**
+     * 根据conversationId查找缓存key（支持内部用户和外部用户）
+     * 
+     * @param conversationId 会话ID
+     * @return 缓存key，找不到返回null
+     */
+    private String findConversationKeyById(String conversationId) {
+        if (oConvertUtils.isEmpty(conversationId)) {
+            return null;
+        }
+        
+        // 1. 先尝试内部用户的key格式
+        try {
+            String key = getConversationCacheKey(conversationId, null);
+            if (oConvertUtils.isNotEmpty(key) && Boolean.TRUE.equals(redisTemplate.hasKey(key))) {
+                return key;
+            }
+        } catch (Exception e) {
+            log.debug("内部用户key格式查找失败，尝试外部用户格式: {}", e.getMessage());
+        }
+        
+        // 2. 尝试外部用户的key格式（通过扫描）
+        String scanPattern = "airag:chat:*:" + conversationId;
+        List<String> keys = redisUtil.scan(scanPattern);
+        if (oConvertUtils.isObjectNotEmpty(keys) && !keys.isEmpty()) {
+            return keys.get(0);
+        }
+        
+        return null;
+    }
+
+    /**
      * 获取会话
      *
      * @param app
@@ -539,9 +687,137 @@ public class AiragChatServiceImpl implements IAiragChatService {
         }
         if (null == chatConversation) {
             chatConversation = createConversation(conversationId);
+            // 设置cacheKey，用于SSE回调线程中保存会话
+            chatConversation.setCacheKey(key);
+        }
+        // 如果从缓存获取的会话没有cacheKey，补充设置
+        if (oConvertUtils.isEmpty(chatConversation.getCacheKey()) && oConvertUtils.isNotEmpty(key)) {
+            chatConversation.setCacheKey(key);
         }
         chatConversation.setApp(app);
         return chatConversation;
+    }
+
+    /**
+     * 获取或创建会话（支持第三方外部用户）
+     *
+     * @param app            应用
+     * @param conversationId 会话ID
+     * @param sendParams     发送参数（包含外部用户信息）
+     * @return 会话对象
+     */
+    @NotNull
+    private ChatConversation getOrCreateChatConversationWithExternal(AiragApp app, String conversationId, ChatSendParams sendParams) {
+        if (oConvertUtils.isObjectEmpty(app)) {
+            app = new AiragApp();
+            app.setId(AiAppConsts.DEFAULT_APP_ID);
+        }
+
+        String externalUserId = sendParams.getExternalUserId();
+        String sessionMode = oConvertUtils.getString(sendParams.getSessionMode(), SESSION_MODE_TEMP);
+        String appId = sendParams.getAppId();
+
+        ChatConversation chatConversation = null;
+        String key;
+
+        // 根据会话模式和外部用户构建缓存key
+        if (oConvertUtils.isNotEmpty(externalUserId)) {
+            key = getExternalConversationCacheKey(appId, externalUserId, sessionMode, conversationId);
+        } else {
+            key = getConversationCacheKey(conversationId, null);
+        }
+
+        if (oConvertUtils.isNotEmpty(key)) {
+            chatConversation = (ChatConversation) redisTemplate.boundValueOps(key).get();
+        }
+
+        if (null == chatConversation) {
+            chatConversation = createConversation(conversationId);
+            // 设置外部用户信息
+            chatConversation.setExternalUserId(externalUserId);
+            chatConversation.setExternalUserName(sendParams.getExternalUserName());
+            chatConversation.setSessionMode(sessionMode);
+            chatConversation.setAppId(appId);
+            // 设置cacheKey，用于SSE回调线程中保存会话
+            chatConversation.setCacheKey(key);
+        }
+        
+        // 如果从缓存获取的会话没有cacheKey，补充设置
+        if (oConvertUtils.isEmpty(chatConversation.getCacheKey()) && oConvertUtils.isNotEmpty(key)) {
+            chatConversation.setCacheKey(key);
+        }
+
+        chatConversation.setApp(app);
+
+        // 保存会话（根据sessionMode设置过期时间）
+        boolean isTemp = SESSION_MODE_TEMP.equals(sessionMode) || oConvertUtils.isEmpty(externalUserId);
+        saveChatConversationWithExternal(chatConversation, isTemp);
+
+        return chatConversation;
+    }
+
+    /**
+     * 获取外部用户会话缓存key
+     *
+     * @param appId          应用ID
+     * @param externalUserId 外部用户ID
+     * @param sessionMode    会话模式
+     * @param conversationId 会话ID
+     * @return 缓存key
+     */
+    private String getExternalConversationCacheKey(String appId, String externalUserId, String sessionMode, String conversationId) {
+        if (oConvertUtils.isEmpty(externalUserId)) {
+            return null;
+        }
+        conversationId = oConvertUtils.getString(conversationId, UUIDGenerator.generate());
+        // 格式: airag:chat:{sessionMode}:{appId}:{externalUserId}:{conversationId}
+        return String.format("airag:chat:%s:%s:%s:%s",
+                oConvertUtils.getString(sessionMode, SESSION_MODE_TEMP),
+                oConvertUtils.getString(appId, "default"),
+                externalUserId,
+                conversationId);
+    }
+
+    /**
+     * 保存会话（支持外部用户）
+     *
+     * @param chatConversation 会话对象
+     * @param isTemp           是否临时会话
+     */
+    private void saveChatConversationWithExternal(ChatConversation chatConversation, boolean isTemp) {
+        if (null == chatConversation) {
+            return;
+        }
+
+        // 优先使用已存储的cacheKey（解决SSE回调线程中无法获取HTTP session的问题）
+        String key = chatConversation.getCacheKey();
+        if (oConvertUtils.isEmpty(key)) {
+            if (oConvertUtils.isNotEmpty(chatConversation.getExternalUserId())) {
+                key = getExternalConversationCacheKey(
+                        chatConversation.getAppId(),
+                        chatConversation.getExternalUserId(),
+                        chatConversation.getSessionMode(),
+                        chatConversation.getId()
+                );
+            } else {
+                key = getConversationCacheKey(chatConversation.getId(), null);
+            }
+        }
+
+        if (oConvertUtils.isEmpty(key)) {
+            log.warn("无法获取会话缓存key，跳过保存: conversationId={}", chatConversation.getId());
+            return;
+        }
+
+        BoundValueOperations chatRedisCacheOp = redisTemplate.boundValueOps(key);
+        chatRedisCacheOp.set(chatConversation);
+        if (isTemp) {
+            // 临时会话3小时过期
+            chatRedisCacheOp.expire(3, TimeUnit.HOURS);
+        } else {
+            // 持久会话30天过期
+            chatRedisCacheOp.expire(30, TimeUnit.DAYS);
+        }
     }
 
     /**
@@ -585,8 +861,13 @@ public class AiragChatServiceImpl implements IAiragChatService {
         if (null == chatConversation) {
             return;
         }
-        String key = getConversationCacheKey(chatConversation.getId(), httpRequest);
+        // 优先使用已存储的cacheKey（解决SSE回调线程中无法获取HTTP session的问题）
+        String key = chatConversation.getCacheKey();
         if (oConvertUtils.isEmpty(key)) {
+            key = getConversationCacheKey(chatConversation.getId(), httpRequest);
+        }
+        if (oConvertUtils.isEmpty(key)) {
+            log.warn("无法获取会话缓存key，跳过保存: conversationId={}", chatConversation.getId());
             return;
         }
         BoundValueOperations chatRedisCacheOp = redisTemplate.boundValueOps(key);
@@ -597,85 +878,90 @@ public class AiragChatServiceImpl implements IAiragChatService {
     }
 
     /**
-     * 构造消息
+     * 构造消息（从MongoDB获取历史消息）
+     * 
+     * 【新架构】从MongoDB获取历史消息，不再从chatConversation.messages获取
      *
-     * @param conversation
-     * @param topicId
-     * @return
+     * @param conversation 会话对象
+     * @param topicId      话题ID
+     * @return LLM消息列表
      * @author chenrui
      * @date 2025/2/25 15:26
      */
     private List<ChatMessage> collateMessage(ChatConversation conversation, String topicId) {
-        List<MessageHistory> messagesHistory = conversation.getMessages();
-        if (oConvertUtils.isObjectEmpty(messagesHistory)) {
-            return new LinkedList<>();
-        }
         LinkedList<ChatMessage> chatMessages = new LinkedList<>();
-        for (int i = messagesHistory.size() - 1; i >= 0; i--) {
-            MessageHistory history = messagesHistory.get(i);
-            if (topicId.equals(history.getTopicId())) {
-                ChatMessage chatMessage = null;
-                switch (history.getRole()) {
-                    case AiragConsts.MESSAGE_ROLE_USER:
-                        List<Content> contents = new ArrayList<>();
-                        List<MessageHistory.ImageHistory> images = history.getImages();
-                        if (oConvertUtils.isObjectNotEmpty(images) && !images.isEmpty()) {
-                            contents.addAll(images.stream().map(imageHistory -> {
-                                if (oConvertUtils.isNotEmpty(imageHistory.getUrl())) {
-                                    return ImageContent.from(imageHistory.getUrl());
-                                } else {
-                                    return ImageContent.from(imageHistory.getBase64Data(), imageHistory.getMimeType());
+        
+        // 【核心变更】从MongoDB获取历史消息
+        if (chatMessageService == null) {
+            return chatMessages;
+        }
+        
+        // 获取最近的消息（限制数量以控制上下文长度）
+        int maxMsgNumber = 20; // 默认最多20条历史消息
+        if (conversation.getApp() != null && conversation.getApp().getMsgNum() != null) {
+            maxMsgNumber = conversation.getApp().getMsgNum();
+        }
+        
+        List<org.jeecg.modules.airag.chat.entity.ChatMessage> mongoMessages = 
+                chatMessageService.getRecentMessages(conversation.getId(), maxMsgNumber);
+        
+        if (oConvertUtils.isObjectEmpty(mongoMessages)) {
+            return chatMessages;
+        }
+        
+        // 转换MongoDB消息为LLM消息格式
+        for (org.jeecg.modules.airag.chat.entity.ChatMessage mongoMsg : mongoMessages) {
+            ChatMessage chatMessage = null;
+            
+            if (mongoMsg.getSenderType() == org.jeecg.modules.airag.chat.entity.ChatMessage.SENDER_USER) {
+                // 用户消息
+                List<Content> contents = new ArrayList<>();
+                // 处理图片（如果有）
+                if (mongoMsg.getExtra() != null && mongoMsg.getExtra().containsKey("images")) {
+                    @SuppressWarnings("unchecked")
+                    List<String> images = (List<String>) mongoMsg.getExtra().get("images");
+                    if (images != null) {
+                        for (String imgUrl : images) {
+                            if (imgUrl.startsWith("data:")) {
+                                // base64图片
+                                String[] parts = imgUrl.split(",");
+                                if (parts.length > 1) {
+                                    String mimeType = parts[0].replace("data:", "").replace(";base64", "");
+                                    contents.add(ImageContent.from(parts[1], mimeType));
                                 }
-                            }).collect(Collectors.toList()));
+                            } else {
+                                contents.add(ImageContent.from(imgUrl));
+                            }
                         }
-                        contents.add(TextContent.from(history.getContent()));
-                        chatMessage = UserMessage.from(contents);
-                        break;
-                    case AiragConsts.MESSAGE_ROLE_AI:
-                        // 重建AI消息，包括工具执行请求
-                        if (oConvertUtils.isObjectNotEmpty(history.getToolExecutionRequests())) {
-                            // 有工具执行请求，重建带工具调用的AiMessage
-                            List<ToolExecutionRequest> toolRequests = history.getToolExecutionRequests().stream()
-                                    .map(toolReq -> ToolExecutionRequest.builder()
-                                            .id(toolReq.getId())
-                                            .name(toolReq.getName())
-                                            .arguments(toolReq.getArguments())
-                                            .build())
-                                    .collect(Collectors.toList());
-                            chatMessage = AiMessage.from(history.getContent(), toolRequests);
-                        } else {
-                            chatMessage = new AiMessage(history.getContent());
-                        }
-                        break;
-                    case AiragConsts.MESSAGE_ROLE_TOOL:
-                        // 重建工具执行结果消息
-                        // 需要重建ToolExecutionRequest，第一个参数是request对象，第二个参数是result字符串
-                        ToolExecutionRequest recreatedRequest = ToolExecutionRequest.builder()
-                                .id(history.getContent()) // content字段存储的是工具执行的id
-                                .name("unknown") // 工具名称在重建时不重要，因为主要用于AI理解结果
-                                .arguments("{}")
-                                .build();
-                        chatMessage = ToolExecutionResultMessage.from(recreatedRequest, history.getToolExecutionResult());
-                        break;
+                    }
                 }
-                if (null == chatMessage) {
-                    continue;
-                }
-                chatMessages.addFirst(chatMessage);
+                contents.add(TextContent.from(mongoMsg.getContent()));
+                chatMessage = UserMessage.from(contents);
+            } else if (mongoMsg.getSenderType() == org.jeecg.modules.airag.chat.entity.ChatMessage.SENDER_AI) {
+                // AI消息
+                chatMessage = new AiMessage(mongoMsg.getContent());
+            }
+            // 系统消息和工具消息不加入上下文
+            
+            if (chatMessage != null) {
+                chatMessages.add(chatMessage);
             }
         }
+        
         return chatMessages;
     }
 
 
     /**
      * 追加消息
+     * 
+     * 【新架构】消息只保存到MongoDB，不再存储在chatConversation.messages中
+     * Redis中的chatConversation只存储会话元信息（id, title, createTime等）
      *
-     * @param messages
-     * @param message
-     * @param chatConversation
-     * @param topicId
-     * @return
+     * @param messages        当前对话的消息列表（内存中，用于LLM上下文）
+     * @param message         新消息
+     * @param chatConversation 会话对象
+     * @param topicId         话题ID
      * @author chenrui
      * @date 2025/2/25 19:05
      */
@@ -688,12 +974,17 @@ public class AiragChatServiceImpl implements IAiragChatService {
         } else {
             messages.add(message);
         }
-        List<MessageHistory> histories = chatConversation.getMessages();
-        if (oConvertUtils.isObjectEmpty(histories)) {
-            histories = new ArrayList<>();
-        }
-        // 消息记录
-        MessageHistory historyMessage = MessageHistory.builder().conversationId(chatConversation.getId()).topicId(topicId).datetime(DateUtils.now()).build();
+        
+        // 【核心变更】不再更新chatConversation.messages，直接保存到MongoDB
+        // 这样Redis中的chatConversation不会包含消息列表，大大减少Redis存储
+        
+        // 构建消息历史对象（用于MongoDB存储）
+        MessageHistory historyMessage = MessageHistory.builder()
+                .conversationId(chatConversation.getId())
+                .topicId(topicId)
+                .datetime(DateUtils.now())
+                .build();
+                
         if (message.type().equals(ChatMessageType.USER)) {
             historyMessage.setRole(AiragConsts.MESSAGE_ROLE_USER);
             StringBuilder textContent = new StringBuilder();
@@ -734,8 +1025,52 @@ public class AiragChatServiceImpl implements IAiragChatService {
             historyMessage.setContent(toolMessage.id());
             historyMessage.setToolExecutionResult(toolMessage.text());
         }
-        histories.add(historyMessage);
-        chatConversation.setMessages(histories);
+        
+        // 【核心变更】直接保存到MongoDB（唯一的消息持久化位置）
+        saveToMongoDB(chatConversation, historyMessage);
+    }
+    
+    /**
+     * 保存消息到MongoDB（唯一的消息持久化位置）
+     * 
+     * 【新架构】MongoDB是消息的唯一存储位置，不再存Redis
+     */
+    private void saveToMongoDB(ChatConversation chatConversation, MessageHistory historyMessage) {
+        if (chatMessageService == null) {
+            log.warn("[AI-CHAT] MongoDB服务未配置，消息将丢失！");
+            return;
+        }
+        try {
+            String appId = chatConversation.getAppId();
+            if (oConvertUtils.isEmpty(appId) && chatConversation.getApp() != null) {
+                appId = chatConversation.getApp().getId();
+            }
+            String userId = chatConversation.getUserId();
+            String externalUserId = chatConversation.getExternalUserId();
+            String externalUserName = chatConversation.getExternalUserName();
+            
+            if (AiragConsts.MESSAGE_ROLE_USER.equals(historyMessage.getRole())) {
+                // 用户消息
+                List<String> imageUrls = null;
+                if (historyMessage.getImages() != null && !historyMessage.getImages().isEmpty()) {
+                    imageUrls = historyMessage.getImages().stream()
+                            .map(img -> img.getUrl() != null ? img.getUrl().toString() : img.getBase64Data())
+                            .collect(java.util.stream.Collectors.toList());
+                }
+                chatMessageService.saveAiUserMessage(
+                        chatConversation.getId(), appId, userId,
+                        externalUserId, externalUserName,
+                        historyMessage.getContent(), imageUrls);
+            } else if (AiragConsts.MESSAGE_ROLE_AI.equals(historyMessage.getRole())) {
+                // AI消息
+                chatMessageService.saveAiAssistantMessage(
+                        chatConversation.getId(), appId,
+                        historyMessage.getContent(), null, null, null);
+            }
+            // 工具调用消息暂不存储到MongoDB（仅在LLM上下文中使用）
+        } catch (Exception e) {
+            log.error("[AI-CHAT] 保存消息到MongoDB失败: {}", e.getMessage(), e);
+        }
     }
 
     /**
@@ -825,12 +1160,17 @@ public class AiragChatServiceImpl implements IAiragChatService {
         // 支持流式
         flowRunParams.setResponseMode(FlowConsts.FLOW_RESPONSE_MODE_STREAMING);
         Map<String, Object> flowInputParams = new HashMap<>();
+        
+        // 【核心变更】从MongoDB获取历史消息
         List<MessageHistory> histories = new ArrayList<>();
-        if (oConvertUtils.isObjectNotEmpty(chatConversation.getMessages())) {
-            // 创建历史消息的副本(不直接操作原来的list)
-            histories.addAll(chatConversation.getMessages());
-            // 移除最后一条历史消息(最后一条是当前发出去的这一条消息)
-            histories.remove(histories.size() - 1);
+        if (chatMessageService != null) {
+            List<org.jeecg.modules.airag.chat.entity.ChatMessage> mongoMessages = 
+                    chatMessageService.getRecentMessages(chatConversation.getId(), 20);
+            if (oConvertUtils.isObjectNotEmpty(mongoMessages)) {
+                histories = mongoMessages.stream()
+                        .map(this::convertToMessageHistory)
+                        .collect(Collectors.toList());
+            }
         }
         flowInputParams.put(FlowConsts.FLOW_INPUT_PARAM_HISTORY, histories);
         flowInputParams.put(FlowConsts.FLOW_INPUT_PARAM_QUESTION, sendParams.getContent());
@@ -1217,23 +1557,6 @@ public class AiragChatServiceImpl implements IAiragChatService {
     }
 
     /**
-     * 发送聊天返回结果
-     *
-     * @author chenrui
-     * @date 2025/2/28 11:05
-     */
-    private static class ChatResult {
-        public final SseEmitter emitter;
-        public final AiragModel chatModel;
-
-        public ChatResult(SseEmitter emitter, AiragModel chatModel) {
-            this.emitter = emitter;
-            this.chatModel = chatModel;
-        }
-    }
-
-
-    /**
      * 总结会话标题
      * 几个问题: <br/>
      * 1. 如果在发消息时同步总结会话标题,会导致接口很慢甚至超时.
@@ -1328,5 +1651,39 @@ public class AiragChatServiceImpl implements IAiragChatService {
         if (null != beginTime) {
             log.info("[AI-CHAT]{},requestId:{},耗时:{}s", message, requestId, (System.currentTimeMillis() - beginTime) / 1000);
         }
+    }
+
+    @Override
+    public Result<List<String>> getActiveConversationKeys(int limit) {
+        // 【核心变更】从MongoDB获取活跃的AI会话
+        if (chatMessageService == null) {
+            return Result.ok(new ArrayList<>());
+        }
+        
+        List<Map<String, Object>> activeConversations = chatMessageService.getActiveAiConversations(limit);
+        List<String> conversationIds = activeConversations.stream()
+                .map(conv -> String.valueOf(conv.get("conversationId")))
+                .collect(Collectors.toList());
+        
+        return Result.ok(conversationIds);
+    }
+
+    @Override
+    public List<MessageHistory> getMessageHistory(String conversationId) {
+        // 【核心变更】从MongoDB获取消息历史
+        if (chatMessageService == null) {
+            return new ArrayList<>();
+        }
+        
+        List<org.jeecg.modules.airag.chat.entity.ChatMessage> chatMessages = 
+                chatMessageService.getMessages(conversationId);
+        
+        if (oConvertUtils.isObjectEmpty(chatMessages)) {
+            return new ArrayList<>();
+        }
+        
+        return chatMessages.stream()
+                .map(this::convertToMessageHistory)
+                .collect(Collectors.toList());
     }
 }

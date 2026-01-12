@@ -48,12 +48,14 @@ public interface IAiragChatService {
     /**
      * 获取所有对话
      *
-     * @param appId
+     * @param appId          应用ID
+     * @param externalUserId 外部用户ID（可选）
+     * @param sessionMode    会话模式（可选）
      * @return
      * @author chenrui
      * @date 2025/2/26 14:48
      */
-    Result<?> getConversations(String appId);
+    Result<?> getConversations(String appId, String externalUserId, String sessionMode);
 
     /**
      * 获取对话聊天记录
@@ -111,4 +113,18 @@ public interface IAiragChatService {
      * @date 2025/8/11 17:39
      */
     SseEmitter receiveByRequestId(String requestId);
+
+    /**
+     * 获取活跃的AI对话key列表
+     * @param limit 限制数量
+     * @return key列表
+     */
+    Result<java.util.List<String>> getActiveConversationKeys(int limit);
+
+    /**
+     * 获取对话的消息历史
+     * @param conversationId 对话ID
+     * @return 消息历史列表
+     */
+    java.util.List<org.jeecg.modules.airag.common.vo.MessageHistory> getMessageHistory(String conversationId);
 }

@@ -59,4 +59,31 @@ public class ChatSendParams {
      */
     private Boolean enableSearch;
 
+    // ==================== 第三方接入参数 ====================
+
+    /**
+     * 第三方用户ID（用于绑定外部系统用户）
+     */
+    private String externalUserId;
+
+    /**
+     * 第三方用户名称
+     */
+    private String externalUserName;
+
+    /**
+     * 会话模式: temp=临时会话(3小时过期), persist=持久会话(绑定用户)
+     */
+    private String sessionMode;
+
+    /**
+     * 接入签名 token = MD5(appId + secretKey + timestamp)
+     */
+    private String token;
+
+    /**
+     * 时间戳（用于签名验证）
+     */
+    private Long timestamp;
+
 }

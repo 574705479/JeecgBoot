@@ -98,8 +98,11 @@ public class AiragChatController {
      */
     @IgnoreAuth
     @GetMapping(value = "/conversations")
-    public Result<?> getConversations(@RequestParam(value = "appId", required = false) String appId) {
-        return chatService.getConversations(appId);
+    public Result<?> getConversations(
+            @RequestParam(value = "appId", required = false) String appId,
+            @RequestParam(value = "externalUserId", required = false) String externalUserId,
+            @RequestParam(value = "sessionMode", required = false) String sessionMode) {
+        return chatService.getConversations(appId, externalUserId, sessionMode);
     }
 
     /**

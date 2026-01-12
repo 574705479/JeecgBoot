@@ -187,6 +187,16 @@ public class ShiroConfig {
         filterChainDefinitionMap.put("/error", "anon");
         // 企业微信证书排除
         filterChainDefinitionMap.put("/WW_verify*", "anon");
+        
+        // 客服系统-转人工接口（聊天页面免登录访问需要）
+        filterChainDefinitionMap.put("/cs/conversation/transfer/**", "anon");
+        filterChainDefinitionMap.put("/cs/conversation/create", "anon");
+        filterChainDefinitionMap.put("/cs/conversation/*/queue", "anon");
+        filterChainDefinitionMap.put("/cs/conversation/rate/**", "anon");
+        // 客服系统-消息发送接口（用户聊天页面免登录访问需要）
+        filterChainDefinitionMap.put("/cs/message/send", "anon");
+        // 客服系统-WebSocket端点
+        filterChainDefinitionMap.put("/ws/cs/**", "anon");
 
         // 添加自己的过滤器并且取名为jwt
         Map<String, Filter> filterMap = new HashMap<String, Filter>(1);

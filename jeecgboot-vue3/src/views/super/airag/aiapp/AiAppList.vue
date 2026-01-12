@@ -106,6 +106,10 @@
                       <Icon icon="ant-design:dribbble-outlined" size="16"></Icon>
                       嵌入网站
                     </a-menu-item>
+                    <a-menu-item key="secret" @click.prevent.stop="handleSecretClick(item)">
+                      <Icon icon="ant-design:key-outlined" size="16"></Icon>
+                      接入设置
+                    </a-menu-item>
                     <a-menu-item v-if="isShowMenu" key="menu" @click.prevent.stop="handleSendClick(item,'menu')">
                       <Icon icon="ant-design:menu-outlined" size="16"></Icon> 配置菜单
                     </a-menu-item>
@@ -136,6 +140,8 @@
     <AiAppSettingModal @register="registerSettingModal" @success="reload"></AiAppSettingModal>
     <!-- 发布弹窗 -->
     <AiAppSendModal @register="registerAiAppSendModal"/>
+    <!-- 接入设置弹窗 -->
+    <AiAppSecretModal @register="registerSecretModal"/>
   </div>
 </template>
 
@@ -150,6 +156,7 @@
   import AiAppModal from './components/AiAppModal.vue';
   import AiAppSettingModal from './components/AiAppSettingModal.vue';
   import AiAppSendModal from './components/AiAppSendModal.vue';
+  import AiAppSecretModal from './components/AiAppSecretModal.vue';
   import Icon from '@/components/Icon';
   import { $electron } from "@/electron";
   import { appList, deleteApp, releaseApp } from './AiApp.api';
@@ -164,6 +171,7 @@
       JDictSelectTag,
       JInput,
       AiAppSendModal,
+      AiAppSecretModal,
       Icon,
       Pagination,
       Avatar,
@@ -190,6 +198,7 @@
       const [registerModal, { openModal }] = useModal();
       const [registerSettingModal, { openModal: openAppModal }] = useModal();
       const [registerAiAppSendModal, { openModal: openAiAppSendModal }] = useModal();
+      const [registerSecretModal, { openModal: openSecretModal }] = useModal();
       const { createMessage, createConfirmSync } = useMessage();
       //查询参数
       const queryParam = reactive<any>({});
@@ -325,6 +334,16 @@
         })
       }
 
+      /**
+       * 接入设置点击事件
+       * @param item 应用数据
+       */
+      function handleSecretClick(item) {
+        openSecretModal(true, {
+          appId: item.id
+        });
+      }
+
       async function onRelease(item) {
         const toRelease = item.status === 'enable';
         let flag = await createConfirmSync({
@@ -408,7 +427,9 @@
         labelCol,
         wrapperCol,
         handleSendClick,
+        handleSecretClick,
         registerAiAppSendModal,
+        registerSecretModal,
         searchReset,
         formRef,
         isShowMenu,

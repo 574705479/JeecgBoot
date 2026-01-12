@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.jeecg.modules.airag.cs.mapper.CsConversationMapper">
+
+    <!-- 分页查询会话列表 (重构版) -->
+    <select id="selectConversationPage" resultType="org.jeecg.modules.airag.cs.entity.CsConversation">
+        SELECT 
+            c.*,
+            a.nickname as owner_agent_name,
+            a.avatar as owner_agent_avatar
+        FROM cs_conversation c
+        LEFT JOIN cs_agent a ON c.agent_id = a.id
+        <where>
+            <!-- 按筛选类型过滤 -->
+            <choose>
+                <when test="filter == 'mine'">
+                    <!-- 我负责的 -->
+                    AND c.agent_id = #{agentId}
+                </when>
+                <when test="filter == 'collab'">
+                    <!-- 协作中的 - 如果cs_collaborator表不存在则跳过 -->
+                    AND EXISTS (
+                        SELECT 1 FROM cs_collaborator col 
+                        WHERE col.conversation_id = c.id 
+                        AND col.agent_id = #{agentId} 
+                        AND col.leave_time IS NULL
+                        AND col.role != 0
+                    )
+                </when>
+                <when test="filter == 'unassigned'">
+                    <!-- 未分配的 -->
+                    AND (c.status = 0 OR c.agent_id IS NULL)
+                </when>
+                <otherwise>
+                    <!-- 所有相关的（我负责的 + 协作中的） -->
+                    <if test="agentId != null and agentId != ''">
+                        AND c.agent_id = #{agentId}
+                    </if>
+                </otherwise>
+            </choose>
+            
+            <!-- 状态筛选 -->
+            <if test="status != null">
+                AND c.status = #{status}
+            </if>
+        </where>
+        ORDER BY 
+            CASE WHEN IFNULL(c.unread_count, 0) > 0 THEN 0 ELSE 1 END,
+            c.last_message_time DESC
+    </select>
+
+</mapper>

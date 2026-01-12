@@ -6,7 +6,6 @@ import org.jeecg.common.util.oConvertUtils;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.boot.autoconfigure.mongo.MongoAutoConfiguration;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.boot.web.servlet.support.SpringBootServletInitializer;
 import org.springframework.context.ConfigurableApplicationContext;
@@ -19,10 +18,10 @@ import java.util.Map;
 
 /**
 * 单体启动类（采用此类启动为单体模式）
-* 报错提醒: 未集成mongo报错，可以打开启动类上面的注释 exclude={MongoAutoConfiguration.class}
+* 已启用MongoDB存储聊天消息
 */
 @Slf4j
-@SpringBootApplication(exclude = MongoAutoConfiguration.class)
+@SpringBootApplication
 @ImportAutoConfiguration(JustAuthAutoConfiguration.class)  // spring boot 3.x justauth 兼容性处理
 public class JeecgSystemApplication extends SpringBootServletInitializer {
 

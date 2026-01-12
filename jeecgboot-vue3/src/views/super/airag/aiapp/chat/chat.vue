@@ -1,7 +1,8 @@
 <template>
   <div class="chatWrap">
     <div class="content">
-      <div class="header-title" v-if="type === 'view' && headerTitle">
+      <!-- 单会话模式下隐藏标题栏（默认隐藏，通过showHeader控制） -->
+      <div class="header-title" v-if="type === 'view' && headerTitle && showHeader">
         <div class="title-content">
           <span>{{headerTitle}}</span>
           <a-button 
@@ -43,6 +44,8 @@
                 :referenceKnowledge="item.referenceKnowledge"
                 :eventType="item.eventType"
                 :showAvatar="item.showAvatar"
+                :senderName="item.senderName"
+                :senderAvatar="item.senderAvatar"
                 @send="handleOutQuestion"
               ></chatMessage>
             </div>
@@ -222,7 +225,7 @@
     prefixCls: 'ai-chat-message',
   });
 
-  const props = defineProps(['uuid', 'prologue', 'formState', 'url', 'type','historyData','chatTitle','presetQuestion','quickCommandData','showAdvertising','hasExtraFlowInputs','conversationSettings']);
+  const props = defineProps(['uuid', 'prologue', 'formState', 'url', 'type','historyData','chatTitle','presetQuestion','quickCommandData','showAdvertising','hasExtraFlowInputs','conversationSettings','externalParams','showHeader']);
   const emit = defineEmits(['save','reload-message-title','edit-settings']);
   const { scrollRef, scrollToBottom } = useScroll();
   const prompt = ref<string>('');
@@ -235,7 +238,7 @@
   //应用数据
   const appData = ref<any>({});
   const usingContext = ref<any>(true);
-  const uuid = ref<string>(props.uuid);
+  const uuid = ref<string>(props.uuid || '');
   const topicId = ref<string>('');
   //请求id
   const requestId = ref<string>('');
@@ -266,6 +269,14 @@
   const showWebSearch = ref<boolean>(false);
   //模型provider信息
   const modelProvider = ref<string>('');
+  
+  // ★ 监听props.uuid变化，保持本地uuid同步
+  watch(() => props.uuid, (newUuid, oldUuid) => {
+    if (newUuid && newUuid !== uuid.value) {
+      uuid.value = newUuid;
+    }
+  }, { immediate: true });
+  
   
   function handleEnter(event: KeyboardEvent) {
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -310,6 +321,7 @@
     }
     
     if (loading.value) return;
+    
     loading.value = true;
 
     addChat(uuid.value, {
@@ -347,7 +359,7 @@
     //发送消息
     sendMessage(userMessage,options);
   }
-
+  
   onUnmounted(() => {
     updateChatSome(uuid.value, chatData.value.length - 1, { loading: false });
   });
@@ -500,7 +512,15 @@
         // 添加对话设置参数
         flowInputs: props.conversationSettings || {},
         // 添加网络搜索参数
-        enableSearch: enableSearch.value
+        enableSearch: enableSearch.value,
+        // 添加第三方接入参数
+        ...(props.externalParams?.externalUserId && {
+          externalUserId: props.externalParams.externalUserId,
+          externalUserName: props.externalParams.externalUserName,
+          sessionMode: props.externalParams.sessionMode || 'temp',
+          token: props.externalParams.token,
+          timestamp: props.externalParams.timestamp,
+        })
       };
 
       if(headerTitle.value == '新建聊天'){
@@ -627,7 +647,10 @@
     if (item.event == 'MESSAGE_END') {
       topicId.value = item.topicId;
       conversationId = item.conversationId;
-      uuid.value = item.conversationId;
+      // ★ 只有当conversationId有效时才更新uuid，避免覆盖为null
+      if (item.conversationId && item.conversationId !== '1002') {
+        uuid.value = item.conversationId;
+      }
       localStorage.removeItem('chat_requestId_' + uuid.value);
       handleStop();
     }
@@ -642,7 +665,10 @@
       //update-end---author:wangshuai---date:2025-03-07---for:【QQYUN-11457】聊天调用流程，执行失败了但是没提示---
       topicId.value = item.topicId;
       conversationId = item.conversationId;
-      uuid.value = item.conversationId;
+      // ★ 只有当conversationId有效时才更新uuid，避免覆盖为null
+      if (item.conversationId && item.conversationId !== '1002') {
+        uuid.value = item.conversationId;
+      }
       requestId.value = item.requestId;
       localStorage.removeItem('chat_requestId_' + uuid.value);
       handleStop();
@@ -1197,6 +1223,18 @@
           color: @primary-color;
         }
         font-size: 18px;
+      }
+      .transfer-btn {
+        color: #1890ff;
+        &.is-queue {
+          color: #faad14;
+          animation: pulse 2s infinite;
+        }
+      }
+      @keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.5; }
+        100% { opacity: 1; }
       }
       .sendBtn {
         font-size: 18px;
