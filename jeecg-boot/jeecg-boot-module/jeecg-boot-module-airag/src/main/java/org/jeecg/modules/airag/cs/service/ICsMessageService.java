@@ -55,6 +55,16 @@ public interface ICsMessageService {
     CsMessage sendSystemMessage(String conversationId, String content);
 
     /**
+     * 发送系统消息（可控制是否持久化）
+     * 
+     * @param conversationId 会话ID
+     * @param content        消息内容
+     * @param persist        是否持久化到数据库
+     * @return 系统消息
+     */
+    CsMessage sendSystemMessage(String conversationId, String content, boolean persist);
+
+    /**
      * 发送消息（通用）
      * 
      * @param message 消息实体

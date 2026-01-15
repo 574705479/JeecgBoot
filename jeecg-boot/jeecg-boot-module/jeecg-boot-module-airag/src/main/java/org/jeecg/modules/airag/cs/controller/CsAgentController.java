@@ -13,6 +13,7 @@ import org.jeecg.common.system.query.QueryGenerator;
 import org.jeecg.modules.airag.cs.entity.CsAgent;
 import org.jeecg.modules.airag.cs.service.ICsAgentService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -31,8 +32,14 @@ import java.util.List;
 @RequestMapping("/cs/agent")
 public class CsAgentController extends JeecgController<CsAgent, ICsAgentService> {
 
+    /** 访客AI应用全局配置的Redis Key */
+    private static final String VISITOR_APP_REDIS_KEY = "cs:global:visitor_app_id";
+
     @Autowired
     private ICsAgentService csAgentService;
+
+    @Autowired
+    private RedisTemplate<String, String> redisTemplate;
 
     /**
      * 分页列表查询
@@ -155,4 +162,50 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
         CsAgent agent = csAgentService.getCurrentAgent();
         return Result.OK(agent);
     }
+
+    /**
+     * 设置客服AI建议应用（用于AI辅助模式）
+     */
+    @Operation(summary = "设置客服AI建议应用")
+    @PutMapping("/{id}/default-app")
+    public Result<String> setDefaultApp(@PathVariable String id, @RequestBody java.util.Map<String, String> params) {
+        String appId = params.get("appId");
+        CsAgent agent = csAgentService.getById(id);
+        if (agent == null) {
+            return Result.error("客服不存在");
+        }
+        agent.setDefaultAppId(appId);
+        csAgentService.updateById(agent);
+        return Result.OK("设置成功");
+    }
+
+    /**
+     * 设置访客AI应用（全局配置，用于AI自动回复模式）
+     * 注意：这是全局设置，任何客服修改都会影响所有会话
+     */
+    @Operation(summary = "设置访客AI应用（全局）")
+    @PutMapping("/global/visitor-app")
+    public Result<String> setGlobalVisitorApp(@RequestBody java.util.Map<String, String> params) {
+        String appId = params.get("appId");
+        if (appId == null || appId.isEmpty()) {
+            redisTemplate.delete(VISITOR_APP_REDIS_KEY);
+        } else {
+            redisTemplate.opsForValue().set(VISITOR_APP_REDIS_KEY, appId);
+        }
+        log.info("[CS-Agent] 全局访客AI应用已更新: appId={}", appId);
+        return Result.OK("设置成功");
+    }
+
+    /**
+     * 获取访客AI应用（全局配置）
+     */
+    @Operation(summary = "获取访客AI应用（全局）")
+    @GetMapping("/global/visitor-app")
+    public Result<java.util.Map<String, String>> getGlobalVisitorApp() {
+        String appId = redisTemplate.opsForValue().get(VISITOR_APP_REDIS_KEY);
+        java.util.Map<String, String> result = new java.util.HashMap<>();
+        result.put("appId", appId);
+        return Result.OK(result);
+    }
+
 }

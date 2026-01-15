@@ -14,6 +14,7 @@ import org.jeecg.modules.airag.cs.mapper.CsCollaboratorMapper;
 import org.jeecg.modules.airag.cs.mapper.CsConversationMapper;
 import org.jeecg.modules.airag.cs.service.ICsAgentService;
 import org.jeecg.modules.airag.cs.service.ICsConversationService;
+import org.jeecg.modules.airag.cs.service.ICsMessageService;
 import org.jeecg.modules.airag.cs.websocket.CsWebSocketMessage;
 import org.jeecg.modules.airag.cs.websocket.CsWebSocketSessionManager;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,6 +23,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.List;
 
 /**
@@ -38,6 +41,10 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
     @Autowired
     @Lazy
     private ICsAgentService agentService;
+
+    @Autowired
+    @Lazy
+    private ICsMessageService messageService;
 
     @Autowired
     private CsCollaboratorMapper collaboratorMapper;
@@ -210,8 +217,8 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         conversation.setStatus(CsConversation.STATUS_ASSIGNED);
         conversation.setAssignTime(new Date());
         conversation.setUpdateTime(new Date());
-        // 默认切换为AI辅助模式（客服可以看到AI建议）
-        conversation.setReplyMode(CsConversation.REPLY_MODE_AI_ASSIST);
+        // ★ 客服接入后切换为手动模式，终止AI自动回复
+        conversation.setReplyMode(CsConversation.REPLY_MODE_MANUAL);
         updateById(conversation);
         
         // 创建协作者记录（主负责人）
@@ -225,8 +232,19 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         // 更新客服会话数
         agentService.incrementSessions(agentId);
         
-        // 通知用户客服已接入
-        notifyUser(conversationId, "agent_connected", "客服 " + agent.getNickname() + " 为您服务");
+        // 广播会话被接入事件给所有客服（实时推送）
+        Map<String, Object> assignData = new HashMap<>();
+        assignData.put("conversationId", conversationId);
+        assignData.put("agentId", agentId);
+        assignData.put("agentName", agent.getNickname());
+        assignData.put("assignTime", new Date());
+        broadcastToAllAgents("conversation_assigned", assignData);
+        
+        // 通知用户客服已接入，同时告知已切换为手动模式
+        Map<String, Object> extra = new HashMap<>();
+        extra.put("replyMode", CsConversation.REPLY_MODE_MANUAL);
+        extra.put("agentName", agent.getNickname());
+        notifyUser(conversationId, "agent_connected", "客服 " + agent.getNickname() + " 为您服务", extra);
         
         log.info("[CS-Conversation] 客服接入成功: conversationId={}, agentId={}", conversationId, agentId);
         return true;
@@ -235,36 +253,67 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void closeConversation(String conversationId) {
-        log.info("[CS-Conversation] 结束会话: conversationId={}", conversationId);
+        closeConversation(conversationId, "会话已结束");
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void closeConversation(String conversationId, String reason) {
+        log.info("[CS-Conversation] 结束会话: conversationId={}, reason={}", conversationId, reason);
         
         CsConversation conversation = getById(conversationId);
         if (conversation == null) {
             return;
         }
         
-        // 更新会话状态
+        // 如果会话已经结束，直接返回
+        if (conversation.getStatus() == CsConversation.STATUS_CLOSED) {
+            log.info("[CS-Conversation] 会话已经结束，跳过: conversationId={}", conversationId);
+            return;
+        }
+        
+        // 更新会话状态为已结束
         conversation.setStatus(CsConversation.STATUS_CLOSED);
         conversation.setEndTime(new Date());
         conversation.setUpdateTime(new Date());
         updateById(conversation);
-        
-        // 更新所有协作者的离开时间
-        LambdaUpdateWrapper<CsCollaborator> updateWrapper = new LambdaUpdateWrapper<>();
-        updateWrapper.eq(CsCollaborator::getConversationId, conversationId)
-                .isNull(CsCollaborator::getLeaveTime)
-                .set(CsCollaborator::getLeaveTime, new Date());
-        collaboratorMapper.update(null, updateWrapper);
         
         // 减少客服会话数
         if (oConvertUtils.isNotEmpty(conversation.getOwnerAgentId())) {
             agentService.decrementSessions(conversation.getOwnerAgentId());
         }
         
-        // 通知用户会话已结束
-        notifyUser(conversationId, "conversation_closed", "会话已结束");
+        // 通知用户会话已结束（不持久化系统消息，只做WebSocket通知）
+        notifyUser(conversationId, "conversation_closed", reason);
         
-        // 通知所有相关客服
-        notifyAgents(conversationId, "conversation_closed", "会话已结束");
+        // ★ 广播会话结束事件给所有客服（让其他客服也能实时更新）
+        broadcastConversationClosed(conversation, reason);
+    }
+    
+    /**
+     * 广播会话结束给所有客服
+     */
+    private void broadcastConversationClosed(CsConversation conversation, String reason) {
+        try {
+            Map<String, Object> data = new HashMap<>();
+            data.put("conversationId", conversation.getId());
+            data.put("reason", reason);
+            data.put("endTime", new Date());
+            data.put("ownerAgentId", conversation.getOwnerAgentId());
+            
+            CsAgent agent = null;
+            if (oConvertUtils.isNotEmpty(conversation.getOwnerAgentId())) {
+                agent = agentService.getById(conversation.getOwnerAgentId());
+            }
+            if (agent != null) {
+                data.put("ownerAgentName", agent.getNickname());
+            }
+            
+            broadcastToAllAgents("conversation_closed", data);
+            log.info("[CS-Conversation] 广播会话结束给所有客服: conversationId={}", conversation.getId());
+        } catch (Exception e) {
+            log.warn("[CS-Conversation] 广播会话结束失败: {}", e.getMessage());
+        }
     }
 
     // ==================== 回复模式管理 ====================
@@ -286,12 +335,47 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         boolean success = update(updateWrapper);
         
         if (success) {
-            // 通知所有相关客服模式已切换
-            String modeName = replyMode == 0 ? "AI自动" : (replyMode == 1 ? "手动" : "AI辅助");
-            notifyAgents(conversationId, "mode_changed", "回复模式已切换为: " + modeName);
+            String modeName = replyMode == CsConversation.REPLY_MODE_AI_AUTO ? "AI自动回复" : 
+                    (replyMode == CsConversation.REPLY_MODE_MANUAL ? "人工服务" : "AI辅助");
+            
+            // ★ 通知用户模式已切换（带replyMode参数）
+            Map<String, Object> extra = new HashMap<>();
+            extra.put("replyMode", replyMode);
+            notifyUser(conversationId, "mode_changed", modeName, extra);
+            
+            // ★ 广播模式切换给所有客服
+            CsConversation conversation = getById(conversationId);
+            broadcastModeChanged(conversation, replyMode, modeName);
         }
         
         return success;
+    }
+    
+    /**
+     * 广播模式切换给所有客服
+     */
+    private void broadcastModeChanged(CsConversation conversation, int newMode, String modeName) {
+        try {
+            Map<String, Object> data = new HashMap<>();
+            data.put("conversationId", conversation.getId());
+            data.put("newMode", newMode);
+            data.put("modeName", modeName);
+            data.put("ownerAgentId", conversation.getOwnerAgentId());
+            
+            CsAgent agent = null;
+            if (oConvertUtils.isNotEmpty(conversation.getOwnerAgentId())) {
+                agent = agentService.getById(conversation.getOwnerAgentId());
+            }
+            if (agent != null) {
+                data.put("ownerAgentName", agent.getNickname());
+            }
+            
+            broadcastToAllAgents("mode_changed", data);
+            log.info("[CS-Conversation] 广播模式切换给所有客服: conversationId={}, mode={}", 
+                    conversation.getId(), modeName);
+        } catch (Exception e) {
+            log.warn("[CS-Conversation] 广播模式切换失败: {}", e.getMessage());
+        }
     }
 
     @Override
@@ -347,14 +431,31 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         conversation.setUpdateTime(new Date());
         updateById(conversation);
         
-        // 创建新负责人的协作记录
-        CsCollaborator collaborator = new CsCollaborator();
-        collaborator.setConversationId(conversationId);
-        collaborator.setAgentId(toAgentId);
-        collaborator.setRole(CsCollaborator.ROLE_OWNER);
-        collaborator.setJoinTime(new Date());
-        collaborator.setInviteBy(fromAgentId);
-        collaboratorMapper.insert(collaborator);
+        // ★ 检查目标客服是否已有协作记录
+        LambdaQueryWrapper<CsCollaborator> checkWrapper = new LambdaQueryWrapper<>();
+        checkWrapper.eq(CsCollaborator::getConversationId, conversationId)
+                .eq(CsCollaborator::getAgentId, toAgentId);
+        CsCollaborator existingCollaborator = collaboratorMapper.selectOne(checkWrapper);
+        
+        if (existingCollaborator != null) {
+            // 已存在记录（之前转接过），更新记录
+            existingCollaborator.setRole(CsCollaborator.ROLE_OWNER);
+            existingCollaborator.setJoinTime(new Date());
+            existingCollaborator.setLeaveTime(null); // 清除离开时间，重新激活
+            existingCollaborator.setInviteBy(fromAgentId);
+            collaboratorMapper.updateById(existingCollaborator);
+            log.info("[CS-Conversation] 重新激活协作记录: conversationId={}, agentId={}", conversationId, toAgentId);
+        } else {
+            // 不存在记录，新建协作记录
+            CsCollaborator collaborator = new CsCollaborator();
+            collaborator.setConversationId(conversationId);
+            collaborator.setAgentId(toAgentId);
+            collaborator.setRole(CsCollaborator.ROLE_OWNER);
+            collaborator.setJoinTime(new Date());
+            collaborator.setInviteBy(fromAgentId);
+            collaboratorMapper.insert(collaborator);
+            log.info("[CS-Conversation] 创建新协作记录: conversationId={}, agentId={}", conversationId, toAgentId);
+        }
         
         // 增加新客服会话数
         agentService.incrementSessions(toAgentId);
@@ -368,7 +469,54 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         notifyUser(conversationId, "agent_changed", 
                 "客服 " + toAgent.getNickname() + " 继续为您服务");
         
+        // ★ 广播会话转接给所有客服（包含完整的会话信息）
+        broadcastConversationTransfer(conversation, fromAgentId, fromName, toAgentId, toAgent.getNickname());
+        
         return true;
+    }
+    
+    /**
+     * 广播会话转接给所有客服
+     */
+    private void broadcastConversationTransfer(CsConversation conversation, 
+                                               String fromAgentId, String fromAgentName,
+                                               String toAgentId, String toAgentName) {
+        try {
+            Map<String, Object> data = new HashMap<>();
+            data.put("conversationId", conversation.getId());
+            data.put("fromAgentId", fromAgentId);
+            data.put("fromAgentName", fromAgentName);
+            data.put("toAgentId", toAgentId);
+            data.put("toAgentName", toAgentName);
+            data.put("transferTime", new Date());
+            
+            // ★ 添加完整的会话信息，供前端直接使用
+            Map<String, Object> conversationData = new HashMap<>();
+            conversationData.put("id", conversation.getId());
+            conversationData.put("userId", conversation.getUserId());
+            conversationData.put("userName", conversation.getUserName());
+            conversationData.put("appId", conversation.getAppId());
+            conversationData.put("source", conversation.getSource()); // 添加source字段
+            conversationData.put("status", conversation.getStatus());
+            conversationData.put("replyMode", conversation.getReplyMode());
+            conversationData.put("ownerAgentId", toAgentId);
+            conversationData.put("ownerAgentName", toAgentName);
+            conversationData.put("lastMessage", conversation.getLastMessage());
+            conversationData.put("lastMessageTime", conversation.getLastMessageTime());
+            conversationData.put("unreadCount", conversation.getUnreadCount());
+            conversationData.put("messageCount", conversation.getMessageCount());
+            conversationData.put("createTime", conversation.getCreateTime());
+            conversationData.put("assignTime", conversation.getAssignTime());
+            conversationData.put("updateTime", conversation.getUpdateTime());
+            
+            data.put("conversation", conversationData);
+            
+            broadcastToAllAgents("conversation_transferred", data);
+            log.info("[CS-Conversation] 广播会话转接给所有客服: conversationId={}, from={}, to={}, conversation={}", 
+                    conversation.getId(), fromAgentName, toAgentName, conversationData);
+        } catch (Exception e) {
+            log.error("[CS-Conversation] 广播会话转接失败: {}", e.getMessage(), e);
+        }
     }
 
     // ==================== 查询接口 ====================
@@ -385,6 +533,34 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         }
         
         return result;
+    }
+
+    @Override
+    public Map<String, Object> getConversationStats(String agentId) {
+        Map<String, Object> stats = new HashMap<>();
+        
+        // 我负责的（进行中）
+        long myCount = count(new LambdaQueryWrapper<CsConversation>()
+                .eq(oConvertUtils.isNotEmpty(agentId), CsConversation::getOwnerAgentId, agentId)
+                .ne(CsConversation::getStatus, CsConversation.STATUS_CLOSED));
+        
+        // 待接入的（只包含status=0的，排除已结束）
+        long unassignedCount = count(new LambdaQueryWrapper<CsConversation>()
+                .eq(CsConversation::getStatus, CsConversation.STATUS_UNASSIGNED));
+        
+        // 已结束的
+        long closedCount = count(new LambdaQueryWrapper<CsConversation>()
+                .eq(CsConversation::getStatus, CsConversation.STATUS_CLOSED));
+        
+        // 总数
+        long totalCount = count();
+        
+        stats.put("myCount", myCount);
+        stats.put("unassignedCount", unassignedCount);
+        stats.put("closedCount", closedCount);
+        stats.put("totalCount", totalCount);
+        
+        return stats;
     }
 
     @Override
@@ -444,6 +620,15 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         update(updateWrapper);
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void resetTimeoutWarning(String conversationId) {
+        LambdaUpdateWrapper<CsConversation> updateWrapper = new LambdaUpdateWrapper<>();
+        updateWrapper.eq(CsConversation::getId, conversationId)
+                .set(CsConversation::getTimeoutWarned, false);
+        update(updateWrapper);
+    }
+
     // ==================== 评价 ====================
 
     @Override
@@ -463,16 +648,24 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
 
     @Override
     public void notifyUser(String conversationId, String type, String content) {
+        notifyUser(conversationId, type, content, null);
+    }
+
+    @Override
+    public void notifyUser(String conversationId, String type, String content, Map<String, Object> extra) {
         CsConversation conversation = getById(conversationId);
         String userId = conversation != null ? conversation.getUserId() : conversationId;
         
-        CsWebSocketMessage message = CsWebSocketMessage.builder()
+        CsWebSocketMessage.CsWebSocketMessageBuilder builder = CsWebSocketMessage.builder()
                 .type(type)
                 .conversationId(conversationId)
-                .content(content)
-                .build();
+                .content(content);
         
-        sessionManager.sendToUserByConversation(conversationId, userId, message);
+        if (extra != null) {
+            builder.extra(extra);
+        }
+        
+        sessionManager.sendToUserByConversation(conversationId, userId, builder.build());
     }
 
     @Override
@@ -496,5 +689,47 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
                 sessionManager.sendToAgent(collab.getAgentId(), message);
             }
         }
+    }
+    
+    /**
+     * 广播消息给所有在线客服（带额外数据）
+     */
+    private void broadcastToAllAgents(String type, Map<String, Object> data) {
+        CsWebSocketMessage.CsWebSocketMessageBuilder builder = CsWebSocketMessage.builder()
+                .type(type);
+        
+        if (data != null) {
+            // 设置常用字段
+            if (data.containsKey("conversationId")) {
+                builder.conversationId((String) data.get("conversationId"));
+            }
+            if (data.containsKey("content")) {
+                builder.content((String) data.get("content"));
+            }
+            // 其他数据放到extra中
+            builder.extra(data);
+        }
+        
+        sessionManager.sendToAllAgents(builder.build());
+    }
+
+    @Override
+    public IPage<CsConversation> getAllActiveConversations(Page<CsConversation> page) {
+        // 查询所有进行中的会话（状态：待接入 或 服务中）
+        LambdaQueryWrapper<CsConversation> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.in(CsConversation::getStatus, 
+                CsConversation.STATUS_UNASSIGNED, 
+                CsConversation.STATUS_ASSIGNED)
+                .orderByDesc(CsConversation::getLastMessageTime);
+        
+        IPage<CsConversation> result = page(page, queryWrapper);
+        
+        // 填充用户在线状态
+        java.util.Set<String> onlineConversationIds = sessionManager.getOnlineConversationIds();
+        for (CsConversation conv : result.getRecords()) {
+            conv.setUserOnline(onlineConversationIds.contains(conv.getId()));
+        }
+        
+        return result;
     }
 }

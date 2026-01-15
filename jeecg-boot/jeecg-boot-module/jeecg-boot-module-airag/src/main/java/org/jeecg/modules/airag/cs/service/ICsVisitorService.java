@@ -30,6 +30,12 @@ public interface ICsVisitorService extends IService<CsVisitor> {
     CsVisitor getByAppAndUser(String appId, String userId);
 
     /**
+     * 根据userId查询访客（不指定appId，取最新创建的一条）
+     * 用于新版客服系统（不再依赖appId）
+     */
+    CsVisitor getByUserId(String userId);
+
+    /**
      * 更新访客访问信息
      */
     void updateVisitInfo(String visitorId);

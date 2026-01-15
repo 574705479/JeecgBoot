@@ -32,6 +32,16 @@ const [registerForm, { setFieldsValue, resetFields, validate }] = useForm({
     { field: 'maxSessions', label: '最大接待数', component: 'InputNumber', defaultValue: 5,
       componentProps: { min: 1, max: 20 }
     },
+    { field: 'role', label: '角色', component: 'Select', defaultValue: 0,
+      componentProps: {
+        options: [
+          { label: '普通客服', value: 0 },
+          { label: '管理者', value: 1 },
+        ],
+        placeholder: '请选择角色'
+      },
+      helpMessage: '管理者可监控所有会话'
+    },
     { field: 'welcomeMessage', label: '欢迎语', component: 'InputTextArea',
       componentProps: { rows: 3, placeholder: '用户接入时发送的欢迎语' }
     },

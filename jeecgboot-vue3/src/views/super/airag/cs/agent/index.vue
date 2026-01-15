@@ -32,6 +32,7 @@ const [registerModal, { openModal }] = useModal();
 const columns = [
   { title: '客服昵称', dataIndex: 'nickname', width: 120 },
   { title: '关联用户', dataIndex: 'userId', width: 120 },
+  { title: '角色', dataIndex: 'role', width: 100, customRender: ({ text }) => text === 1 ? '管理者' : '普通客服' },
   { title: '最大接待数', dataIndex: 'maxSessions', width: 100 },
   { title: '当前接待数', dataIndex: 'currentSessions', width: 100 },
   { title: '状态', dataIndex: 'status', width: 100, slots: { customRender: 'status' } },

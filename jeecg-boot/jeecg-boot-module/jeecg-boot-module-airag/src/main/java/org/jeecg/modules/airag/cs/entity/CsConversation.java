@@ -113,6 +113,11 @@ public class CsConversation implements Serializable {
     @Schema(description = "更新时间")
     private Date updateTime;
 
+    // ==================== 超时管理 ====================
+
+    @Schema(description = "是否已发送超时提醒")
+    private Boolean timeoutWarned;
+
     // ==================== 评价 ====================
 
     @Schema(description = "满意度评分: 1-5")

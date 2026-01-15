@@ -64,6 +64,16 @@ public class CsAgent implements Serializable {
     @Schema(description = "累计服务数")
     private Integer totalServed;
 
+    @Excel(name = "客服AI建议应用ID", width = 20)
+    @Schema(description = "客服AI建议应用ID，用于AI辅助模式下生成建议")
+    private String defaultAppId;
+
+    // 注意：访客AI应用已改为全局配置，存储在Redis中，Key: cs:global:visitor_app_id
+
+    @Excel(name = "角色", width = 10)
+    @Schema(description = "角色: 0-普通客服 1-管理者(可监控所有会话)")
+    private Integer role;
+
     @Excel(name = "最后在线时间", width = 20, format = "yyyy-MM-dd HH:mm:ss")
     @JsonFormat(timezone = "GMT+8", pattern = "yyyy-MM-dd HH:mm:ss")
     @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss")
@@ -95,11 +105,26 @@ public class CsAgent implements Serializable {
     /** 忙碌 */
     public static final int STATUS_BUSY = 2;
 
+    // ==================== 客服角色常量 ====================
+    
+    /** 普通客服 */
+    public static final int ROLE_AGENT = 0;
+    /** 管理者（可监控所有会话） */
+    public static final int ROLE_SUPERVISOR = 1;
+
     /**
      * 判断客服是否可以接待新会话
      */
     public boolean canAcceptSession() {
         return status == STATUS_ONLINE && 
                (maxSessions == null || currentSessions == null || currentSessions < maxSessions);
+    }
+
+    /**
+     * 判断是否为管理者
+     * 注意：方法名不使用 isSupervisor，避免被 QueryGenerator 误识别为数据库字段
+     */
+    public boolean checkSupervisor() {
+        return role != null && role == ROLE_SUPERVISOR;
     }
 }

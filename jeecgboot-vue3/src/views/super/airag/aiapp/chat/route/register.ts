@@ -12,6 +12,16 @@ const ChatRoutes: RouteRecordRaw[] = [
       title: 'AI聊天',
       ignoreAuth: true,
     },
+  },
+  // 新版用户聊天（支持AI和人工客服，不需要appId参数）
+  {
+    path: "/cs/chat",
+    name: "cs-user-chat",
+    component: () => import("/@/views/super/airag/cs/userChat/index.vue"),
+    meta: {
+      title: '在线客服',
+      ignoreAuth: true,
+    },
   },  
   {
     path: "/ai/app/chatIcon/:appId",

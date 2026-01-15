@@ -7,7 +7,9 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
 import org.jeecg.common.api.vo.Result;
 import org.jeecg.common.system.base.controller.JeecgController;
+import org.jeecg.modules.airag.cs.entity.CsAgent;
 import org.jeecg.modules.airag.cs.entity.CsConversation;
+import org.jeecg.modules.airag.cs.service.ICsAgentService;
 import org.jeecg.modules.airag.cs.service.ICsConversationService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -30,6 +32,9 @@ public class CsConversationController extends JeecgController<CsConversation, IC
 
     @Autowired
     private ICsConversationService conversationService;
+
+    @Autowired
+    private ICsAgentService csAgentService;
 
     // ==================== 会话生命周期 ====================
 
@@ -82,9 +87,21 @@ public class CsConversationController extends JeecgController<CsConversation, IC
      */
     @Operation(summary = "客服接入会话")
     @PostMapping("/{id}/assign")
-    public Result<Map<String, Object>> assign(@PathVariable String id, @RequestParam String agentId) {
+    public Result<Map<String, Object>> assign(@PathVariable String id, 
+                                              @RequestParam(required = false) String agentId,
+                                              @RequestBody(required = false) Map<String, String> body) {
+        // 优先从query参数获取，其次从body获取
+        String agent = agentId;
+        if (agent == null && body != null) {
+            agent = body.get("agentId");
+        }
+        
+        if (agent == null || agent.isEmpty()) {
+            return Result.error("agentId不能为空");
+        }
+        
         Map<String, Object> result = new HashMap<>();
-        boolean success = conversationService.assignToAgent(id, agentId);
+        boolean success = conversationService.assignToAgent(id, agent);
         result.put("success", success);
         result.put("message", success ? "接入成功" : "接入失败");
         
@@ -130,14 +147,53 @@ public class CsConversationController extends JeecgController<CsConversation, IC
      */
     @Operation(summary = "切换回复模式")
     @PutMapping("/{id}/mode")
-    public Result<String> changeMode(@PathVariable String id, @RequestParam Integer mode) {
-        boolean success = conversationService.changeReplyMode(id, mode);
+    public Result<String> changeMode(@PathVariable String id, 
+                                     @RequestParam(required = false) Integer mode,
+                                     @RequestBody(required = false) Map<String, Object> body) {
+        // 优先从query参数获取，其次从body获取
+        Integer replyMode = mode;
+        if (replyMode == null && body != null) {
+            Object modeObj = body.get("mode");
+            if (modeObj instanceof Integer) {
+                replyMode = (Integer) modeObj;
+            } else if (modeObj instanceof Number) {
+                replyMode = ((Number) modeObj).intValue();
+            }
+        }
+        
+        if (replyMode == null) {
+            return Result.error("mode不能为空");
+        }
+        
+        boolean success = conversationService.changeReplyMode(id, replyMode);
         if (!success) {
             return Result.error("切换失败");
         }
         
-        String modeName = mode == 0 ? "AI自动" : (mode == 1 ? "手动" : "AI辅助");
+        String modeName = replyMode == 0 ? "AI自动" : (replyMode == 1 ? "手动" : "AI辅助");
         return Result.OK("已切换为" + modeName + "模式");
+    }
+
+    /**
+     * 更新会话的AI应用
+     */
+    @Operation(summary = "更新会话的AI应用")
+    @PutMapping("/{id}/app")
+    public Result<String> updateApp(@PathVariable String id, @RequestBody Map<String, String> params) {
+        String appId = params.get("appId");
+        if (appId == null) {
+            return Result.error("appId不能为空");
+        }
+        
+        CsConversation conversation = conversationService.getById(id);
+        if (conversation == null) {
+            return Result.error("会话不存在");
+        }
+        
+        conversation.setAppId(appId);
+        conversationService.updateById(conversation);
+        
+        return Result.OK("AI应用已更新");
     }
 
     /**
@@ -171,6 +227,8 @@ public class CsConversationController extends JeecgController<CsConversation, IC
 
     /**
      * 分页查询会话列表
+     * 
+     * @param supervisorMode 管理者监控模式，为true时返回所有进行中的会话（仅管理者可用）
      */
     @Operation(summary = "分页查询会话列表")
     @GetMapping("/list")
@@ -179,11 +237,33 @@ public class CsConversationController extends JeecgController<CsConversation, IC
             @RequestParam(defaultValue = "20") Integer pageSize,
             @RequestParam(required = false) String agentId,
             @RequestParam(required = false) Integer status,
-            @RequestParam(defaultValue = "all") String filter) {
+            @RequestParam(defaultValue = "all") String filter,
+            @RequestParam(defaultValue = "false") Boolean supervisorMode) {
         
         Page<CsConversation> page = new Page<>(pageNo, pageSize);
+        
+        // 管理者监控模式：返回所有进行中的会话
+        if (Boolean.TRUE.equals(supervisorMode) && "monitor".equals(filter)) {
+            // 验证当前用户是否为管理者
+            CsAgent currentAgent = csAgentService.getCurrentAgent();
+            if (currentAgent != null && currentAgent.checkSupervisor()) {
+                IPage<CsConversation> result = conversationService.getAllActiveConversations(page);
+                return Result.OK(result);
+            }
+        }
+        
         IPage<CsConversation> result = conversationService.getConversationList(page, agentId, status, filter);
         return Result.OK(result);
+    }
+
+    /**
+     * 获取会话统计数据
+     */
+    @Operation(summary = "获取会话统计数据")
+    @GetMapping("/stats")
+    public Result<Map<String, Object>> getStats(@RequestParam(required = false) String agentId) {
+        Map<String, Object> stats = conversationService.getConversationStats(agentId);
+        return Result.OK(stats);
     }
 
     /**
@@ -191,9 +271,12 @@ public class CsConversationController extends JeecgController<CsConversation, IC
      */
     @Operation(summary = "获取我负责的会话")
     @GetMapping("/mine")
-    public Result<List<CsConversation>> getMine(@RequestParam String agentId) {
+    public Result<Map<String, Object>> getMine(@RequestParam String agentId) {
         List<CsConversation> list = conversationService.getMyConversations(agentId);
-        return Result.OK(list);
+        Map<String, Object> result = new HashMap<>();
+        result.put("list", list);
+        result.put("count", list.size());
+        return Result.OK(result);
     }
 
     /**

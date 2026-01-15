@@ -47,22 +47,62 @@ public class CsWebSocketHandler implements WebSocketHandler {
         String userType = sessionManager.getUserType(session);
         String conversationId = sessionManager.getConversationId(session);
         
+        // 构建extra信息
+        java.util.Map<String, Object> extra = new java.util.HashMap<>();
+        extra.put("userType", userType);
+        
+        // 如果是用户连接，获取会话的replyMode
+        if (CsWebSocketInterceptor.USER_TYPE_USER.equals(userType) && oConvertUtils.isNotEmpty(conversationId)) {
+            CsConversation conversation = conversationService.getById(conversationId);
+            if (conversation != null) {
+                extra.put("replyMode", conversation.getReplyMode() != null ? conversation.getReplyMode() : 0);
+                extra.put("hasAgent", oConvertUtils.isNotEmpty(conversation.getOwnerAgentId()));
+                extra.put("status", conversation.getStatus());
+            }
+        }
+        
         // 发送连接成功消息
         CsWebSocketMessage welcome = CsWebSocketMessage.builder()
                 .type("connected")
                 .senderId(userId)
                 .conversationId(conversationId)
                 .content("连接成功")
-                .extra(java.util.Map.of("userType", userType))
+                .extra(extra)
                 .build();
         session.sendMessage(new TextMessage(JSON.toJSONString(welcome)));
         
         log.info("[CS-WebSocket] 连接建立: userId={}, userType={}, conversationId={}", 
                 userId, userType, conversationId);
         
-        // 如果是用户连接，通知所有在线客服
+        // 如果是用户连接，通知相关客服
         if (CsWebSocketInterceptor.USER_TYPE_USER.equals(userType)) {
             notifyAgentsNewConversation(conversationId, userId);
+            // 通知客服用户上线
+            notifyAgentsUserOnline(conversationId, userId);
+        }
+    }
+
+    /**
+     * 通知客服用户上线
+     */
+    private void notifyAgentsUserOnline(String conversationId, String userId) {
+        if (oConvertUtils.isEmpty(conversationId)) {
+            return;
+        }
+        
+        try {
+            // 通知所有在线客服用户已上线
+            sessionManager.sendToAllAgents(CsWebSocketMessage.builder()
+                    .type("user_online")
+                    .conversationId(conversationId)
+                    .senderId(userId)
+                    .content("用户已上线")
+                    .timestamp(new java.util.Date())
+                    .build());
+            
+            log.info("[CS-WebSocket] 通知客服用户上线: conversationId={}, userId={}", conversationId, userId);
+        } catch (Exception e) {
+            log.error("[CS-WebSocket] 通知客服用户上线失败: {}", e.getMessage());
         }
     }
 
@@ -222,6 +262,10 @@ public class CsWebSocketHandler implements WebSocketHandler {
         
         if (oConvertUtils.isNotEmpty(conversationId) && mode != null) {
             conversationService.changeReplyMode(conversationId, mode);
+            
+            // 通知用户模式已切换
+            String modeDesc = mode == CsConversation.REPLY_MODE_MANUAL ? "人工服务" : "AI自动回复";
+            conversationService.notifyUser(conversationId, "mode_changed", modeDesc, java.util.Map.of("replyMode", mode));
         }
     }
 
@@ -309,13 +353,28 @@ public class CsWebSocketHandler implements WebSocketHandler {
             return;
         }
         
-        CsConversation conversation = conversationService.getById(conversationId);
-        if (conversation != null && conversation.getStatus() == CsConversation.STATUS_ASSIGNED) {
-            // 通知客服用户已离线
-            conversationService.notifyAgents(conversationId, "user_offline", "用户已离线");
-            
-            // 发送系统消息
-            messageService.sendSystemMessage(conversationId, "用户已离开会话");
+        try {
+            CsConversation conversation = conversationService.getById(conversationId);
+            if (conversation != null) {
+                // 通知所有在线客服用户已离线（不仅限于已分配的会话）
+                sessionManager.sendToAllAgents(CsWebSocketMessage.builder()
+                        .type("user_offline")
+                        .conversationId(conversationId)
+                        .senderId(userId)
+                        .content("用户已离线")
+                        .timestamp(new java.util.Date())
+                        .build());
+                
+                log.info("[CS-WebSocket] 通知客服用户离线: conversationId={}, userId={}", conversationId, userId);
+                
+                // 只有已分配的会话才发送系统消息
+                if (conversation.getStatus() == CsConversation.STATUS_ASSIGNED) {
+                    // 发送系统消息（不持久化到数据库，只推送通知）
+                    messageService.sendSystemMessage(conversationId, "用户已离开会话", false);
+                }
+            }
+        } catch (Exception e) {
+            log.error("[CS-WebSocket] 处理用户离线失败: {}", e.getMessage());
         }
     }
 

@@ -77,4 +77,19 @@ public interface ICsAgentService extends IService<CsAgent> {
      * @param agentId 客服ID
      */
     void decrementSessions(String agentId);
+
+    /**
+     * 查找任意一个在线且设置了AI应用的客服
+     * 
+     * @return 客服信息，如果没有返回null
+     */
+    CsAgent findOnlineAgentWithApp();
+
+    /**
+     * 获取所有在线的管理者客服
+     * 管理者可以监控所有会话的消息
+     * 
+     * @return 在线管理者列表
+     */
+    List<CsAgent> getOnlineSupervisors();
 }

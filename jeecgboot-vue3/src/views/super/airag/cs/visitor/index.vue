@@ -262,7 +262,7 @@ async function handleToggleStar(record: any) {
   try {
     await defHttp.post({
       url: '/airag/cs/visitor/toggleStar',
-      params: { id: record.id }
+      data: { id: record.id }
     });
     record.star = record.star === 1 ? 0 : 1;
     message.success('操作成功');

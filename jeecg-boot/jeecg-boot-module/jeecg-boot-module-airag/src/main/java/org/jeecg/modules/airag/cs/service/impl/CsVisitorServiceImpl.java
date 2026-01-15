@@ -61,6 +61,11 @@ public class CsVisitorServiceImpl extends ServiceImpl<CsVisitorMapper, CsVisitor
     }
 
     @Override
+    public CsVisitor getByUserId(String userId) {
+        return baseMapper.selectByUserId(userId);
+    }
+
+    @Override
     public void updateVisitInfo(String visitorId) {
         baseMapper.updateVisitInfo(visitorId);
     }

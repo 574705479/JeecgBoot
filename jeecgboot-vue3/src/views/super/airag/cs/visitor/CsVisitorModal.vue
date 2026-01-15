@@ -261,7 +261,7 @@ async function toggleStar() {
   try {
     await defHttp.post({
       url: '/airag/cs/visitor/toggleStar',
-      params: { id: visitor.value.id }
+      data: { id: visitor.value.id }
     });
     visitor.value.star = visitor.value.star === 1 ? 0 : 1;
     message.success('操作成功');

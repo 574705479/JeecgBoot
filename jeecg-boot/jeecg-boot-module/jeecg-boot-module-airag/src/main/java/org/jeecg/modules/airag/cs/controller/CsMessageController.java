@@ -38,7 +38,20 @@ public class CsMessageController {
         String content = (String) params.get("content");
         String senderId = (String) params.get("senderId");
         String senderName = (String) params.get("senderName");
-        String senderType = (String) params.get("senderType");
+        
+        // 兼容处理 senderType，可能是字符串或数字
+        Object senderTypeObj = params.get("senderType");
+        String senderType;
+        if (senderTypeObj instanceof Integer) {
+            // 1=用户, 2=客服
+            senderType = ((Integer) senderTypeObj) == 1 ? "user" : "agent";
+        } else if (senderTypeObj instanceof String) {
+            String typeStr = (String) senderTypeObj;
+            // 支持 "1", "user" 等格式
+            senderType = "1".equals(typeStr) || "user".equals(typeStr) ? "user" : "agent";
+        } else {
+            senderType = "user"; // 默认用户
+        }
         
         CsMessage message;
         if ("user".equals(senderType)) {
@@ -88,6 +101,18 @@ public class CsMessageController {
     public Result<List<CsMessage>> getMessages(
             @PathVariable String conversationId,
             @RequestParam(defaultValue = "50") Integer limit) {
+        List<CsMessage> messages = messageService.getMessages(conversationId, limit);
+        return Result.OK(messages);
+    }
+
+    /**
+     * 获取会话消息（通过参数）
+     */
+    @Operation(summary = "获取会话消息列表")
+    @GetMapping("/list")
+    public Result<List<CsMessage>> getMessageList(
+            @RequestParam String conversationId,
+            @RequestParam(defaultValue = "100") Integer limit) {
         List<CsMessage> messages = messageService.getMessages(conversationId, limit);
         return Result.OK(messages);
     }
@@ -147,7 +172,8 @@ public class CsMessageController {
     }
 
     /**
-     * 生成AI建议
+     * 生成AI建议（流式）
+     * 建议内容通过WebSocket推送，这里只返回状态
      */
     @Operation(summary = "生成AI建议")
     @PostMapping("/ai-generate/{conversationId}")
@@ -156,13 +182,23 @@ public class CsMessageController {
             @RequestBody Map<String, String> params) {
         
         String userMessage = params.get("userMessage");
-        String suggestion = messageService.generateAiSuggestion(conversationId, userMessage);
+        String result = messageService.generateAiSuggestion(conversationId, userMessage);
         
-        Map<String, Object> result = new HashMap<>();
-        result.put("suggestion", suggestion);
-        result.put("success", suggestion != null);
+        Map<String, Object> response = new HashMap<>();
+        // 返回__STREAMING__表示正在流式生成，建议通过WebSocket推送
+        if ("__STREAMING__".equals(result)) {
+            response.put("streaming", true);
+            response.put("success", true);
+            response.put("message", "AI建议正在生成，请通过WebSocket接收");
+        } else if (result != null) {
+            response.put("suggestion", result);
+            response.put("success", true);
+        } else {
+            response.put("success", false);
+            response.put("message", "AI建议生成失败");
+        }
         
-        return Result.OK(result);
+        return Result.OK(response);
     }
 
     // ==================== 已读状态 ====================

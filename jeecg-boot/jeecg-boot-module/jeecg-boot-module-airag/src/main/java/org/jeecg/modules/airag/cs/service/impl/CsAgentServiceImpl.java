@@ -10,6 +10,9 @@ import org.jeecg.common.util.oConvertUtils;
 import org.jeecg.modules.airag.cs.entity.CsAgent;
 import org.jeecg.modules.airag.cs.mapper.CsAgentMapper;
 import org.jeecg.modules.airag.cs.service.ICsAgentService;
+import org.jeecg.modules.airag.cs.websocket.CsWebSocketMessage;
+import org.jeecg.modules.airag.cs.websocket.CsWebSocketSessionManager;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,6 +28,9 @@ import java.util.List;
 @Slf4j
 @Service
 public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> implements ICsAgentService {
+
+    @Autowired
+    private CsWebSocketSessionManager sessionManager;
 
     @Override
     public CsAgent getByUserId(String userId) {
@@ -73,6 +79,9 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
                 .set(CsAgent::getStatus, CsAgent.STATUS_ONLINE)
                 .set(CsAgent::getLastOnlineTime, new Date()));
         log.info("[CS-Agent] 客服上线: agentId={}", agentId);
+        
+        // ★ 广播客服状态变化
+        broadcastAgentStatusChanged(agentId, CsAgent.STATUS_ONLINE, "在线");
     }
 
     @Override
@@ -86,6 +95,9 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
                 .set(CsAgent::getStatus, CsAgent.STATUS_OFFLINE)
                 .set(CsAgent::getCurrentSessions, 0));
         log.info("[CS-Agent] 客服下线: agentId={}", agentId);
+        
+        // ★ 广播客服状态变化
+        broadcastAgentStatusChanged(agentId, CsAgent.STATUS_OFFLINE, "离线");
     }
 
     @Override
@@ -98,6 +110,39 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
                 .eq(CsAgent::getId, agentId)
                 .set(CsAgent::getStatus, CsAgent.STATUS_BUSY));
         log.info("[CS-Agent] 客服设置忙碌: agentId={}", agentId);
+        
+        // ★ 广播客服状态变化
+        broadcastAgentStatusChanged(agentId, CsAgent.STATUS_BUSY, "忙碌");
+    }
+    
+    /**
+     * 广播客服状态变化给所有客服
+     */
+    private void broadcastAgentStatusChanged(String agentId, int status, String statusText) {
+        try {
+            CsAgent agent = getById(agentId);
+            if (agent == null) {
+                return;
+            }
+            
+            CsWebSocketMessage message = CsWebSocketMessage.builder()
+                    .type("agent_status_changed")
+                    .senderId(agentId)
+                    .senderName(agent.getNickname())
+                    .extra(java.util.Map.of(
+                            "agentId", agentId,
+                            "agentName", agent.getNickname(),
+                            "status", status,
+                            "statusText", statusText,
+                            "avatar", agent.getAvatar() != null ? agent.getAvatar() : ""
+                    ))
+                    .build();
+            
+            sessionManager.sendToAllAgents(message);
+            log.info("[CS-Agent] 广播客服状态变化: agentId={}, status={}", agentId, statusText);
+        } catch (Exception e) {
+            log.warn("[CS-Agent] 广播客服状态变化失败: {}", e.getMessage());
+        }
     }
 
     @Override
@@ -168,6 +213,26 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
                 && agent.getCurrentSessions() < agent.getMaxSessions()) {
             goOnline(agentId);
         }
+    }
+
+    @Override
+    public CsAgent findOnlineAgentWithApp() {
+        // 查找在线且设置了AI应用的客服
+        LambdaQueryWrapper<CsAgent> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(CsAgent::getStatus, CsAgent.STATUS_ONLINE)
+                .isNotNull(CsAgent::getDefaultAppId)
+                .ne(CsAgent::getDefaultAppId, "")
+                .last("LIMIT 1");
+        return getOne(queryWrapper);
+    }
+
+    @Override
+    public List<CsAgent> getOnlineSupervisors() {
+        // 查询所有在线的管理者客服
+        LambdaQueryWrapper<CsAgent> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(CsAgent::getStatus, CsAgent.STATUS_ONLINE)
+                .eq(CsAgent::getRole, CsAgent.ROLE_SUPERVISOR);
+        return list(queryWrapper);
     }
 
 }

@@ -14,8 +14,9 @@
             <!-- 按筛选类型过滤 -->
             <choose>
                 <when test="filter == 'mine'">
-                    <!-- 我负责的 -->
+                    <!-- 我负责的（排除已结束） -->
                     AND c.agent_id = #{agentId}
+                    AND c.status != 2
                 </when>
                 <when test="filter == 'collab'">
                     <!-- 协作中的 - 如果cs_collaborator表不存在则跳过 -->
@@ -28,13 +29,19 @@
                     )
                 </when>
                 <when test="filter == 'unassigned'">
-                    <!-- 未分配的 -->
-                    AND (c.status = 0 OR c.agent_id IS NULL)
+                    <!-- 未分配的（排除已结束） -->
+                    AND c.status = 0
+                    AND (c.agent_id IS NULL OR c.agent_id = '')
+                </when>
+                <when test="filter == 'closed'">
+                    <!-- 已结束的 -->
+                    AND c.status = 2
                 </when>
                 <otherwise>
-                    <!-- 所有相关的（我负责的 + 协作中的） -->
+                    <!-- 所有相关的（我负责的 + 协作中的 + 未分配的，不包含已结束） -->
                     <if test="agentId != null and agentId != ''">
-                        AND c.agent_id = #{agentId}
+                        AND (c.agent_id = #{agentId} OR c.agent_id IS NULL OR c.status = 0)
+                        AND c.status != 2
                     </if>
                 </otherwise>
             </choose>

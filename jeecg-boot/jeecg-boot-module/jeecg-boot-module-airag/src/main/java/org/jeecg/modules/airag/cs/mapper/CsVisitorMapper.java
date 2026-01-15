@@ -25,6 +25,13 @@ public interface CsVisitorMapper extends BaseMapper<CsVisitor> {
     CsVisitor selectByAppAndUser(@Param("appId") String appId, @Param("userId") String userId);
 
     /**
+     * 根据userId查询访客（不指定appId，取最新创建的一条）
+     * 用于新版客服系统（不再依赖appId）
+     */
+    @Select("SELECT * FROM cs_visitor WHERE user_id = #{userId} ORDER BY create_time DESC LIMIT 1")
+    CsVisitor selectByUserId(@Param("userId") String userId);
+
+    /**
      * 更新访客访问次数和最后访问时间
      */
     @Update("UPDATE cs_visitor SET visit_count = visit_count + 1, last_visit_time = NOW() WHERE id = #{id}")

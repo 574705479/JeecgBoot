@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.service.IService;
 import org.jeecg.modules.airag.cs.entity.CsConversation;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 会话管理服务接口 (重构版)
@@ -68,6 +69,14 @@ public interface ICsConversationService extends IService<CsConversation> {
      */
     void closeConversation(String conversationId);
 
+    /**
+     * 结束会话（带原因）
+     * 
+     * @param conversationId 会话ID
+     * @param reason         结束原因（如："客服主动结束"、"会话超时自动结束"等）
+     */
+    void closeConversation(String conversationId, String reason);
+
     // ==================== 回复模式管理 ====================
 
     /**
@@ -112,6 +121,14 @@ public interface ICsConversationService extends IService<CsConversation> {
      */
     IPage<CsConversation> getConversationList(Page<CsConversation> page, String agentId, 
                                                Integer status, String filter);
+
+    /**
+     * 获取会话统计数据
+     * 
+     * @param agentId 客服ID (可选)
+     * @return 统计数据 {myCount, unassignedCount, closedCount, totalCount}
+     */
+    Map<String, Object> getConversationStats(String agentId);
 
     /**
      * 获取客服负责的会话列表
@@ -162,6 +179,13 @@ public interface ICsConversationService extends IService<CsConversation> {
      */
     void clearUnread(String conversationId);
 
+    /**
+     * 重置超时提醒标记（用户发送消息时调用）
+     * 
+     * @param conversationId 会话ID
+     */
+    void resetTimeoutWarning(String conversationId);
+
     // ==================== 评价 ====================
 
     /**
@@ -185,6 +209,16 @@ public interface ICsConversationService extends IService<CsConversation> {
     void notifyUser(String conversationId, String type, String content);
 
     /**
+     * 通知用户（带额外数据）
+     * 
+     * @param conversationId 会话ID
+     * @param type           消息类型
+     * @param content        消息内容
+     * @param extra          额外数据
+     */
+    void notifyUser(String conversationId, String type, String content, java.util.Map<String, Object> extra);
+
+    /**
      * 通知所有相关客服 (主负责人 + 协作者)
      * 
      * @param conversationId 会话ID
@@ -192,4 +226,13 @@ public interface ICsConversationService extends IService<CsConversation> {
      * @param content        消息内容
      */
     void notifyAgents(String conversationId, String type, String content);
+
+    /**
+     * 获取所有进行中的会话（管理者监控模式）
+     * 包括：待接入 + 服务中
+     * 
+     * @param page 分页参数
+     * @return 会话列表
+     */
+    IPage<CsConversation> getAllActiveConversations(Page<CsConversation> page);
 }
