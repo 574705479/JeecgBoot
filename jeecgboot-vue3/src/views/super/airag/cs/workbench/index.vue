@@ -694,6 +694,9 @@ const quickReplyKeyword = ref('');
 const lastConversationStorageKey = 'cs_last_conversation_id';
 let clearUnreadTimer: number | null = null;
 let messagesEl: HTMLElement | null = null;
+const conversationsCache = new Map<string, any[]>();
+const conversationsCacheTime = new Map<string, number>();
+let conversationsRequestSeq = 0;
 
 // WebSocket
 let ws: WebSocket | null = null;
@@ -786,7 +789,14 @@ onDeactivated(() => {
   closeWebSocket();
 });
 
-watch(filter, () => loadConversations());
+watch(filter, () => {
+  const cacheKey = getConversationsCacheKey();
+  const cached = conversationsCache.get(cacheKey);
+  if (cached) {
+    conversations.value = cached;
+  }
+  loadConversations();
+});
 watch(messagesRef, (el, prev) => {
   if (prev) {
     prev.removeEventListener('scroll', handleMessageScroll);
@@ -836,6 +846,11 @@ function toggleQuickReply() {
   if (showQuickReply.value) {
     loadQuickReplies();
   }
+}
+
+function getConversationsCacheKey() {
+  const supervisor = filter.value === 'monitor' && isSupervisor.value ? '1' : '0';
+  return `${agentId.value || 'guest'}_${filter.value}_${supervisor}`;
 }
 
 function isMessagesAtBottom() {
@@ -1006,7 +1021,7 @@ function loadStatsDebounced() {
 }
 
 async function loadConversations() {
-  if (loadingConversations.value) return;
+  const requestId = ++conversationsRequestSeq;
   loadingConversations.value = true;
   try {
     // 同时加载统计数据（不等待，异步执行）
@@ -1029,6 +1044,9 @@ async function loadConversations() {
       url: '/cs/conversation/list',
       params
     });
+    if (requestId !== conversationsRequestSeq) {
+      return;
+    }
     const newConversations = res?.records || [];
     
     // 保留已有的访客昵称和"对话中"客服名称（从缓存或旧数据中获取）
@@ -1054,6 +1072,9 @@ async function loadConversations() {
     });
     
     conversations.value = newConversations;
+    const cacheKey = getConversationsCacheKey();
+    conversationsCache.set(cacheKey, newConversations);
+    conversationsCacheTime.set(cacheKey, Date.now());
     
     // 异步预取昵称，避免首次加载显示为“访客”
     newConversations.forEach((conv: any) => {
@@ -1076,7 +1097,9 @@ async function loadConversations() {
   } catch (e) {
     console.error('加载会话列表失败', e);
   } finally {
-    loadingConversations.value = false;
+    if (requestId === conversationsRequestSeq) {
+      loadingConversations.value = false;
+    }
   }
 }
 
