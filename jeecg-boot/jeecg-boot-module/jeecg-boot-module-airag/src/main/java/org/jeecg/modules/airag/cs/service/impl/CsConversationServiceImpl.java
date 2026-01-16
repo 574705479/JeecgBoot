@@ -524,7 +524,15 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
     @Override
     public IPage<CsConversation> getConversationList(Page<CsConversation> page, String agentId, 
                                                       Integer status, String filter) {
-        IPage<CsConversation> result = baseMapper.selectConversationPage(page, agentId, status, filter);
+        // 调用高级版本，不包含已删除记录，不按特定客服筛选
+        return getConversationListAdvanced(page, agentId, status, filter, false, null);
+    }
+
+    @Override
+    public IPage<CsConversation> getConversationListAdvanced(Page<CsConversation> page, String agentId, 
+                                                              Integer status, String filter,
+                                                              Boolean includeDeleted, String filterAgentId) {
+        IPage<CsConversation> result = baseMapper.selectConversationPage(page, agentId, status, filter, includeDeleted, filterAgentId);
         
         // 补充协作者信息
         for (CsConversation conv : result.getRecords()) {
@@ -548,9 +556,10 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         long unassignedCount = count(new LambdaQueryWrapper<CsConversation>()
                 .eq(CsConversation::getStatus, CsConversation.STATUS_UNASSIGNED));
         
-        // 已结束的
+        // ★ 已结束的：只统计当前客服自己负责的已结束会话
         long closedCount = count(new LambdaQueryWrapper<CsConversation>()
-                .eq(CsConversation::getStatus, CsConversation.STATUS_CLOSED));
+                .eq(CsConversation::getStatus, CsConversation.STATUS_CLOSED)
+                .eq(oConvertUtils.isNotEmpty(agentId), CsConversation::getOwnerAgentId, agentId));
         
         // 总数
         long totalCount = count();

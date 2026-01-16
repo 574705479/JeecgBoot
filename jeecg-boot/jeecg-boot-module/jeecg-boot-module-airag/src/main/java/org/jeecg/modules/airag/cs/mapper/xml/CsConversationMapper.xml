@@ -11,6 +11,16 @@
         FROM cs_conversation c
         LEFT JOIN cs_agent a ON c.agent_id = a.id
         <where>
+            <!-- ★ 逻辑删除过滤：根据includeDeleted参数决定是否包含已删除记录 -->
+            <if test="includeDeleted == null or includeDeleted == false">
+                AND (c.deleted = 0 OR c.deleted IS NULL)
+            </if>
+            
+            <!-- ★ 按指定客服筛选（用于会话记录查询） -->
+            <if test="filterAgentId != null and filterAgentId != ''">
+                AND c.agent_id = #{filterAgentId}
+            </if>
+            
             <!-- 按筛选类型过滤 -->
             <choose>
                 <when test="filter == 'mine'">
@@ -34,8 +44,14 @@
                     AND (c.agent_id IS NULL OR c.agent_id = '')
                 </when>
                 <when test="filter == 'closed'">
-                    <!-- 已结束的 -->
+                    <!-- ★ 已结束的：只显示当前客服自己负责的已结束会话 -->
                     AND c.status = 2
+                    <if test="agentId != null and agentId != ''">
+                        AND c.agent_id = #{agentId}
+                    </if>
+                </when>
+                <when test="filter == 'history'">
+                    <!-- ★ 会话记录：查询所有会话（包括所有状态），不做 agentId 限制 -->
                 </when>
                 <otherwise>
                     <!-- 所有相关的（我负责的 + 协作中的 + 未分配的，不包含已结束） -->

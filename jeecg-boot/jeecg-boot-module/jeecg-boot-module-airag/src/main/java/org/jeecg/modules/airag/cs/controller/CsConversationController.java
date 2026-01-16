@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
 import org.jeecg.common.api.vo.Result;
 import org.jeecg.common.system.base.controller.JeecgController;
+import org.jeecg.common.util.oConvertUtils;
 import org.jeecg.modules.airag.cs.entity.CsAgent;
 import org.jeecg.modules.airag.cs.entity.CsConversation;
 import org.jeecg.modules.airag.cs.service.ICsAgentService;
@@ -124,7 +125,9 @@ public class CsConversationController extends JeecgController<CsConversation, IC
     }
 
     /**
-     * 删除会话
+     * 删除会话（逻辑删除）
+     * 使用@TableLogic注解，removeById会自动执行逻辑删除（UPDATE SET deleted=1）
+     * 不会物理删除表数据
      */
     @Operation(summary = "删除会话")
     @DeleteMapping("/{id}")
@@ -135,7 +138,7 @@ public class CsConversationController extends JeecgController<CsConversation, IC
             conversationService.closeConversation(id);
         }
         
-        // 删除记录
+        // ★ 逻辑删除：设置 deleted=1，不会物理删除数据
         boolean success = conversationService.removeById(id);
         return success ? Result.OK("删除成功") : Result.error("删除失败");
     }
@@ -228,7 +231,9 @@ public class CsConversationController extends JeecgController<CsConversation, IC
     /**
      * 分页查询会话列表
      * 
-     * @param supervisorMode 管理者监控模式，为true时返回所有进行中的会话（仅管理者可用）
+     * @param supervisorMode  管理者监控模式，为true时返回所有进行中的会话（仅管理者可用）
+     * @param includeDeleted  是否包含已删除的记录（用于会话记录查询）
+     * @param filterAgentId   按指定客服筛选（用于会话记录查询）
      */
     @Operation(summary = "分页查询会话列表")
     @GetMapping("/list")
@@ -238,7 +243,9 @@ public class CsConversationController extends JeecgController<CsConversation, IC
             @RequestParam(required = false) String agentId,
             @RequestParam(required = false) Integer status,
             @RequestParam(defaultValue = "all") String filter,
-            @RequestParam(defaultValue = "false") Boolean supervisorMode) {
+            @RequestParam(defaultValue = "false") Boolean supervisorMode,
+            @RequestParam(required = false) Boolean includeDeleted,
+            @RequestParam(required = false) String filterAgentId) {
         
         Page<CsConversation> page = new Page<>(pageNo, pageSize);
         
@@ -250,6 +257,13 @@ public class CsConversationController extends JeecgController<CsConversation, IC
                 IPage<CsConversation> result = conversationService.getAllActiveConversations(page);
                 return Result.OK(result);
             }
+        }
+        
+        // 会话记录模式：使用高级查询（支持包含已删除记录和按客服筛选）
+        if ("history".equals(filter) || Boolean.TRUE.equals(includeDeleted) || oConvertUtils.isNotEmpty(filterAgentId)) {
+            IPage<CsConversation> result = conversationService.getConversationListAdvanced(
+                    page, agentId, status, filter, includeDeleted, filterAgentId);
+            return Result.OK(result);
         }
         
         IPage<CsConversation> result = conversationService.getConversationList(page, agentId, status, filter);

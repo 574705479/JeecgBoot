@@ -124,10 +124,12 @@ public class CsConversationTimeoutTask {
         Date timeoutTime = new Date(System.currentTimeMillis() - timeoutThreshold);
         
         // 查询需要自动结束的会话：
-        // 1. 状态为已分配
+        // 1. ★ 包含待接入和已分配两种状态（避免"僵尸会话"堆积）
         // 2. 最后消息时间存在且超过阈值
         LambdaQueryWrapper<CsConversation> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.eq(CsConversation::getStatus, CsConversation.STATUS_ASSIGNED)
+        queryWrapper.in(CsConversation::getStatus, 
+                        CsConversation.STATUS_UNASSIGNED,  // 待接入也会超时
+                        CsConversation.STATUS_ASSIGNED)     // 已分配
                 .isNotNull(CsConversation::getLastMessageTime)
                 .lt(CsConversation::getLastMessageTime, timeoutTime);
         

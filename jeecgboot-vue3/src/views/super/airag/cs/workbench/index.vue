@@ -248,7 +248,7 @@
               </a-avatar>
               <div class="msg-body">
                 <div class="msg-bubble user-bubble">
-                  <div class="msg-text" v-html="renderMarkdown(msg.content)"></div>
+                  <div class="msg-text" v-html="renderMessage(msg.content)"></div>
                 </div>
                 <div class="msg-meta">
                   {{ formatMessageTime(msg.createTime) }}
@@ -277,7 +277,7 @@
                   </a-avatar>
                 </div>
                 <div class="msg-bubble agent-bubble" :class="{ 'ai-bubble': msg.senderType === 1 || msg.isAiGenerated }">
-                  <div class="msg-text" v-html="renderMarkdown(msg.content)"></div>
+                  <div class="msg-text" v-html="renderMessage(msg.content)"></div>
                 </div>
                 <div class="msg-meta">{{ formatMessageTime(msg.createTime) }}</div>
               </div>
@@ -548,7 +548,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
+import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, watch, nextTick } from 'vue';
 import { message } from 'ant-design-vue';
 import { 
   StarFilled, StarOutlined, SwapOutlined, MenuUnfoldOutlined, MenuFoldOutlined,
@@ -557,6 +557,9 @@ import {
   MoreOutlined, DeleteOutlined
 } from '@ant-design/icons-vue';
 import { defHttp } from '/@/utils/http/axios';
+// ★ 为AI建议保留Markdown渲染能力
+import MarkdownIt from 'markdown-it';
+import hljs from 'highlight.js';
 
 // 客服信息
 const agentId = ref('');
@@ -600,8 +603,15 @@ const visitorTags = ref<string[]>([]);
 const showDetailPanel = ref(true);
 const userOnline = ref(false);
 
-// 访客信息缓存 (userId -> visitorInfo)
+// 访客信息缓存 (key -> visitorInfo)
 const visitorCache = new Map<string, any>();
+
+function getVisitorCacheKey(appId: string | undefined, userId: string | undefined) {
+  if (!userId) {
+    return '';
+  }
+  return appId ? `${appId}_${userId}` : userId;
+}
 
 // 标签编辑
 const showTagInput = ref(false);
@@ -635,6 +645,24 @@ const transferLoading = ref(false);
 // WebSocket
 let ws: WebSocket | null = null;
 let refreshTimer: number | null = null;
+let wsReconnectTimer: number | null = null;
+let wsManuallyClosed = false;
+
+function closeWebSocket() {
+  wsManuallyClosed = true;
+  if (wsReconnectTimer) {
+    clearTimeout(wsReconnectTimer);
+    wsReconnectTimer = null;
+  }
+  if (ws) {
+    try {
+      ws.close();
+    } catch {
+      // 忽略关闭异常
+    }
+  }
+  ws = null;
+}
 
 // 计算属性
 const inputPlaceholder = computed(() => {
@@ -659,8 +687,21 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
-  ws?.close();
+  closeWebSocket();
   refreshTimer && clearInterval(refreshTimer);
+});
+
+onActivated(async () => {
+  // 菜单切换返回时，确保客服在线、会话和WebSocket正常
+  await loadAgentInfo();
+  await loadConversations();
+  closeWebSocket();
+  connectWebSocket();
+});
+
+onDeactivated(() => {
+  // 离开菜单时断开连接，避免后台连接失效导致不再接收消息
+  closeWebSocket();
 });
 
 watch(filter, () => loadConversations());
@@ -825,7 +866,7 @@ async function loadConversations() {
     // 保留已有的访客昵称和"对话中"客服名称（从缓存或旧数据中获取）
     newConversations.forEach((conv: any) => {
       // 1. 尝试从访客缓存获取昵称
-      const cacheKey = `${conv.appId}_${conv.userId}`;
+      const cacheKey = getVisitorCacheKey(conv.appId, conv.userId);
       const cached = visitorCache.get(cacheKey);
       if (cached?.nickname) {
         conv.visitorNickname = cached.nickname;
@@ -845,8 +886,45 @@ async function loadConversations() {
     });
     
     conversations.value = newConversations;
+    
+    // 异步预取昵称，避免首次加载显示为“访客”
+    newConversations.forEach((conv: any) => {
+      if (!conv.visitorNickname) {
+        prefetchVisitorNickname(conv);
+      }
+    });
   } catch (e) {
     console.error('加载会话列表失败', e);
+  }
+}
+
+async function prefetchVisitorNickname(conv: any) {
+  const cacheKey = getVisitorCacheKey(conv.appId, conv.userId);
+  if (!cacheKey) {
+    return;
+  }
+  const cached = visitorCache.get(cacheKey);
+  if (cached?.nickname) {
+    conv.visitorNickname = cached.nickname;
+    return;
+  }
+  try {
+    const params: any = { userId: conv.userId };
+    if (conv.appId) {
+      params.appId = conv.appId;
+    }
+    const res = await defHttp.get({
+      url: '/airag/cs/visitor/getByUser',
+      params
+    });
+    if (res) {
+      visitorCache.set(cacheKey, res);
+      if (res.nickname) {
+        conv.visitorNickname = res.nickname;
+      }
+    }
+  } catch {
+    // 忽略预取失败
   }
 }
 
@@ -868,6 +946,21 @@ function sortConversations() {
 
 // 选择会话
 async function selectConversation(conv: any) {
+  // 清理上一个会话残留，避免昵称/头像短暂闪回
+  visitorInfo.value = { level: 1, star: 0 };
+  visitorTags.value = [];
+
+  // 优先使用缓存昵称/信息，避免首次渲染显示为“访客”
+  const cacheKey = getVisitorCacheKey(conv.appId, conv.userId);
+  const cached = visitorCache.get(cacheKey);
+  if (cached) {
+    if (cached.nickname) {
+      conv.visitorNickname = cached.nickname;
+    }
+    visitorInfo.value = cached;
+    visitorTags.value = cached.tags ? JSON.parse(cached.tags) : [];
+  }
+
   currentConversation.value = conv;
   currentReplyMode.value = conv.replyMode || 0;
   
@@ -972,16 +1065,22 @@ async function loadVisitorInfo(appId: string, userId: string) {
   }
   
   // 使用 userId 作为缓存key（兼容有无appId的情况）
-  const cacheKey = appId ? `${appId}_${userId}` : userId;
+  const cacheKey = getVisitorCacheKey(appId, userId);
+  const currentCacheKey = getVisitorCacheKey(
+    currentConversation.value?.appId,
+    currentConversation.value?.userId
+  );
   
   // 1. 先从缓存加载（立即显示）
   const cached = visitorCache.get(cacheKey);
   if (cached) {
-    visitorInfo.value = cached;
-    visitorTags.value = cached.tags ? JSON.parse(cached.tags) : [];
-    // 同步更新会话列表中的昵称
-    if (cached.nickname && currentConversation.value) {
-      currentConversation.value.visitorNickname = cached.nickname;
+    if (cacheKey === currentCacheKey) {
+      visitorInfo.value = cached;
+      visitorTags.value = cached.tags ? JSON.parse(cached.tags) : [];
+      // 同步更新会话列表中的昵称
+      if (cached.nickname && currentConversation.value) {
+        currentConversation.value.visitorNickname = cached.nickname;
+      }
     }
   }
   
@@ -1001,6 +1100,10 @@ async function loadVisitorInfo(appId: string, userId: string) {
       // 更新缓存
       visitorCache.set(cacheKey, res);
       
+      if (cacheKey !== currentCacheKey) {
+        return;
+      }
+      
       visitorInfo.value = res;
       visitorTags.value = res.tags ? JSON.parse(res.tags) : [];
       
@@ -1014,13 +1117,17 @@ async function loadVisitorInfo(appId: string, userId: string) {
       }
     } else if (!cached) {
       // 只有没有缓存时才设置默认值
-      visitorInfo.value = { level: 1, star: 0 };
-      visitorTags.value = [];
+      if (cacheKey === currentCacheKey) {
+        visitorInfo.value = { level: 1, star: 0 };
+        visitorTags.value = [];
+      }
     }
   } catch {
     if (!cached) {
-      visitorInfo.value = { level: 1, star: 0 };
-      visitorTags.value = [];
+      if (cacheKey === currentCacheKey) {
+        visitorInfo.value = { level: 1, star: 0 };
+        visitorTags.value = [];
+      }
     }
   }
 }
@@ -1061,6 +1168,22 @@ async function sendMessage() {
       }
     });
     
+    // 发送成功后，立即更新会话列表的最后消息和“对话中”客服
+    const nowIso = new Date().toISOString();
+    currentConversation.value.lastMessage = content;
+    currentConversation.value.lastMessageTime = nowIso;
+    if (currentConversation.value.status === 1) {
+      currentConversation.value.lastTalkingAgent = agentName.value;
+    }
+    const listItem = conversations.value.find(c => c.id === currentConversation.value?.id);
+    if (listItem) {
+      listItem.lastMessage = content;
+      listItem.lastMessageTime = nowIso;
+      if (listItem.status === 1) {
+        listItem.lastTalkingAgent = agentName.value;
+      }
+    }
+    
     inputMessage.value = '';
     await loadMessages(currentConversation.value.id);
     
@@ -1070,7 +1193,6 @@ async function sendMessage() {
       currentConversation.value.unreadCount = 0;
       
       // 同步更新会话列表中的未读数
-      const listItem = conversations.value.find(c => c.id === currentConversation.value.id);
       if (listItem) {
         listItem.unreadCount = 0;
       }
@@ -1252,9 +1374,7 @@ async function saveEditField() {
     }
     
     // 更新访客缓存
-    const cacheKey = currentConversation.value.appId 
-      ? `${currentConversation.value.appId}_${userId}` 
-      : userId;
+    const cacheKey = getVisitorCacheKey(currentConversation.value.appId, userId);
     visitorCache.set(cacheKey, { ...visitorInfo.value });
     
     // 如果编辑的是昵称，同步更新到会话列表中的会话对象
@@ -1276,12 +1396,12 @@ async function saveEditField() {
   }
 }
 
-// 获取访客缓存key
-function getVisitorCacheKey(): string {
+// 获取当前会话的访客缓存key
+function getCurrentVisitorCacheKey(): string {
   if (!currentConversation.value) return '';
   const userId = currentConversation.value.userId;
   const appId = currentConversation.value.appId;
-  return appId ? `${appId}_${userId}` : userId;
+  return getVisitorCacheKey(appId, userId);
 }
 
 async function toggleStar() {
@@ -1295,7 +1415,7 @@ async function toggleStar() {
     visitorInfo.value.star = visitorInfo.value.star === 1 ? 0 : 1;
     
     // 更新缓存
-    const cacheKey = getVisitorCacheKey();
+    const cacheKey = getCurrentVisitorCacheKey();
     if (cacheKey) {
       visitorCache.set(cacheKey, { ...visitorInfo.value });
     }
@@ -1315,7 +1435,7 @@ async function updateVisitorLevel(level: number) {
     visitorInfo.value.level = level;
     
     // 更新缓存
-    const cacheKey = getVisitorCacheKey();
+    const cacheKey = getCurrentVisitorCacheKey();
     if (cacheKey) {
       visitorCache.set(cacheKey, { ...visitorInfo.value });
     }
@@ -1349,7 +1469,7 @@ async function saveTags() {
     
     // 更新缓存
     visitorInfo.value.tags = JSON.stringify(visitorTags.value);
-    const cacheKey = getVisitorCacheKey();
+    const cacheKey = getCurrentVisitorCacheKey();
     if (cacheKey) {
       visitorCache.set(cacheKey, { ...visitorInfo.value });
     }
@@ -1409,6 +1529,21 @@ function connectWebSocket() {
     console.warn('[CS-WS] 缺少agentId，无法连接WebSocket');
     return;
   }
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+  if (ws) {
+    try {
+      ws.close();
+    } catch {
+      // 忽略关闭异常
+    }
+  }
+  wsManuallyClosed = false;
+  if (wsReconnectTimer) {
+    clearTimeout(wsReconnectTimer);
+    wsReconnectTimer = null;
+  }
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const host = window.location.host; // 使用当前页面的host（包含端口），通过代理连接
   // 通过前端代理连接后端WebSocket，路径前缀 /jeecgboot
@@ -1419,7 +1554,21 @@ function connectWebSocket() {
   
   ws.onopen = () => console.log('[CS-WS] 连接成功');
   ws.onmessage = (event) => handleWsMessage(JSON.parse(event.data));
-  ws.onclose = () => setTimeout(connectWebSocket, 5000);
+  ws.onerror = () => {
+    if (!wsManuallyClosed) {
+      try {
+        ws?.close();
+      } catch {
+        // 忽略关闭异常
+      }
+    }
+  };
+  ws.onclose = () => {
+    ws = null;
+    if (!wsManuallyClosed) {
+      wsReconnectTimer = window.setTimeout(connectWebSocket, 5000);
+    }
+  };
 }
 
 function handleWsMessage(data: any) {
@@ -1546,25 +1695,43 @@ function handleWsMessage(data: any) {
     case 'conversation_closed':
       // 会话结束通知 - 广播给所有客服
       {
-        const closedConv = conversations.value.find(c => c.id === data.conversationId);
+        // ★ 兼容 extra 字段（与转接事件保持一致）
+        const extraData = data.extra || data;
+        const conversationId = extraData.conversationId || data.conversationId;
+        const reason = extraData.reason || data.reason || '会话已结束';
+        
+        console.log('[Workbench] 收到会话结束事件:', {
+          conversationId,
+          reason,
+          ownerAgentId: extraData.ownerAgentId,
+          currentAgentId: agentId.value,
+          currentFilter: filter.value,
+          rawData: data
+        });
+        
+        const closedConv = conversations.value.find(c => c.id === conversationId);
         if (closedConv) {
           // 更新会话状态
           closedConv.status = 2; // 已结束
-          closedConv.endTime = data.endTime || new Date().toISOString();
+          closedConv.endTime = extraData.endTime || data.endTime || new Date().toISOString();
           
           // 如果当前在"我的"或其他进行中的列表，从列表中移除
           if (filter.value !== 'closed') {
-            const index = conversations.value.findIndex(c => c.id === data.conversationId);
+            const index = conversations.value.findIndex(c => c.id === conversationId);
             if (index > -1) {
               conversations.value.splice(index, 1);
+              console.log('[Workbench] 已从列表移除会话');
             }
           }
           
           // 如果是当前选中的会话，提示并清空选中
-          if (currentConversation.value?.id === data.conversationId) {
-            message.info(data.reason || '会话已结束');
+          if (currentConversation.value?.id === conversationId) {
+            message.info(reason);
             currentConversation.value = null;
           }
+        } else {
+          // 会话不在当前列表，但仍需更新统计
+          console.log('[Workbench] 会话不在当前列表，仅更新统计');
         }
         
         // 刷新统计数据
@@ -1800,7 +1967,23 @@ function getMessageClass(msg: any) {
 }
 
 // 渲染消息内容（与访客端保持一致：简单HTML转义 + 换行转换）
-function renderMarkdown(content: string) {
+// ★ 初始化Markdown渲染器（仅用于AI建议）
+const md = new MarkdownIt({
+  html: true,
+  linkify: true,
+  typographer: true,
+  highlight: function (str: string, lang: string) {
+    if (lang && hljs.getLanguage(lang)) {
+      try {
+        return hljs.highlight(str, { language: lang }).value;
+      } catch (__) {}
+    }
+    return '';
+  }
+});
+
+// 渲染消息内容（普通消息 - 简单换行转换）
+function renderMessage(content: string) {
   if (!content) return '';
   // 简单的换行转换，与访客端相同
   return content
@@ -1808,6 +1991,17 @@ function renderMarkdown(content: string) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/\n/g, '<br>');
+}
+
+// ★ 渲染AI建议内容（保留Markdown渲染）
+function renderMarkdown(content: string) {
+  if (!content) return '';
+  try {
+    return md.render(content);
+  } catch (e) {
+    console.error('Markdown渲染失败', e);
+    return renderMessage(content); // 降级到普通文本
+  }
 }
 
 // 处理AI流式token
@@ -2362,6 +2556,84 @@ function scrollToBottom() {
     white-space: pre-wrap;
     word-wrap: break-word;
     line-height: 1.6;
+    
+    // ★ Markdown渲染样式
+    :deep(h1), :deep(h2), :deep(h3), :deep(h4), :deep(h5), :deep(h6) {
+      margin: 16px 0 8px;
+      font-weight: 600;
+      line-height: 1.4;
+      &:first-child {
+        margin-top: 0;
+      }
+    }
+    
+    :deep(h1) { font-size: 1.6em; }
+    :deep(h2) { font-size: 1.4em; }
+    :deep(h3) { font-size: 1.2em; }
+    
+    :deep(p) {
+      margin: 8px 0;
+      &:first-child {
+        margin-top: 0;
+      }
+      &:last-child {
+        margin-bottom: 0;
+      }
+    }
+    
+    :deep(ul), :deep(ol) {
+      margin: 8px 0;
+      padding-left: 24px;
+    }
+    
+    :deep(li) {
+      margin: 4px 0;
+    }
+    
+    :deep(code) {
+      background: #f5f5f5;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: 'Courier New', Consolas, monospace;
+      font-size: 0.9em;
+    }
+    
+    :deep(pre) {
+      background: #f5f5f5;
+      padding: 12px;
+      border-radius: 4px;
+      overflow-x: auto;
+      margin: 8px 0;
+      
+      code {
+        background: none;
+        padding: 0;
+      }
+    }
+    
+    :deep(blockquote) {
+      border-left: 3px solid #d3adf7;
+      padding-left: 12px;
+      margin: 8px 0;
+      color: #666;
+    }
+    
+    :deep(strong) {
+      font-weight: 600;
+      color: #722ed1;
+    }
+    
+    :deep(em) {
+      font-style: italic;
+    }
+    
+    :deep(a) {
+      color: #1890ff;
+      text-decoration: none;
+      &:hover {
+        text-decoration: underline;
+      }
+    }
   }
   
   .suggestion-btns {

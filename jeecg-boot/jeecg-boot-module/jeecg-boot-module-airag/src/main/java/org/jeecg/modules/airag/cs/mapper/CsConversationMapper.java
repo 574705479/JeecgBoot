@@ -22,16 +22,20 @@ public interface CsConversationMapper extends BaseMapper<CsConversation> {
     /**
      * 分页查询会话列表（包含主负责客服信息）
      * 
-     * @param page    分页参数
-     * @param agentId 客服ID（主负责人或协作者）
-     * @param status  状态
-     * @param filter  筛选类型: mine-我负责的, collab-协作中, unassigned-未分配
+     * @param page           分页参数
+     * @param agentId        客服ID（主负责人或协作者）
+     * @param status         状态
+     * @param filter         筛选类型: mine-我负责的, collab-协作中, unassigned-未分配, history-会话记录
+     * @param includeDeleted 是否包含已删除的记录
+     * @param filterAgentId  按指定客服筛选（用于会话记录查询）
      * @return 会话列表
      */
     IPage<CsConversation> selectConversationPage(Page<CsConversation> page, 
                                                   @Param("agentId") String agentId, 
                                                   @Param("status") Integer status,
-                                                  @Param("filter") String filter);
+                                                  @Param("filter") String filter,
+                                                  @Param("includeDeleted") Boolean includeDeleted,
+                                                  @Param("filterAgentId") String filterAgentId);
 
     /**
      * 获取客服负责的会话列表
@@ -40,6 +44,7 @@ public interface CsConversationMapper extends BaseMapper<CsConversation> {
             "FROM cs_conversation c " +
             "LEFT JOIN cs_agent a ON c.agent_id = a.id " +
             "WHERE c.agent_id = #{agentId} AND c.status != 2 " +
+            "AND (c.deleted = 0 OR c.deleted IS NULL) " +
             "ORDER BY c.last_message_time DESC")
     List<CsConversation> selectByOwnerAgent(@Param("agentId") String agentId);
 
@@ -48,6 +53,7 @@ public interface CsConversationMapper extends BaseMapper<CsConversation> {
      */
     @Select("SELECT * FROM cs_conversation " +
             "WHERE (status = 0 OR agent_id IS NULL) " +
+            "AND (deleted = 0 OR deleted IS NULL) " +
             "ORDER BY last_message_time DESC " +
             "LIMIT #{limit}")
     List<CsConversation> selectUnassigned(@Param("limit") int limit);
@@ -56,6 +62,7 @@ public interface CsConversationMapper extends BaseMapper<CsConversation> {
      * 统计客服当前负责的会话数
      */
     @Select("SELECT COUNT(*) FROM cs_conversation " +
-            "WHERE agent_id = #{agentId} AND status = 1")
+            "WHERE agent_id = #{agentId} AND status = 1 " +
+            "AND (deleted = 0 OR deleted IS NULL)")
     int countByOwnerAgent(@Param("agentId") String agentId);
 }

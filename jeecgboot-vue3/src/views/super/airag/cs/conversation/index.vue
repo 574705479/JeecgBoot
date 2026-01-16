@@ -17,6 +17,10 @@
       <template #status="{ record }">
         <a-tag :color="getStatusColor(record.status)">{{ getStatusText(record.status) }}</a-tag>
       </template>
+      <template #deleted="{ record }">
+        <a-tag v-if="record.deleted === 1" color="red">已删除</a-tag>
+        <span v-else>-</span>
+      </template>
       <template #replyMode="{ record }">
         <a-tag :color="getModeColor(record.replyMode)">{{ getModeText(record.replyMode) }}</a-tag>
       </template>
@@ -28,7 +32,7 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { BasicTable, useTable, TableAction } from '/@/components/Table';
 import { useModal } from '/@/components/Modal';
 import { defHttp } from '/@/utils/http/axios';
@@ -38,6 +42,27 @@ import CsConversationDetailModal from './CsConversationDetailModal.vue';
 
 const { createMessage, createConfirm } = useMessage();
 const [registerDetailModal, { openModal: openDetailModal }] = useModal();
+
+// 客服列表（用于筛选）
+const agentOptions = ref<{ label: string; value: string }[]>([]);
+
+// 加载客服列表
+async function loadAgentList() {
+  try {
+    const res = await defHttp.get({ url: '/cs/agent/list', params: { pageSize: 1000 } });
+    const records = res.records || res || [];
+    agentOptions.value = records.map((agent: any) => ({
+      label: agent.nickname || agent.username || agent.id,
+      value: agent.id,
+    }));
+  } catch (e) {
+    console.error('加载客服列表失败', e);
+  }
+}
+
+onMounted(() => {
+  loadAgentList();
+});
 
 // 选中的行
 const selectedRowKeys = ref<string[]>([]);
@@ -59,6 +84,7 @@ const columns = [
     customRender: ({ text }: any) => text || '-'
   },
   { title: '状态', dataIndex: 'status', width: 90, slots: { customRender: 'status' } },
+  { title: '删除状态', dataIndex: 'deleted', width: 90, slots: { customRender: 'deleted' } },
   { title: '回复模式', dataIndex: 'replyMode', width: 100, slots: { customRender: 'replyMode' } },
   { title: '来源', dataIndex: 'source', width: 80,
     customRender: ({ text }: any) => text || '直接访问'
@@ -82,6 +108,10 @@ const [registerTable, { reload, getSelectRows }] = useTable({
       params.createTimeEnd = params.createTime[1];
       delete params.createTime;
     }
+    // ★ 会话记录默认使用 history 筛选模式，包含所有会话
+    params.filter = 'history';
+    // ★ 默认包含已删除的记录
+    params.includeDeleted = true;
     const res = await defHttp.get({ url: '/cs/conversation/list', params });
     return res;
   },
@@ -92,8 +122,23 @@ const [registerTable, { reload, getSelectRows }] = useTable({
         field: 'userName', 
         label: '访客', 
         component: 'Input', 
-        colProps: { span: 6 },
+        colProps: { span: 5 },
         componentProps: { placeholder: '访客名称/ID' }
+      },
+      { 
+        field: 'filterAgentId', 
+        label: '负责客服', 
+        component: 'Select', 
+        colProps: { span: 5 },
+        componentProps: {
+          options: agentOptions,
+          placeholder: '选择客服',
+          allowClear: true,
+          showSearch: true,
+          filterOption: (input: string, option: any) => {
+            return option.label?.toLowerCase().includes(input.toLowerCase());
+          },
+        }
       },
       { 
         field: 'status', 
@@ -129,7 +174,7 @@ const [registerTable, { reload, getSelectRows }] = useTable({
         field: 'createTime', 
         label: '创建时间', 
         component: 'RangePicker', 
-        colProps: { span: 8 },
+        colProps: { span: 6 },
         componentProps: {
           format: 'YYYY-MM-DD',
           valueFormat: 'YYYY-MM-DD',

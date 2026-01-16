@@ -151,9 +151,9 @@ spring:
           slow-sql-millis: 5000
       datasource:
         master:
-          url: jdbc:mysql://127.0.0.1:3306/jeecg-boot?characterEncoding=UTF-8&useUnicode=true&useSSL=false&tinyInt1isBit=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+          url: jdbc:mysql://127.0.0.1:3308/jeecg-boot?characterEncoding=UTF-8&useUnicode=true&useSSL=false&tinyInt1isBit=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
           username: root
-          password: root
+          password: 92400bda284afba53b21162911f98d00Z
           driver-class-name: com.mysql.cj.jdbc.Driver
 #        # shardingjdbc数据源
 #        sharding-db:
@@ -166,6 +166,9 @@ spring:
       host: 127.0.0.1
       port: 6379
       password:
+    # MongoDB 配置（聊天消息存储）
+    mongodb:
+      uri: mongodb://root:root@127.0.0.1:27017/jeecg_chat?authSource=admin&ssl=false
 #mybatis plus 设置
 mybatis-plus:
   mapper-locations: classpath*:org/jeecg/**/xml/*Mapper.xml
@@ -351,3 +354,4 @@ justauth:
     type: default
     prefix: 'demo::'
     timeout: 1h
+

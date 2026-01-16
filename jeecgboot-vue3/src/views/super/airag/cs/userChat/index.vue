@@ -173,6 +173,26 @@ const agentTyping = ref(false);
 
 // AI回复中状态（用于限制用户快速发送）
 const aiResponding = ref(false);
+let aiResponseTimeoutTimer: number | null = null;
+
+function stopAiResponding(reason?: string) {
+  if (aiResponseTimeoutTimer) {
+    clearTimeout(aiResponseTimeoutTimer);
+    aiResponseTimeoutTimer = null;
+  }
+  if (aiResponding.value) {
+    aiResponding.value = false;
+  }
+  if (reason) {
+    messages.value.push({
+      id: Date.now().toString(),
+      content: reason,
+      senderType: 3,
+      createTime: new Date().toISOString(),
+    });
+    scrollToBottom();
+  }
+}
 
 // 流式AI消息临时存储 (messageId -> 累积内容)
 const streamingMessages = ref<Map<string, string>>(new Map());
@@ -348,6 +368,9 @@ function connectWebSocket() {
     console.log('[UserChat] WebSocket已断开:', event.code, event.reason);
     wsConnected.value = false;
     stopHeartbeat();
+    if (aiResponding.value && replyMode.value === 0) {
+      stopAiResponding('网络中断，AI回复可能未完成，请稍后重试');
+    }
     // 自动重连
     setTimeout(() => {
       if (!wsConnected.value) {
@@ -358,6 +381,9 @@ function connectWebSocket() {
 
   ws.onerror = (error) => {
     console.error('[UserChat] WebSocket错误:', error);
+    if (aiResponding.value && replyMode.value === 0) {
+      stopAiResponding('网络异常，AI回复可能未完成，请稍后重试');
+    }
   };
 }
 
@@ -423,7 +449,7 @@ function handleWsMessage(data: any) {
       // senderType: 0=用户, 1=客服, 2=AI, 3=系统
       if (msgSenderType !== 0) {
         console.log('[UserChat] 收到AI/客服回复，解除等待状态, senderType:', msgSenderType);
-        aiResponding.value = false;
+        stopAiResponding();
       }
       break;
 
@@ -474,7 +500,7 @@ function handleWsMessage(data: any) {
         replyMode.value = 1; // 默认切换为手动模式
       }
       // ★ 切换为手动模式后，解除AI回复中状态
-      aiResponding.value = false;
+      stopAiResponding();
       messages.value.push({
         id: Date.now().toString(),
         content: data.content || `客服 ${data.extra?.agentName || data.senderName || ''} 已为您服务`,
@@ -491,7 +517,7 @@ function handleWsMessage(data: any) {
       }
       // ★ 切换为手动模式后，解除AI回复中状态
       if (replyMode.value === 1) {
-        aiResponding.value = false;
+        stopAiResponding();
       }
       const modeText = replyMode.value === 1 ? '人工服务' : 'AI自动回复';
       messages.value.push({
@@ -567,9 +593,12 @@ async function sendMessage() {
   }
   
   // 设置超时自动解除AI回复状态（防止异常情况下一直锁定）
-  const aiResponseTimeout = setTimeout(() => {
+  if (aiResponseTimeoutTimer) {
+    clearTimeout(aiResponseTimeoutTimer);
+  }
+  aiResponseTimeoutTimer = window.setTimeout(() => {
     if (isAiMode) {
-      aiResponding.value = false;
+      stopAiResponding('AI回复超时，请稍后重试');
     }
   }, 60000); // 60秒超时
   
@@ -599,9 +628,8 @@ async function sendMessage() {
     console.error('发送消息失败', e);
     message.error('发送失败，请重试');
     if (isAiMode) {
-      aiResponding.value = false;
+      stopAiResponding();
     }
-    clearTimeout(aiResponseTimeout);
   } finally {
     sending.value = false;
   }
@@ -700,7 +728,7 @@ function handleAiStreamComplete(data: any) {
   }
   
   // 解除AI回复中状态
-  aiResponding.value = false;
+  stopAiResponding();
   agentTyping.value = false;
   
   scrollToBottom();

@@ -3,6 +3,7 @@ package org.jeecg.modules.airag.cs.entity;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -117,6 +118,12 @@ public class CsConversation implements Serializable {
 
     @Schema(description = "是否已发送超时提醒")
     private Boolean timeoutWarned;
+
+    // ==================== 逻辑删除 ====================
+
+    @TableLogic(value = "0", delval = "1")
+    @Schema(description = "逻辑删除: 0-未删除 1-已删除")
+    private Integer deleted;
 
     // ==================== 评价 ====================
 

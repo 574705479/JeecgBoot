@@ -10,7 +10,7 @@
       <!-- 基本信息 -->
       <a-descriptions :column="3" bordered size="small" class="info-section">
         <a-descriptions-item label="会话ID" :span="2">
-          <a-typography-text copyable>{{ record?.id }}</a-typography-text>
+          <ATypographyText copyable>{{ record?.id }}</ATypographyText>
         </a-descriptions-item>
         <a-descriptions-item label="状态">
           <a-tag :color="getStatusColor(record?.status)">{{ getStatusText(record?.status) }}</a-tag>
@@ -113,6 +113,9 @@ import { ref, nextTick } from 'vue';
 import { BasicModal, useModalInner } from '/@/components/Modal';
 import { defHttp } from '/@/utils/http/axios';
 import { MessageOutlined } from '@ant-design/icons-vue';
+import { Typography } from 'ant-design-vue';
+
+const { Text: ATypographyText } = Typography;
 
 const record = ref<any>(null);
 const messages = ref<any[]>([]);

@@ -116,11 +116,26 @@ public interface ICsConversationService extends IService<CsConversation> {
      * @param page    分页参数
      * @param agentId 客服ID
      * @param status  状态 (可选)
-     * @param filter  筛选类型: mine-我负责的, collab-协作中, unassigned-未分配, all-全部
+     * @param filter  筛选类型: mine-我负责的, collab-协作中, unassigned-未分配, all-全部, history-会话记录
      * @return 会话列表
      */
     IPage<CsConversation> getConversationList(Page<CsConversation> page, String agentId, 
                                                Integer status, String filter);
+
+    /**
+     * 分页查询会话列表（高级）
+     * 
+     * @param page           分页参数
+     * @param agentId        客服ID
+     * @param status         状态 (可选)
+     * @param filter         筛选类型: mine-我负责的, collab-协作中, unassigned-未分配, all-全部, history-会话记录
+     * @param includeDeleted 是否包含已删除的记录
+     * @param filterAgentId  按指定客服筛选（用于会话记录查询）
+     * @return 会话列表
+     */
+    IPage<CsConversation> getConversationListAdvanced(Page<CsConversation> page, String agentId, 
+                                                       Integer status, String filter,
+                                                       Boolean includeDeleted, String filterAgentId);
 
     /**
      * 获取会话统计数据
