@@ -533,11 +533,13 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
                                                               Integer status, String filter,
                                                               Boolean includeDeleted, String filterAgentId) {
         IPage<CsConversation> result = baseMapper.selectConversationPage(page, agentId, status, filter, includeDeleted, filterAgentId);
+        java.util.Set<String> onlineConversationIds = sessionManager.getOnlineConversationIds();
         
         // 补充协作者信息
         for (CsConversation conv : result.getRecords()) {
             List<CsCollaborator> collaborators = collaboratorMapper.selectActiveCollaborators(conv.getId());
             conv.setCollaborators(collaborators);
+            conv.setUserOnline(onlineConversationIds.contains(conv.getId()));
         }
         
         return result;

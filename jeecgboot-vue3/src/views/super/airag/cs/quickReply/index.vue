@@ -90,7 +90,11 @@ function handleEdit(record: any) {
 }
 
 async function handleDelete(record: any) {
-  await defHttp.delete({ url: '/cs/quickReply/delete', params: { id: record.id } });
+  if (!record?.id) {
+    createMessage.error('缺少快捷回复ID');
+    return;
+  }
+  await defHttp.delete({ url: `/cs/quickReply/delete?id=${record.id}` });
   createMessage.success('删除成功');
   reload();
 }

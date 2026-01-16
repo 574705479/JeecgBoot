@@ -311,8 +311,36 @@
             <SmileOutlined class="toolbar-icon" />
           </a-tooltip>
           <a-tooltip title="快捷回复">
-            <ThunderboltOutlined class="toolbar-icon" @click="showQuickReply = !showQuickReply" />
+            <ThunderboltOutlined class="toolbar-icon" @click="toggleQuickReply" />
           </a-tooltip>
+        </div>
+        <div class="quick-reply-panel" v-if="showQuickReply">
+          <div class="quick-reply-header">
+            <a-input
+              v-model:value="quickReplyKeyword"
+              allowClear
+              placeholder="搜索快捷回复"
+              size="small"
+            />
+            <a-button size="small" type="link" @click="loadQuickReplies(true)">刷新</a-button>
+          </div>
+          <a-spin :spinning="quickReplyLoading" size="small">
+            <div v-if="filteredQuickReplies.length" class="quick-reply-list">
+              <div
+                v-for="item in filteredQuickReplies"
+                :key="item.id"
+                class="quick-reply-item"
+                @click="applyQuickReply(item)"
+              >
+                <div class="quick-reply-title">
+                  <span>{{ item.title || '无标题' }}</span>
+                  <a-tag size="small">{{ item.scope === 'public' ? '公共' : '我的' }}</a-tag>
+                </div>
+                <div class="quick-reply-content">{{ item.content }}</div>
+              </div>
+            </div>
+            <a-empty v-else description="暂无快捷回复" />
+          </a-spin>
         </div>
         <div class="input-wrapper">
           <a-textarea
@@ -659,6 +687,13 @@ const showTransferModal = ref(false);
 const showQuickReply = ref(false);
 const availableAgents = ref<any[]>([]);
 const transferLoading = ref(false);
+const quickReplyList = ref<any[]>([]);
+const quickReplyLoading = ref(false);
+const quickReplyLoaded = ref(false);
+const quickReplyKeyword = ref('');
+const lastConversationStorageKey = 'cs_last_conversation_id';
+let clearUnreadTimer: number | null = null;
+let messagesEl: HTMLElement | null = null;
 
 // WebSocket
 let ws: WebSocket | null = null;
@@ -693,6 +728,18 @@ const inputPlaceholder = computed(() => {
   return '输入消息，Enter发送';
 });
 
+const filteredQuickReplies = computed(() => {
+  const keyword = quickReplyKeyword.value.trim().toLowerCase();
+  if (!keyword) {
+    return quickReplyList.value;
+  }
+  return quickReplyList.value.filter(item => {
+    const title = (item.title || '').toLowerCase();
+    const content = (item.content || '').toLowerCase();
+    return title.includes(keyword) || content.includes(keyword);
+  });
+});
+
 // 初始化
 onMounted(async () => {
   await loadAgentInfo();
@@ -711,6 +758,13 @@ onMounted(async () => {
 onUnmounted(() => {
   closeWebSocket();
   refreshTimer && clearInterval(refreshTimer);
+  if (messagesEl) {
+    messagesEl.removeEventListener('scroll', handleMessageScroll);
+  }
+  if (clearUnreadTimer) {
+    clearTimeout(clearUnreadTimer);
+    clearUnreadTimer = null;
+  }
 });
 
 onActivated(async () => {
@@ -733,6 +787,21 @@ onDeactivated(() => {
 });
 
 watch(filter, () => loadConversations());
+watch(messagesRef, (el, prev) => {
+  if (prev) {
+    prev.removeEventListener('scroll', handleMessageScroll);
+  }
+  if (el) {
+    messagesEl = el;
+    el.addEventListener('scroll', handleMessageScroll, { passive: true });
+  }
+});
+watch(agentId, () => {
+  quickReplyLoaded.value = false;
+  if (showQuickReply.value) {
+    loadQuickReplies(true);
+  }
+});
 
 // 加载客服信息
 async function loadAgentInfo() {
@@ -760,6 +829,75 @@ async function loadAgentInfo() {
   } catch (e) {
     console.error('加载客服信息失败', e);
   }
+}
+
+function toggleQuickReply() {
+  showQuickReply.value = !showQuickReply.value;
+  if (showQuickReply.value) {
+    loadQuickReplies();
+  }
+}
+
+function isMessagesAtBottom() {
+  const el = messagesEl || messagesRef.value;
+  if (!el) return false;
+  const threshold = 40;
+  return el.scrollHeight - (el.scrollTop + el.clientHeight) <= threshold;
+}
+
+function handleMessageScroll() {
+  scheduleClearUnread();
+}
+
+function scheduleClearUnread() {
+  if (!currentConversation.value) return;
+  if (!document.hasFocus()) return;
+  if (!isMessagesAtBottom()) return;
+  const unreadCount = currentConversation.value.unreadCount;
+  if (unreadCount !== undefined && unreadCount <= 0) {
+    return;
+  }
+  if (clearUnreadTimer) {
+    clearTimeout(clearUnreadTimer);
+  }
+  clearUnreadTimer = window.setTimeout(async () => {
+    if (!currentConversation.value) return;
+    try {
+      await httpPost({ url: `/cs/conversation/${currentConversation.value.id}/clear-unread` });
+      currentConversation.value.unreadCount = 0;
+      const listItem = conversations.value.find(c => c.id === currentConversation.value?.id);
+      if (listItem) {
+        listItem.unreadCount = 0;
+      }
+    } catch (e) {
+      console.error('[Workbench] 清除未读失败', e);
+    }
+  }, 300);
+}
+
+async function loadQuickReplies(force = false) {
+  if (quickReplyLoading.value) return;
+  if (quickReplyLoaded.value && !force) return;
+  if (!agentId.value) return;
+  quickReplyLoading.value = true;
+  try {
+    const agentList = await httpGet({ url: `/cs/quickReply/agent/${agentId.value}` });
+    quickReplyList.value = (agentList || []).map((item: any) => ({
+      ...item,
+      scope: item.agentId ? 'agent' : 'public',
+    }));
+    quickReplyLoaded.value = true;
+  } catch (e) {
+    console.error('加载快捷回复失败', e);
+  } finally {
+    quickReplyLoading.value = false;
+  }
+}
+
+function applyQuickReply(item: any) {
+  inputMessage.value = item?.content || '';
+  showQuickReply.value = false;
+  nextTick(() => inputRef.value?.focus());
 }
 
 // 加载AI应用列表
@@ -923,6 +1061,18 @@ async function loadConversations() {
         prefetchVisitorNickname(conv);
       }
     });
+
+    if (!currentConversation.value) {
+      try {
+        const lastId = sessionStorage.getItem(lastConversationStorageKey);
+        const lastConv = lastId ? newConversations.find((c: any) => c.id === lastId) : null;
+        if (lastConv) {
+          await selectConversation(lastConv);
+        }
+      } catch {
+        // 忽略读取异常
+      }
+    }
   } catch (e) {
     console.error('加载会话列表失败', e);
   } finally {
@@ -994,6 +1144,11 @@ async function selectConversation(conv: any) {
   }
 
   currentConversation.value = conv;
+  try {
+    sessionStorage.setItem(lastConversationStorageKey, conv.id);
+  } catch {
+    // 忽略存储异常
+  }
   currentReplyMode.value = conv.replyMode || 0;
   
   // 切换会话时清除AI建议（AI建议是针对特定会话的）
@@ -1015,14 +1170,9 @@ async function selectConversation(conv: any) {
     }
   }
   
-  if (conv.unreadCount > 0) {
-    await httpPost({ url: `/cs/conversation/${conv.id}/clear-unread` });
-    conv.unreadCount = 0;
-  }
-  userOnline.value = true;
-  conv.userOnline = true;
-  if (listItem) {
-    listItem.userOnline = true;
+  scheduleClearUnread();
+  if (conv.userOnline !== undefined) {
+    userOnline.value = conv.userOnline;
   }
   nextTick(() => inputRef.value?.focus());
 }
@@ -1672,6 +1822,7 @@ function handleWsMessage(data: any) {
         if (!messages.value.find(m => m.id === newMsg.id)) {
           messages.value.push(newMsg);
           scrollToBottom();
+          scheduleClearUnread();
         }
       }
       
@@ -1681,6 +1832,27 @@ function handleWsMessage(data: any) {
       // 延迟刷新统计数据（防抖）
       loadStatsDebounced();
       break;
+    case 'delivery_failed': {
+      const failedConversationId = data.conversationId;
+      const failedConv = conversations.value.find(c => c.id === failedConversationId);
+      if (failedConv) {
+        failedConv.userOnline = false;
+      }
+      if (currentConversation.value?.id === failedConversationId) {
+        userOnline.value = false;
+        currentConversation.value.userOnline = false;
+        const noticeMsg = {
+          id: `delivery_failed_${Date.now()}`,
+          conversationId: failedConversationId,
+          content: data.content || '用户不在线，消息未送达',
+          senderType: 3,
+          createTime: data.timestamp || new Date().toISOString(),
+        };
+        messages.value.push(noticeMsg);
+        scrollToBottom();
+      }
+      break;
+    }
     case 'conversation_assigned':
       // 会话被接入 - 实时推送
       {
@@ -2127,6 +2299,7 @@ function scrollToBottom() {
   nextTick(() => {
     if (messagesRef.value) {
       messagesRef.value.scrollTop = messagesRef.value.scrollHeight;
+      scheduleClearUnread();
     }
   });
 }
@@ -2733,6 +2906,56 @@ function scrollToBottom() {
       &:hover {
         color: #1890ff;
       }
+    }
+  }
+
+  .quick-reply-panel {
+    margin-bottom: 8px;
+    padding: 8px;
+    background: #fafafa;
+    border: 1px solid #f0f0f0;
+    border-radius: 6px;
+
+    .quick-reply-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .quick-reply-list {
+      max-height: 200px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .quick-reply-item {
+      padding: 8px;
+      background: #fff;
+      border: 1px solid #f0f0f0;
+      border-radius: 6px;
+      cursor: pointer;
+
+      &:hover {
+        border-color: #1890ff;
+      }
+    }
+
+    .quick-reply-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-weight: 500;
+      margin-bottom: 4px;
+      font-size: 13px;
+    }
+
+    .quick-reply-content {
+      font-size: 12px;
+      color: #666;
+      white-space: pre-wrap;
     }
   }
   

@@ -112,7 +112,7 @@ public class CsWebSocketSessionManager {
      * 通过conversationId发送消息给用户
      * 优先使用conversationId查找会话，支持无痕浏览器刷新后仍能收到消息
      */
-    public void sendToUserByConversation(String conversationId, String userId, Object message) {
+    public boolean sendToUserByConversation(String conversationId, String userId, Object message) {
         WebSocketSession session = null;
         
         // ★ 增强日志：显示当前所有在线用户
@@ -140,16 +140,17 @@ public class CsWebSocketSessionManager {
             log.warn("[CS-WebSocket] ★★★ 用户会话不存在，无法发送消息: conversationId={}, userId={}, " +
                     "当前conversationSessions={}, 当前userSessions={}", 
                     conversationId, userId, conversationSessions.keySet(), userSessions.keySet());
-            return;
+            return false;
         }
         
         if (!session.isOpen()) {
             log.warn("[CS-WebSocket] 用户会话已关闭: conversationId={}, userId={}", conversationId, userId);
-            return;
+            return false;
         }
         
         log.info("[CS-WebSocket] 正在发送消息给用户: conversationId={}, userId={}", conversationId, userId);
         sendMessage(session, message);
+        return true;
     }
 
     /**

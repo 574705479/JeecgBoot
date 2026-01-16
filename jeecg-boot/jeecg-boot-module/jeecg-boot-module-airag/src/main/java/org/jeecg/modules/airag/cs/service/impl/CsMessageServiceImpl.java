@@ -171,7 +171,22 @@ public class CsMessageServiceImpl implements ICsMessageService {
         conversationService.updateLastMessage(conversationId, content);
         
         // 推送给用户
-        pushToUser(conversationId, agentMessage);
+        boolean delivered = pushToUser(conversationId, agentMessage);
+        if (!delivered) {
+            String userId = conversation != null ? conversation.getUserId() : null;
+            Map<String, Object> extra = new HashMap<>();
+            extra.put("reason", "USER_OFFLINE");
+            extra.put("userId", userId);
+            extra.put("messageId", agentMessage.getId());
+            CsWebSocketMessage deliveryFailed = CsWebSocketMessage.builder()
+                    .type("delivery_failed")
+                    .conversationId(conversationId)
+                    .content("用户不在线，消息未送达")
+                    .extra(extra)
+                    .timestamp(agentMessage.getCreateTime())
+                    .build();
+            sessionManager.sendToAgent(agentId, deliveryFailed);
+        }
         
         // 推送给其他协作客服（同步）
         pushToOtherAgents(conversationId, agentId, agentMessage);
@@ -444,7 +459,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
     /**
      * 推送消息给用户
      */
-    private void pushToUser(String conversationId, CsMessage message) {
+    private boolean pushToUser(String conversationId, CsMessage message) {
         CsWebSocketMessage wsMessage = CsWebSocketMessage.builder()
                 .type("message")
                 .conversationId(conversationId)
@@ -459,7 +474,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
         CsConversation conversation = conversationService.getById(conversationId);
         String userId = conversation != null ? conversation.getUserId() : conversationId;
         
-        sessionManager.sendToUserByConversation(conversationId, userId, wsMessage);
+        return sessionManager.sendToUserByConversation(conversationId, userId, wsMessage);
     }
 
     /**
