@@ -170,6 +170,8 @@ const messagesRef = ref<HTMLElement | null>(null);
 let ws: WebSocket | null = null;
 const wsConnected = ref(false);
 const agentTyping = ref(false);
+let wsReconnectTimer: number | null = null;
+let wsManuallyClosed = false;
 
 // AI回复中状态（用于限制用户快速发送）
 const aiResponding = ref(false);
@@ -339,6 +341,14 @@ function connectWebSocket() {
     console.warn('缺少conversationId或userId，无法连接WebSocket');
     return;
   }
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+  if (wsReconnectTimer) {
+    clearTimeout(wsReconnectTimer);
+    wsReconnectTimer = null;
+  }
+  wsManuallyClosed = false;
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const host = window.location.host; // 使用当前页面的host（包含端口），通过代理连接
@@ -371,12 +381,15 @@ function connectWebSocket() {
     if (aiResponding.value && replyMode.value === 0) {
       stopAiResponding('网络中断，AI回复可能未完成，请稍后重试');
     }
+    ws = null;
     // 自动重连
-    setTimeout(() => {
-      if (!wsConnected.value) {
-        connectWebSocket();
-      }
-    }, 3000);
+    if (!wsManuallyClosed) {
+      wsReconnectTimer = window.setTimeout(() => {
+        if (!wsConnected.value) {
+          connectWebSocket();
+        }
+      }, 3000);
+    }
   };
 
   ws.onerror = (error) => {
@@ -390,11 +403,17 @@ function connectWebSocket() {
 // 断开WebSocket
 function disconnectWebSocket() {
   stopHeartbeat();
+  wsManuallyClosed = true;
+  if (wsReconnectTimer) {
+    clearTimeout(wsReconnectTimer);
+    wsReconnectTimer = null;
+  }
   if (ws) {
     ws.close();
     ws = null;
   }
   wsConnected.value = false;
+  stopAiResponding();
 }
 
 // 心跳

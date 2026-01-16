@@ -647,6 +647,9 @@ let ws: WebSocket | null = null;
 let refreshTimer: number | null = null;
 let wsReconnectTimer: number | null = null;
 let wsManuallyClosed = false;
+const hasMounted = ref(false);
+const isActivating = ref(false);
+const loadingConversations = ref(false);
 
 function closeWebSocket() {
   wsManuallyClosed = true;
@@ -679,6 +682,7 @@ onMounted(async () => {
   await loadGlobalVisitorApp();  // 加载全局访客AI应用配置
   await loadConversations();
   connectWebSocket();
+  hasMounted.value = true;
   
   // ★ 移除定时轮询，完全依赖 WebSocket 实时推送
   // refreshTimer = window.setInterval(() => {
@@ -693,10 +697,16 @@ onUnmounted(() => {
 
 onActivated(async () => {
   // 菜单切换返回时，确保客服在线、会话和WebSocket正常
-  await loadAgentInfo();
-  await loadConversations();
-  closeWebSocket();
-  connectWebSocket();
+  if (!hasMounted.value || isActivating.value) return;
+  isActivating.value = true;
+  try {
+    await loadAgentInfo();
+    await loadConversations();
+    closeWebSocket();
+    connectWebSocket();
+  } finally {
+    isActivating.value = false;
+  }
 });
 
 onDeactivated(() => {
@@ -840,6 +850,8 @@ function loadStatsDebounced() {
 }
 
 async function loadConversations() {
+  if (loadingConversations.value) return;
+  loadingConversations.value = true;
   try {
     // 同时加载统计数据（不等待，异步执行）
     loadStats().catch(() => {});
@@ -895,6 +907,8 @@ async function loadConversations() {
     });
   } catch (e) {
     console.error('加载会话列表失败', e);
+  } finally {
+    loadingConversations.value = false;
   }
 }
 
@@ -1553,7 +1567,13 @@ function connectWebSocket() {
   ws = new WebSocket(wsUrl);
   
   ws.onopen = () => console.log('[CS-WS] 连接成功');
-  ws.onmessage = (event) => handleWsMessage(JSON.parse(event.data));
+  ws.onmessage = (event) => {
+    try {
+      handleWsMessage(JSON.parse(event.data));
+    } catch (e) {
+      console.error('[CS-WS] 解析消息失败', e);
+    }
+  };
   ws.onerror = () => {
     if (!wsManuallyClosed) {
       try {
@@ -1625,32 +1645,36 @@ function handleWsMessage(data: any) {
     case 'conversation_assigned':
       // 会话被接入 - 实时推送
       {
-        const assignedConv = conversations.value.find(c => c.id === data.conversationId);
+        const extraData = data.extra || data;
+        const assignedAgentId = extraData.agentId;
+        const assignedAgentName = extraData.agentName
+          || (assignedAgentId && assignedAgentId === agentId.value ? agentName.value : '其他客服');
+        const assignedConv = conversations.value.find(c => c.id === extraData.conversationId);
         if (assignedConv) {
           // 更新会话状态
           assignedConv.status = 1; // 已分配
-          assignedConv.ownerAgentId = data.agentId;
-          assignedConv.ownerAgentName = data.agentName;
+          assignedConv.ownerAgentId = assignedAgentId;
+          assignedConv.ownerAgentName = assignedAgentName;
           assignedConv.assignTime = new Date().toISOString();
           
           // 如果当前是待接入列表，从列表中移除该会话
           if (filter.value === 'unassigned') {
-            const index = conversations.value.findIndex(c => c.id === data.conversationId);
+            const index = conversations.value.findIndex(c => c.id === extraData.conversationId);
             if (index > -1) {
               conversations.value.splice(index, 1);
             }
           }
           
           // 如果是当前选中的会话，更新当前会话对象
-          if (currentConversation.value?.id === data.conversationId) {
+          if (currentConversation.value?.id === extraData.conversationId) {
             currentConversation.value.status = 1;
-            currentConversation.value.ownerAgentId = data.agentId;
-            currentConversation.value.ownerAgentName = data.agentName;
+            currentConversation.value.ownerAgentId = assignedAgentId;
+            currentConversation.value.ownerAgentName = assignedAgentName;
           }
           
           // 如果不是当前客服接入的，显示提示
-          if (data.agentId !== agentId.value) {
-            message.info(`会话已被 ${data.agentName} 接入`);
+          if (assignedAgentId && assignedAgentId !== agentId.value) {
+            message.info(`会话已被 ${assignedAgentName} 接入`);
           }
         }
         
