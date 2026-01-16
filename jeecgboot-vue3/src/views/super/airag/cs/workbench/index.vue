@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="cs-workbench">
     <!-- 左侧会话列表 -->
     <div class="sidebar">
@@ -134,8 +134,8 @@
           @click="selectConversation(conv)"
         >
           <div class="conv-avatar">
-            <a-badge :status="conv.userOnline ? 'success' : 'default'" dot>
-              <a-avatar :size="42">{{ getDisplayName(conv).charAt(0) }}</a-avatar>
+            <a-badge :status="(conv.userOnline ?? (currentConversation?.id === conv.id ? userOnline : false)) ? 'success' : 'default'" dot>
+              <a-avatar :size="42" class="visitor-avatar">{{ getDisplayName(conv).charAt(0) }}</a-avatar>
             </a-badge>
           </div>
           <div class="conv-content">
@@ -190,7 +190,7 @@
       <!-- 聊天头部 -->
       <div class="chat-header">
         <div class="chat-user">
-          <a-avatar :size="40">{{ getDisplayName(currentConversation).charAt(0) }}</a-avatar>
+          <a-avatar :size="40" class="visitor-avatar">{{ getDisplayName(currentConversation).charAt(0) }}</a-avatar>
           <div class="user-info">
             <div class="user-name">
               {{ getDisplayName(currentConversation) }}
@@ -243,10 +243,13 @@
             </div>
             <!-- 用户/访客消息 (显示在左边) -->
             <template v-else-if="msg.senderType === 0">
-              <a-avatar :size="36" class="msg-avatar">
-                {{ msg.senderName?.charAt(0) || '访' }}
+              <a-avatar :size="messageAvatarSize" class="msg-avatar">
+                {{ getVisitorDisplayName(msg).charAt(0) }}
               </a-avatar>
               <div class="msg-body">
+                <div class="msg-info">
+                  <span class="sender-name">{{ getVisitorDisplayName(msg) }}</span>
+                </div>
                 <div class="msg-bubble user-bubble">
                   <div class="msg-text" v-html="renderMessage(msg.content)"></div>
                 </div>
@@ -272,7 +275,7 @@
                 <div class="msg-info">
                   <span class="sender-name">{{ msg.actualSenderName || msg.senderName }}</span>
                   <a-tag v-if="msg.senderType === 1 || msg.isAiGenerated" color="purple" size="small">AI</a-tag>
-                  <a-avatar :size="24" class="msg-avatar-inline">
+                  <a-avatar :size="messageAvatarSize" class="msg-avatar-inline">
                     {{ (msg.actualSenderName || msg.senderName)?.charAt(0) || (msg.senderType === 1 ? 'AI' : '客') }}
                   </a-avatar>
                 </div>
@@ -561,6 +564,20 @@ import { defHttp } from '/@/utils/http/axios';
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
 
+const silentRequestOptions = { successMessageMode: 'none' as const };
+function httpGet<T = any>(config: any, options: any = {}) {
+  return defHttp.get<T>(config, { ...silentRequestOptions, ...options });
+}
+function httpPost<T = any>(config: any, options: any = {}) {
+  return defHttp.post<T>(config, { ...silentRequestOptions, ...options });
+}
+function httpPut<T = any>(config: any, options: any = {}) {
+  return defHttp.put<T>(config, { ...silentRequestOptions, ...options });
+}
+function httpDelete<T = any>(config: any, options: any = {}) {
+  return defHttp.delete<T>(config, { ...silentRequestOptions, ...options });
+}
+
 // 客服信息
 const agentId = ref('');
 const agentName = ref('');
@@ -593,6 +610,7 @@ const messages = ref<any[]>([]);
 const inputMessage = ref('');
 const messagesRef = ref<HTMLElement | null>(null);
 const inputRef = ref();
+const messageAvatarSize = 32;
 
 // 流式AI消息临时存储 (messageId -> 累积内容)
 const streamingMessages = ref<Map<string, string>>(new Map());
@@ -719,7 +737,7 @@ watch(filter, () => loadConversations());
 // 加载客服信息
 async function loadAgentInfo() {
   try {
-    const res = await defHttp.get({ url: '/cs/agent/current' });
+    const res = await httpGet({ url: '/cs/agent/current' });
     if (res?.id) {
       agentId.value = res.id;
       agentName.value = res.nickname || '客服';
@@ -734,7 +752,7 @@ async function loadAgentInfo() {
       // 注意：visitorAppId 是全局配置，在 loadGlobalVisitorApp() 中加载
       
       if (!isOnline.value) {
-        await defHttp.post({ url: `/cs/agent/online/${agentId.value}` });
+        await httpPost({ url: `/cs/agent/online/${agentId.value}` });
         agentStatus.value = 1;
         isOnline.value = true;
       }
@@ -747,7 +765,7 @@ async function loadAgentInfo() {
 // 加载AI应用列表
 async function loadAiAppList() {
   try {
-    const res = await defHttp.get({ 
+    const res = await httpGet({ 
       url: '/airag/app/list',
       params: { pageNo: 1, pageSize: 100 }
     });
@@ -764,12 +782,12 @@ async function onAppChange(appId: string | undefined) {
   if (!agentId.value) return;
   
   try {
-    await defHttp.put({
+    await httpPut({
       url: `/cs/agent/${agentId.value}/default-app`,
       data: { appId: appId || '' }
     });
     selectedAppId.value = appId;
-    message.success('客服AI建议应用已更新');
+    console.log('[Workbench] 客服AI建议应用已更新');
   } catch (e) {
     console.error('设置客服AI建议应用失败', e);
     message.error('设置失败');
@@ -779,12 +797,12 @@ async function onAppChange(appId: string | undefined) {
 // 访客AI应用切换（全局配置）
 async function onVisitorAppChange(appId: string | undefined) {
   try {
-    await defHttp.put({
+    await httpPut({
       url: '/cs/agent/global/visitor-app',
       data: { appId: appId || '' }
     });
     visitorAppId.value = appId;
-    message.success('访客AI应用已更新（全局生效）');
+    console.log('[Workbench] 访客AI应用已更新（全局生效）');
   } catch (e) {
     console.error('设置访客AI应用失败', e);
     message.error('设置失败');
@@ -794,7 +812,7 @@ async function onVisitorAppChange(appId: string | undefined) {
 // 加载全局访客AI应用配置
 async function loadGlobalVisitorApp() {
   try {
-    const res = await defHttp.get({ url: '/cs/agent/global/visitor-app' });
+    const res = await httpGet({ url: '/cs/agent/global/visitor-app' });
     if (res?.appId) {
       visitorAppId.value = res.appId;
     }
@@ -807,9 +825,9 @@ async function loadGlobalVisitorApp() {
 async function toggleOnline(checked: boolean) {
   try {
     if (checked) {
-      await defHttp.post({ url: `/cs/agent/online/${agentId.value}` });
+      await httpPost({ url: `/cs/agent/online/${agentId.value}` });
     } else {
-      await defHttp.post({ url: `/cs/agent/offline/${agentId.value}` });
+      await httpPost({ url: `/cs/agent/offline/${agentId.value}` });
     }
     agentStatus.value = checked ? 1 : 0;
   } catch (e) {
@@ -823,7 +841,7 @@ async function toggleOnline(checked: boolean) {
 let statsLoadTimer: any = null;
 async function loadStats() {
   try {
-    const res = await defHttp.get({
+    const res = await httpGet({
       url: '/cs/conversation/stats',
       params: { agentId: agentId.value }
     });
@@ -869,7 +887,7 @@ async function loadConversations() {
       params.supervisorMode = true;
     }
     
-    const res = await defHttp.get({
+    const res = await httpGet({
       url: '/cs/conversation/list',
       params
     });
@@ -927,7 +945,7 @@ async function prefetchVisitorNickname(conv: any) {
     if (conv.appId) {
       params.appId = conv.appId;
     }
-    const res = await defHttp.get({
+    const res = await httpGet({
       url: '/airag/cs/visitor/getByUser',
       params
     });
@@ -987,22 +1005,25 @@ async function selectConversation(conv: any) {
   await loadVisitorInfo(conv.appId, conv.userId);
   
   // 加载消息后，计算"对话中"的客服并缓存
+  const listItem = conversations.value.find(c => c.id === conv.id);
   const lastAgent = getLastAgentFromMessages();
   if (lastAgent) {
     conv.lastTalkingAgent = lastAgent;
     // 同步更新会话列表中的对应项
-    const listItem = conversations.value.find(c => c.id === conv.id);
     if (listItem) {
       listItem.lastTalkingAgent = lastAgent;
     }
   }
   
   if (conv.unreadCount > 0) {
-    await defHttp.post({ url: `/cs/conversation/${conv.id}/clear-unread` });
+    await httpPost({ url: `/cs/conversation/${conv.id}/clear-unread` });
     conv.unreadCount = 0;
   }
-  
   userOnline.value = true;
+  conv.userOnline = true;
+  if (listItem) {
+    listItem.userOnline = true;
+  }
   nextTick(() => inputRef.value?.focus());
 }
 
@@ -1055,10 +1076,21 @@ function getDisplayName(conv: any): string {
   return conv.userName || '访客';
 }
 
+function getVisitorDisplayName(msg?: any): string {
+  const nickname = currentConversation.value?.visitorNickname || visitorInfo.value?.nickname;
+  if (nickname) {
+    return nickname;
+  }
+  if (msg?.senderName) {
+    return msg.senderName;
+  }
+  return '访客';
+}
+
 // 加载消息
 async function loadMessages(conversationId: string) {
   try {
-    const res = await defHttp.get({
+    const res = await httpGet({
       url: `/cs/message/${conversationId}`,
       params: { limit: 100 }
     });
@@ -1105,7 +1137,7 @@ async function loadVisitorInfo(appId: string, userId: string) {
       params.appId = appId;
     }
     
-    const res = await defHttp.get({
+    const res = await httpGet({
       url: '/airag/cs/visitor/getByUser',
       params
     });
@@ -1172,7 +1204,7 @@ async function sendMessage() {
       await changeMode(1);
     }
     
-    await defHttp.post({
+    await httpPost({
       url: '/cs/message/agent/send',
       data: {
         conversationId: currentConversation.value.id,
@@ -1203,7 +1235,7 @@ async function sendMessage() {
     
     // ★ 问题3修复：发送消息后清除未读数
     if (currentConversation.value.unreadCount > 0) {
-      await defHttp.post({ url: `/cs/conversation/${currentConversation.value.id}/clear-unread` });
+      await httpPost({ url: `/cs/conversation/${currentConversation.value.id}/clear-unread` });
       currentConversation.value.unreadCount = 0;
       
       // 同步更新会话列表中的未读数
@@ -1228,14 +1260,14 @@ async function sendMessage() {
 // 接入会话
 async function assignConversation(conversationId: string) {
   try {
-    const res = await defHttp.post({
+    const res = await httpPost({
       url: `/cs/conversation/${conversationId}/assign`,
       data: { agentId: agentId.value }
     }, { isTransformResponse: false });
     
     const result = res.result || res;
     if (result.success) {
-      message.success('接入成功');
+      console.log('[Workbench] 接入成功');
       await loadConversations();
       if (result.conversation) {
         await selectConversation(result.conversation);
@@ -1253,7 +1285,7 @@ async function changeMode(mode: number) {
   if (!currentConversation.value) return;
   
   try {
-    await defHttp.put({
+    await httpPut({
       url: `/cs/conversation/${currentConversation.value.id}/mode`,
       data: { mode }
     });
@@ -1269,23 +1301,23 @@ async function closeConversation() {
   if (!currentConversation.value) return;
   
   try {
-    await defHttp.post({ url: `/cs/conversation/${currentConversation.value.id}/close` });
-    message.success('会话已结束');
+    await httpPost({ url: `/cs/conversation/${currentConversation.value.id}/close` });
+    console.log('[Workbench] 会话已结束');
     currentConversation.value.status = 2;
     
     // 刷新会话列表和统计数据
     await loadConversations();
     await loadStats();
   } catch (e) {
-    message.error('操作失败');
+    console.error('[Workbench] 结束会话失败', e);
   }
 }
 
 // 删除会话（仅已结束的会话可删除）
 async function deleteConversation(conversationId: string) {
   try {
-    await defHttp.delete({ url: `/cs/conversation/${conversationId}` });
-    message.success('删除成功');
+    await httpDelete({ url: `/cs/conversation/${conversationId}` });
+    console.log('[Workbench] 删除成功');
     
     // 如果删除的是当前选中的会话，清空选中状态
     if (currentConversation.value?.id === conversationId) {
@@ -1311,7 +1343,7 @@ async function openTransferModal() {
 async function loadAvailableAgents() {
   transferLoading.value = true;
   try {
-    const res = await defHttp.get({
+    const res = await httpGet({
       url: '/cs/agent/list',
       params: { pageNo: 1, pageSize: 100 } // 获取所有客服
     });
@@ -1333,10 +1365,10 @@ async function doTransfer(toAgentId: string) {
   
   try {
     // 使用查询参数方式传递（直接拼接到URL）
-    await defHttp.post({
+    await httpPost({
       url: `/cs/conversation/${currentConversation.value.id}/transfer?toAgentId=${toAgentId}&fromAgentId=${agentId.value}`
     });
-    message.success('转接成功');
+    console.log('[Workbench] 转接成功');
     showTransferModal.value = false;
     await loadConversations();
     // 转接后清空当前会话
@@ -1379,7 +1411,7 @@ async function saveEditField() {
       data.id = visitorInfo.value.id;
     }
     
-    const res = await defHttp.post({ url: '/airag/cs/visitor/update', data });
+    const res = await httpPost({ url: '/airag/cs/visitor/update', data });
     // 更新本地访客信息，包括新创建的ID
     if (res && typeof res === 'object') {
       Object.assign(visitorInfo.value, res);
@@ -1404,7 +1436,7 @@ async function saveEditField() {
     }
     
     showEditModal.value = false;
-    message.success('保存成功');
+    console.log('[Workbench] 保存成功');
   } catch {
     message.error('保存失败');
   }
@@ -1422,7 +1454,7 @@ async function toggleStar() {
   if (!visitorInfo.value.id || !currentConversation.value) return;
   
   try {
-    await defHttp.post({
+    await httpPost({
       url: '/airag/cs/visitor/toggleStar',
       data: { id: visitorInfo.value.id }
     });
@@ -1442,7 +1474,7 @@ async function updateVisitorLevel(level: number) {
   if (!visitorInfo.value.id || !currentConversation.value) return;
   
   try {
-    await defHttp.post({
+    await httpPost({
       url: '/airag/cs/visitor/updateLevel',
       data: { id: visitorInfo.value.id, level }
     });
@@ -1476,7 +1508,7 @@ async function saveTags() {
   if (!visitorInfo.value.id || !currentConversation.value) return;
   
   try {
-    await defHttp.post({
+    await httpPost({
       url: '/airag/cs/visitor/updateTags',
       data: { id: visitorInfo.value.id, tags: JSON.stringify(visitorTags.value) }
     });
@@ -1501,7 +1533,7 @@ async function requestAiSuggestion(userMessage: string) {
   aiSuggestion.value = ''; // 清空之前的建议，准备接收流式内容
   
   try {
-    const res = await defHttp.post({
+    const res = await httpPost({
       url: `/cs/message/ai-generate/${currentConversation.value.id}`,
       data: { userMessage }
     });
@@ -1513,7 +1545,7 @@ async function requestAiSuggestion(userMessage: string) {
     } else if (res?.suggestion) {
       // 非流式模式（兼容旧逻辑）
       aiSuggestion.value = res.suggestion;
-      message.success('AI建议已生成');
+      console.log('[Workbench] AI建议已生成');
       aiSuggestionLoading.value = false;
     } else {
       message.warning(res?.message || 'AI暂时无法生成建议');
@@ -1600,6 +1632,9 @@ function handleWsMessage(data: any) {
         // ★ 问题1修复：更新最后消息和时间（包含客服消息）
         conv.lastMessage = data.content;
         conv.lastMessageTime = new Date().toISOString();
+        if (data.senderType === 0) {
+          conv.userOnline = true;
+        }
         
         // ★ 问题2修复：如果是客服消息，更新"对话中"的客服名称
         if (data.senderType === 2 && data.senderName && conv.status === 1) {
@@ -1615,6 +1650,10 @@ function handleWsMessage(data: any) {
       // 如果是当前选中的会话，也要更新currentConversation
       if (currentConversation.value?.id === data.conversationId) {
         // ★ 问题2修复：实时更新当前会话中"对话中"的客服
+        if (data.senderType === 0) {
+          userOnline.value = true;
+          currentConversation.value.userOnline = true;
+        }
         if (data.senderType === 2 && data.senderName) {
           currentConversation.value.lastTalkingAgent = data.senderName;
         }
@@ -1674,7 +1713,7 @@ function handleWsMessage(data: any) {
           
           // 如果不是当前客服接入的，显示提示
           if (assignedAgentId && assignedAgentId !== agentId.value) {
-            message.info(`会话已被 ${assignedAgentName} 接入`);
+            console.log('[Workbench] 会话已被接入:', assignedAgentName);
           }
         }
         
@@ -1685,7 +1724,7 @@ function handleWsMessage(data: any) {
     case 'new_conversation':
       // 新会话通知 - 只在待接入列表中实时添加
       {
-        message.info('有新的会话接入');
+        console.log('[Workbench] 有新的会话接入');
         
         // ★ 只有在待接入列表时才添加到当前列表
         if (filter.value === 'unassigned') {
@@ -1750,7 +1789,7 @@ function handleWsMessage(data: any) {
           
           // 如果是当前选中的会话，提示并清空选中
           if (currentConversation.value?.id === conversationId) {
-            message.info(reason);
+            console.log('[Workbench] 会话已结束:', reason);
             currentConversation.value = null;
           }
         } else {
@@ -1790,9 +1829,9 @@ function handleWsMessage(data: any) {
           
           // 显示提示消息
           if (extraData.fromAgentName) {
-            message.success(`${extraData.fromAgentName} 已将会话"${extraData.conversation?.userName || '访客'}"转接给您`);
+            console.log('[Workbench] 收到转接会话:', extraData.fromAgentName, extraData.conversation?.userName || '访客');
           } else {
-            message.success(`收到新的转接会话`);
+            console.log('[Workbench] 收到新的转接会话');
           }
         }
         // 如果当前客服是原负责人
@@ -1810,7 +1849,7 @@ function handleWsMessage(data: any) {
           
           // 如果是当前选中的会话，清空选中
           if (currentConversation.value?.id === conversationId) {
-            message.info(`会话已转接给 ${extraData.toAgentName}`);
+            console.log('[Workbench] 会话已转接给', extraData.toAgentName);
             currentConversation.value = null;
           }
           
@@ -1838,16 +1877,19 @@ function handleWsMessage(data: any) {
     case 'mode_changed':
       // 回复模式切换通知 - 广播给所有客服
       {
-        const modeConv = conversations.value.find(c => c.id === data.conversationId);
+        const extraData = data.extra || data;
+        const modeConv = conversations.value.find(c => c.id === extraData.conversationId);
         if (modeConv) {
           // 更新回复模式
-          modeConv.replyMode = data.newMode;
+          modeConv.replyMode = extraData.newMode;
           
           // 如果是当前选中的会话，更新显示
-          if (currentConversation.value?.id === data.conversationId) {
-            currentConversation.value.replyMode = data.newMode;
-            currentReplyMode.value = data.newMode;
-            message.info(`回复模式已切换为: ${data.modeName}`);
+          if (currentConversation.value?.id === extraData.conversationId) {
+            currentConversation.value.replyMode = extraData.newMode;
+            currentReplyMode.value = extraData.newMode;
+            const modeName = extraData.modeName
+              || (extraData.newMode === 0 ? 'AI自动' : extraData.newMode === 1 ? '手动' : extraData.newMode === 2 ? 'AI辅助' : '未知');
+            console.log('[Workbench] 回复模式已切换为:', modeName);
           }
         }
       }
@@ -1870,9 +1912,9 @@ function handleWsMessage(data: any) {
           const agentName = statusData.agentName || '客服';
           // 只在上线/下线时提示，忙碌状态不提示
           if (newStatus === 1) {
-            message.success(`${agentName} 已上线`);
+            console.log('[Workbench] 客服已上线:', agentName);
           } else if (newStatus === 0) {
-            message.info(`${agentName} 已下线`);
+            console.log('[Workbench] 客服已下线:', agentName);
           }
         }
       }
@@ -1894,7 +1936,7 @@ function handleWsMessage(data: any) {
       if (currentConversation.value?.id === data.conversationId) {
         aiSuggestion.value = data.content;
         aiSuggestionLoading.value = false;
-        message.success('AI建议已生成');
+        console.log('[Workbench] AI建议已生成');
       }
       break;
     case 'ai_suggestion_error':
@@ -2467,15 +2509,20 @@ function scrollToBottom() {
   }
 }
 
+.visitor-avatar {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+}
+
 .msg-avatar {
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: 13px;
   flex-shrink: 0;
 }
 

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="user-chat-container">
     <!-- 头部 -->
     <div class="chat-header">
@@ -120,6 +120,14 @@ import { ref, onMounted, onUnmounted, nextTick, computed, watch } from 'vue';
 import { message } from 'ant-design-vue';
 import { DeleteOutlined, MessageOutlined, SendOutlined, BulbOutlined } from '@ant-design/icons-vue';
 import { defHttp } from '/@/utils/http/axios';
+
+const silentRequestOptions = { successMessageMode: 'none' as const };
+function httpGet<T = any>(config: any, options: any = {}) {
+  return defHttp.get<T>(config, { ...silentRequestOptions, ...options });
+}
+function httpPost<T = any>(config: any, options: any = {}) {
+  return defHttp.post<T>(config, { ...silentRequestOptions, ...options });
+}
 
 // 应用信息
 const appInfo = ref({
@@ -273,7 +281,7 @@ async function initConversation() {
     if (storedConvId) {
       // 检查会话是否已结束
       try {
-        const convRes = await defHttp.get({ url: `/cs/conversation/${storedConvId}` });
+        const convRes = await httpGet({ url: `/cs/conversation/${storedConvId}` });
         if (convRes && convRes.status === 2) {
           // 会话已结束，清除存储并创建新会话
           localStorage.removeItem(`cs_conversation_${userId.value}`);
@@ -288,7 +296,7 @@ async function initConversation() {
     }
 
     // 创建新会话（不再传appId，AI应用由客服工作台选择）
-    const res = await defHttp.post({
+    const res = await httpPost({
       url: '/cs/conversation/create',
       data: {
         userId: userId.value,
@@ -318,7 +326,7 @@ async function loadMessages() {
 
   loading.value = true;
   try {
-    const res = await defHttp.get({
+    const res = await httpGet({
       url: '/cs/message/list',
       params: {
         conversationId: conversationId.value,
@@ -538,14 +546,7 @@ function handleWsMessage(data: any) {
       if (replyMode.value === 1) {
         stopAiResponding();
       }
-      const modeText = replyMode.value === 1 ? '人工服务' : 'AI自动回复';
-      messages.value.push({
-        id: Date.now().toString(),
-        content: `已切换为${modeText}模式`,
-        senderType: 3,
-        createTime: new Date().toISOString(),
-      });
-      scrollToBottom();
+      console.log('[UserChat] 回复模式已切换为', replyMode.value === 1 ? '人工服务' : 'AI自动回复');
       break;
 
     case 'conversation_closed':
@@ -632,7 +633,7 @@ async function sendMessage() {
       }));
     } else {
       // 降级：通过HTTP发送
-      await defHttp.post({
+      await httpPost({
         url: '/cs/message/send',
         data: {
           conversationId: conversationId.value,
@@ -684,7 +685,7 @@ async function restartConversation() {
     // 重新连接WebSocket
     connectWebSocket();
     
-    message.success('已开始新对话');
+    console.log('[UserChat] 已开始新对话');
   } catch (e) {
     console.error('[UserChat] 重新开始对话失败', e);
     message.error('重新开始失败，请刷新页面');

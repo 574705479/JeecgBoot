@@ -611,13 +611,8 @@ public class CsMessageServiceImpl implements ICsMessageService {
                             // 推送给用户
                             sessionManager.sendToUser(userId, streamMsg);
                             
-                            // 推送给客服（如果有负责客服推送给负责人，否则广播给所有在线客服）
-                            if (oConvertUtils.isNotEmpty(ownerAgentId)) {
-                                sessionManager.sendToAgent(ownerAgentId, streamMsg);
-                            } else {
-                                // 待接入会话，广播给所有在线客服
-                                sessionManager.sendToAllAgents(streamMsg);
-                            }
+                            // 推送给客服（负责人 + 协作者 + 管理者；未分配则广播所有在线客服）
+                            sendAiStreamToAgents(conversationId, ownerAgentId, streamMsg);
                         }
                         
                         if (isComplete) {
@@ -646,13 +641,8 @@ public class CsMessageServiceImpl implements ICsMessageService {
                                         .build();
                                 
                                 sessionManager.sendToUser(userId, completeMsg);
-                                // 推送给客服
-                                if (oConvertUtils.isNotEmpty(ownerAgentId)) {
-                                    sessionManager.sendToAgent(ownerAgentId, completeMsg);
-                                } else {
-                                    // 待接入会话，广播给所有在线客服
-                                    sessionManager.sendToAllAgents(completeMsg);
-                                }
+                                // 推送给客服（负责人 + 协作者 + 管理者；未分配则广播所有在线客服）
+                                sendAiStreamToAgents(conversationId, ownerAgentId, completeMsg);
                             }
                             
                             // 取消"AI正在输入"状态
@@ -687,6 +677,35 @@ public class CsMessageServiceImpl implements ICsMessageService {
                 .build();
         
         sessionManager.sendToUser(userId, statusMsg);
+    }
+
+    /**
+     * 推送AI流式消息给相关客服（负责人 + 协作者 + 在线管理者）
+     * 未分配会话则广播给所有在线客服
+     */
+    private void sendAiStreamToAgents(String conversationId, String ownerAgentId, CsWebSocketMessage message) {
+        if (oConvertUtils.isEmpty(ownerAgentId)) {
+            // 待接入会话，广播给所有在线客服
+            sessionManager.sendToAllAgents(message);
+            return;
+        }
+        Set<String> agentIds = new HashSet<>();
+        agentIds.add(ownerAgentId);
+        List<CsCollaborator> activeCollaborators = collaboratorService.getCollaborators(conversationId);
+        if (activeCollaborators != null) {
+            for (CsCollaborator collab : activeCollaborators) {
+                agentIds.add(collab.getAgentId());
+            }
+        }
+        List<CsAgent> supervisors = agentService.getOnlineSupervisors();
+        if (supervisors != null) {
+            for (CsAgent supervisor : supervisors) {
+                agentIds.add(supervisor.getId());
+            }
+        }
+        for (String agentId : agentIds) {
+            sessionManager.sendToAgent(agentId, message);
+        }
     }
     
     /**
