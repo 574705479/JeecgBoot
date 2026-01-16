@@ -186,7 +186,8 @@ public class CsMessageController {
             @RequestBody Map<String, String> params) {
         
         String userMessage = params.get("userMessage");
-        String result = messageService.generateAiSuggestion(conversationId, userMessage);
+        String agentId = params.get("agentId");
+        String result = messageService.generateAiSuggestion(conversationId, userMessage, agentId);
         
         Map<String, Object> response = new HashMap<>();
         // 返回__STREAMING__表示正在流式生成，建议通过WebSocket推送

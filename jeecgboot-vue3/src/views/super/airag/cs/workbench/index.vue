@@ -263,11 +263,12 @@
                       :key="`${item.url}_${index}`"
                     >
                       <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview(msg, item)" />
-                      <video v-else :src="getAttachmentUrl(item)" @click="openVideoPreview(item)" />
+                      <video v-else :src="getAttachmentUrl(item)" controls playsinline />
                       <span v-if="item.type === 'video'" class="play-badge">▶</span>
                       <div
                         v-if="index === getMediaGridData(msg).items.length - 1 && getMediaGridData(msg).extraCount > 0"
                         class="media-more"
+                        @click.stop="openMediaViewer(msg)"
                       >
                         +{{ getMediaGridData(msg).extraCount }}
                       </div>
@@ -323,11 +324,12 @@
                       :key="`${item.url}_${index}`"
                     >
                       <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview(msg, item)" />
-                      <video v-else :src="getAttachmentUrl(item)" @click="openVideoPreview(item)" />
+                      <video v-else :src="getAttachmentUrl(item)" controls playsinline />
                       <span v-if="item.type === 'video'" class="play-badge">▶</span>
                       <div
                         v-if="index === getMediaGridData(msg).items.length - 1 && getMediaGridData(msg).extraCount > 0"
                         class="media-more"
+                        @click.stop="openMediaViewer(msg)"
                       >
                         +{{ getMediaGridData(msg).extraCount }}
                       </div>
@@ -370,7 +372,7 @@
       <div class="chat-input-area" v-if="currentConversation.status !== 2">
         <div class="input-toolbar">
           <a-tooltip title="表情">
-            <SmileOutlined class="toolbar-icon" />
+            <SmileOutlined class="toolbar-icon" @click="toggleEmojiPanel" />
           </a-tooltip>
           <a-upload
             :action="uploadUrl"
@@ -387,6 +389,16 @@
           <a-tooltip title="快捷回复">
             <ThunderboltOutlined class="toolbar-icon" @click="toggleQuickReply" />
           </a-tooltip>
+        </div>
+        <div class="emoji-panel" v-if="showEmojiPanel">
+          <span
+            v-for="emoji in emojiList"
+            :key="emoji"
+            class="emoji-item"
+            @click="appendEmoji(emoji)"
+          >
+            {{ emoji }}
+          </span>
         </div>
         <div class="quick-reply-panel" v-if="showQuickReply">
           <div class="quick-reply-header">
@@ -437,6 +449,7 @@
             :placeholder="inputPlaceholder"
             :auto-size="{ minRows: 1, maxRows: 4 }"
             @keydown="handleInputKeydown"
+            @paste="handlePasteUpload"
           />
         </div>
         <div class="input-footer">
@@ -451,6 +464,22 @@
       </div>
       <a-modal v-model:open="videoPreviewVisible" :footer="null" width="720px">
         <video v-if="videoPreviewUrl" :src="videoPreviewUrl" controls style="width: 100%;" />
+      </a-modal>
+      <a-modal v-model:open="mediaViewerVisible" :footer="null" width="820px" class="media-viewer-modal" title="媒体预览">
+        <div class="media-viewer-header">
+          <span>共 {{ mediaViewerList.length }} 项</span>
+          <span class="media-viewer-tip">点击图片可放大，视频可播放</span>
+        </div>
+        <div class="media-viewer-grid">
+          <div
+            class="media-viewer-item"
+            v-for="(item, index) in mediaViewerList"
+            :key="`${item.url}_${index}`"
+          >
+            <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreviewFromList(mediaViewerList, item)" />
+            <video v-else :src="getAttachmentUrl(item)" controls @click="openVideoPreview(item)" />
+          </div>
+        </div>
       </a-modal>
     </div>
 
@@ -737,6 +766,14 @@ const attachmentList = ref<any[]>([]);
 const uploadFileList = ref<any[]>([]);
 const videoPreviewVisible = ref(false);
 const videoPreviewUrl = ref('');
+const mediaViewerVisible = ref(false);
+const mediaViewerList = ref<any[]>([]);
+const showEmojiPanel = ref(false);
+const emojiList = [
+  '😀','😁','😂','🤣','😊','😍','😘','😗','😙','😚','😋','😜',
+  '🤪','😎','😭','😢','😤','😡','👍','👎','🙏','👏','💪','🔥',
+  '🎉','❤️','⭐','🌟','💯','✅'
+];
 const messagesRef = ref<HTMLElement | null>(null);
 const inputRef = ref();
 const messageAvatarSize = 32;
@@ -993,6 +1030,62 @@ function handleAttachmentChange(info: any) {
   }
 }
 
+async function uploadAttachmentFile(file: File) {
+  const isReturn = (fileInfo: any) => {
+    try {
+      if (fileInfo.code === 0) {
+        const url = fileInfo.message;
+        if (!url) return;
+        attachmentList.value.push({
+          name: file.name || 'image',
+          url,
+          size: file.size,
+          type: getAttachmentType(file),
+        });
+        uploadFileList.value.push(file);
+      } else {
+        message.error(fileInfo.message || `${file.name} 上传失败`);
+      }
+    } catch (error) {
+      console.error('上传处理失败', error);
+      message.error(`${file.name} 上传失败`);
+    }
+  };
+  await defHttp.uploadFile({ url: '/airag/chat/upload' }, { file }, { success: isReturn });
+}
+
+function handlePasteUpload(event: ClipboardEvent) {
+  const items = event.clipboardData?.items;
+  if (!items || items.length === 0) return;
+  let hasImage = false;
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (item.type && item.type.startsWith('image/')) {
+      const file = item.getAsFile();
+      if (file) {
+        hasImage = true;
+        const namedFile = file.name
+          ? file
+          : new File([file], `clipboard-${Date.now()}.png`, { type: file.type });
+        uploadAttachmentFile(namedFile);
+      }
+    }
+  }
+  if (hasImage) {
+    event.preventDefault();
+  }
+}
+
+function toggleEmojiPanel() {
+  showEmojiPanel.value = !showEmojiPanel.value;
+}
+
+function appendEmoji(emoji: string) {
+  inputMessage.value = `${inputMessage.value}${emoji}`;
+  showEmojiPanel.value = false;
+  nextTick(() => inputRef.value?.focus());
+}
+
 function removeAttachment(index: number) {
   attachmentList.value.splice(index, 1);
   uploadFileList.value.splice(index, 1);
@@ -1035,23 +1128,29 @@ function getMediaGridData(msg: any) {
   return { items, extraCount, total: media.length };
 }
 
-function openImagePreview(msg: any, _item: any) {
+function openImagePreview(msg: any, item: any) {
   const images = getMessageAttachments(msg).filter(att => att.type === 'image');
   const imageList = images.map(att => getAttachmentUrl(att));
   if (!imageList.length) return;
+  const targetUrl = getAttachmentUrl(item);
+  const index = imageList.findIndex(url => url === targetUrl);
   createImgPreview({
     imageList,
+    index: index >= 0 ? index : 0,
     defaultWidth: 700,
     rememberState: true,
   });
 }
 
-function openImagePreviewFromList(list: any[], _item: any) {
+function openImagePreviewFromList(list: any[], item: any) {
   const images = (list || []).filter(att => att.type === 'image');
   const imageList = images.map(att => getAttachmentUrl(att));
   if (!imageList.length) return;
+  const targetUrl = getAttachmentUrl(item);
+  const index = imageList.findIndex(url => url === targetUrl);
   createImgPreview({
     imageList,
+    index: index >= 0 ? index : 0,
     defaultWidth: 700,
     rememberState: true,
   });
@@ -1067,6 +1166,11 @@ function openFilePreview(item: any) {
   if (url) {
     window.open(url, '_blank');
   }
+}
+
+function openMediaViewer(msg: any) {
+  mediaViewerList.value = getMediaAttachments(msg);
+  mediaViewerVisible.value = true;
 }
 
 function buildMessagePreview(content: string, attachments: any[]) {
@@ -1944,7 +2048,7 @@ async function requestAiSuggestion(userMessage: string) {
   try {
     const res = await httpPost({
       url: `/cs/message/ai-generate/${currentConversation.value.id}`,
-      data: { userMessage }
+      data: { userMessage, agentId: agentId.value }
     });
     
     if (res?.streaming) {
@@ -2485,6 +2589,11 @@ const md = new MarkdownIt({
 // 渲染消息内容（普通消息 - 简单换行转换）
 function renderMessage(content: string) {
   if (!content) return '';
+  const hasHtml = /<([a-z][\s\S]*?)>/i.test(content);
+  const hasMarkdown = /!\[[^\]]*]\([^)]*\)|\*\*[^*]+\*\*|```|^\s*#/m.test(content);
+  if (hasHtml || hasMarkdown) {
+    return md.render(content);
+  }
   // 简单的换行转换，与访客端相同
   return content
     .replace(/&/g, '&amp;')
@@ -3008,8 +3117,43 @@ function scrollToBottom() {
   
   .msg-text {
     // 简单的文本显示，支持换行
-    white-space: pre-wrap;
+    font-size: 14px;
+    line-height: 1.6;
     word-wrap: break-word;
+
+    :deep(p) {
+      margin: 0 0 8px;
+      &:last-child {
+        margin-bottom: 0;
+      }
+    }
+
+    :deep(pre) {
+      background: #f0f0f0;
+      padding: 8px 12px;
+      border-radius: 8px;
+      overflow-x: auto;
+    }
+
+    :deep(code) {
+      background: #e8e8e8;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+
+    :deep(ul), :deep(ol) {
+      padding-left: 20px;
+      margin: 8px 0;
+    }
+
+    :deep(img) {
+      max-width: 100%;
+      height: auto;
+      border-radius: 8px;
+      display: block;
+      margin: 4px 0;
+    }
   }
 }
 
@@ -3059,86 +3203,41 @@ function scrollToBottom() {
     font-size: 14px;
     max-height: 300px;
     overflow-y: auto;
-    white-space: pre-wrap;
     word-wrap: break-word;
     line-height: 1.6;
-    
-    // ★ Markdown渲染样式
-    :deep(h1), :deep(h2), :deep(h3), :deep(h4), :deep(h5), :deep(h6) {
-      margin: 16px 0 8px;
-      font-weight: 600;
-      line-height: 1.4;
-      &:first-child {
-        margin-top: 0;
-      }
-    }
-    
-    :deep(h1) { font-size: 1.6em; }
-    :deep(h2) { font-size: 1.4em; }
-    :deep(h3) { font-size: 1.2em; }
-    
+
     :deep(p) {
-      margin: 8px 0;
-      &:first-child {
-        margin-top: 0;
-      }
+      margin: 0 0 8px;
       &:last-child {
         margin-bottom: 0;
       }
     }
-    
+
     :deep(ul), :deep(ol) {
+      padding-left: 20px;
       margin: 8px 0;
-      padding-left: 24px;
     }
-    
-    :deep(li) {
-      margin: 4px 0;
-    }
-    
-    :deep(code) {
-      background: #f5f5f5;
-      padding: 2px 6px;
-      border-radius: 3px;
-      font-family: 'Courier New', Consolas, monospace;
-      font-size: 0.9em;
-    }
-    
+
     :deep(pre) {
-      background: #f5f5f5;
-      padding: 12px;
-      border-radius: 4px;
+      background: #f0f0f0;
+      padding: 8px 12px;
+      border-radius: 8px;
       overflow-x: auto;
-      margin: 8px 0;
-      
-      code {
-        background: none;
-        padding: 0;
-      }
     }
-    
-    :deep(blockquote) {
-      border-left: 3px solid #d3adf7;
-      padding-left: 12px;
-      margin: 8px 0;
-      color: #666;
+
+    :deep(code) {
+      background: #e8e8e8;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 13px;
     }
-    
-    :deep(strong) {
-      font-weight: 600;
-      color: #722ed1;
-    }
-    
-    :deep(em) {
-      font-style: italic;
-    }
-    
-    :deep(a) {
-      color: #1890ff;
-      text-decoration: none;
-      &:hover {
-        text-decoration: underline;
-      }
+
+    :deep(img) {
+      max-width: 100%;
+      height: auto;
+      border-radius: 8px;
+      display: block;
+      margin: 4px 0;
     }
   }
   
@@ -3289,6 +3388,23 @@ function scrollToBottom() {
       }
     }
   }
+
+  .emoji-panel {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px;
+    background: #fff;
+    border: 1px solid #f0f0f0;
+    border-radius: 6px;
+    margin-bottom: 8px;
+
+    .emoji-item {
+      font-size: 18px;
+      cursor: pointer;
+      line-height: 1;
+    }
+  }
 }
 
 .msg-attachments {
@@ -3310,7 +3426,7 @@ function scrollToBottom() {
 
 .msg-media-grid {
   display: grid;
-  gap: 6px;
+  gap: 4px;
   margin-top: 6px;
 
   .media-item {
@@ -3355,7 +3471,7 @@ function scrollToBottom() {
 .media-grid--1 {
   grid-template-columns: 1fr;
   .media-item {
-    aspect-ratio: 4 / 3;
+    aspect-ratio: 3 / 2;
   }
 }
 
@@ -3384,6 +3500,7 @@ function scrollToBottom() {
   }
 }
 
+
 .msg-file-list {
   margin-top: 6px;
   display: flex;
@@ -3397,6 +3514,44 @@ function scrollToBottom() {
     cursor: pointer;
     font-size: 12px;
   }
+}
+
+.media-viewer-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.media-viewer-item {
+  border-radius: 6px;
+  overflow: hidden;
+  background: #f5f5f5;
+  border: 1px solid #f0f0f0;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  img,
+  video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    cursor: pointer;
+  }
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+  }
+}
+
+.media-viewer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  color: #666;
+  font-size: 13px;
+}
+
+.media-viewer-tip {
+  color: #999;
 }
 
 .chat-ended {

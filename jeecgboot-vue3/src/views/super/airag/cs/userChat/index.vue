@@ -56,6 +56,7 @@
                   <div
                     v-if="index === getMediaGridData(msg).items.length - 1 && getMediaGridData(msg).extraCount > 0"
                     class="media-more"
+                    @click.stop="openMediaViewer(msg)"
                   >
                     +{{ getMediaGridData(msg).extraCount }}
                   </div>
@@ -99,6 +100,7 @@
                   <div
                     v-if="index === getMediaGridData(msg).items.length - 1 && getMediaGridData(msg).extraCount > 0"
                     class="media-more"
+                    @click.stop="openMediaViewer(msg)"
                   >
                     +{{ getMediaGridData(msg).extraCount }}
                   </div>
@@ -166,17 +168,34 @@
       </a-button>
     </div>
     <!-- 会话已结束时显示重新开始按钮 -->
-    <div class="chat-closed" v-else>
+    <div class="chat-closed" v-if="conversationClosed">
       <span>会话已结束</span>
       <a-button type="primary" @click="restartConversation">
         重新开始对话
       </a-button>
     </div>
+    <a-modal v-model:open="mediaViewerVisible" :footer="null" width="820px" class="media-viewer-modal" title="媒体预览">
+      <div class="media-viewer-header">
+        <span>共 {{ mediaViewerList.length }} 项</span>
+        <span class="media-viewer-tip">点击图片可放大，视频可播放</span>
+      </div>
+      <div class="media-viewer-grid">
+        <div
+          class="media-viewer-item"
+          v-for="(item, index) in mediaViewerList"
+          :key="`${item.url}_${index}`"
+        >
+          <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview({ extra: { attachments: mediaViewerList } }, item)" />
+          <video v-else :src="getAttachmentUrl(item)" controls @click="openFilePreview(item)" />
+        </div>
+      </div>
+    </a-modal>
   </div>
 </template>
 
 <script setup lang="ts" name="UserChatPage">
 import { ref, onMounted, onUnmounted, nextTick, computed, watch } from 'vue';
+import MarkdownIt from 'markdown-it';
 import { message } from 'ant-design-vue';
 import { DeleteOutlined, MessageOutlined, SendOutlined, BulbOutlined } from '@ant-design/icons-vue';
 import { defHttp } from '/@/utils/http/axios';
@@ -293,6 +312,9 @@ onMounted(async () => {
   // 生成或获取用户ID
   initUserId();
 
+  // 加载访客AI应用信息（头像/开场白/预设问题）
+  await loadVisitorAppInfo();
+
   // 获取或创建会话
   await initConversation();
 
@@ -379,6 +401,29 @@ async function initConversation() {
     console.error('初始化会话失败', e);
     // 使用临时会话ID
     conversationId.value = `temp_${userId.value}_${Date.now()}`;
+  }
+}
+
+// 加载访客AI应用信息
+async function loadVisitorAppInfo() {
+  try {
+    const res = await httpGet({ url: '/cs/agent/global/visitor-app' });
+    const appId = res?.appId || res?.result?.appId;
+    if (!appId) return;
+
+    const appRes = await httpGet({ url: '/airag/app/queryById', params: { id: appId } });
+    const app = appRes?.result || appRes;
+    if (!app) return;
+
+    appInfo.value = {
+      id: app.id || '',
+      name: app.name || '在线客服',
+      avatar: app.avatar || '',
+      prologue: app.prologue || '',
+      presetQuestion: app.presetQuestion || '',
+    };
+  } catch (e) {
+    console.warn('[UserChat] 加载访客AI应用信息失败', e);
   }
 }
 
@@ -742,10 +787,12 @@ async function restartConversation() {
     messages.value = [];
     conversationClosed.value = false;
     conversationId.value = '';
-    
     // 创建新会话
     await initConversation();
-    
+
+    // 加载历史消息并追加开场白（若需要）
+    await loadMessages();
+
     // 重新连接WebSocket
     connectWebSocket();
     
@@ -899,17 +946,38 @@ function openImagePreview(msg: any, item: any) {
   const images = getMessageAttachments(msg).filter(att => att.type === 'image');
   const imageList = images.map(att => getAttachmentUrl(att));
   if (!imageList.length) return;
+  const targetUrl = getAttachmentUrl(item);
+  const index = imageList.findIndex(url => url === targetUrl);
   createImgPreview({
     imageList,
+    index: index >= 0 ? index : 0,
     defaultWidth: 700,
     rememberState: true,
   });
 }
 
+const mediaViewerVisible = ref(false);
+const mediaViewerList = ref<any[]>([]);
+const md = new MarkdownIt({
+  html: true,
+  linkify: true,
+  typographer: true,
+});
+
+function openMediaViewer(msg: any) {
+  mediaViewerList.value = getMediaAttachments(msg);
+  mediaViewerVisible.value = true;
+}
+
 // 渲染消息内容（简单HTML转换）
 function renderMessage(content: string) {
   if (!content) return '';
-  // 简单的换行转换
+  const hasHtml = /<([a-z][\s\S]*?)>/i.test(content);
+  const hasMarkdown = /!\[[^\]]*]\([^)]*\)|\*\*[^*]+\*\*|```|^\s*#/m.test(content);
+  if (hasHtml || hasMarkdown) {
+    return md.render(content);
+  }
+  // 纯文本：转义并保留换行
   return content
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -1124,6 +1192,14 @@ watch(messages, () => {
       overflow-x: auto;
     }
 
+    :deep(img) {
+      max-width: 100%;
+      height: auto;
+      border-radius: 8px;
+      display: block;
+      margin: 4px 0;
+    }
+
     :deep(code) {
       background: #e8e8e8;
       padding: 2px 6px;
@@ -1147,7 +1223,7 @@ watch(messages, () => {
 .message-media-grid {
   margin-top: 6px;
   display: grid;
-  gap: 6px;
+  gap: 4px;
 
   .media-item {
     border-radius: 6px;
@@ -1178,7 +1254,7 @@ watch(messages, () => {
 .media-grid--1 {
   grid-template-columns: 1fr;
   .media-item {
-    aspect-ratio: 4 / 3;
+    aspect-ratio: 3 / 2;
   }
 }
 
@@ -1207,6 +1283,7 @@ watch(messages, () => {
   }
 }
 
+
 .message-file-list {
   margin-top: 6px;
   display: flex;
@@ -1220,6 +1297,44 @@ watch(messages, () => {
     font-size: 12px;
     cursor: pointer;
   }
+}
+
+.media-viewer-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.media-viewer-item {
+  border-radius: 6px;
+  overflow: hidden;
+  background: #f5f5f5;
+  border: 1px solid #f0f0f0;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  img,
+  video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    cursor: pointer;
+  }
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+  }
+}
+
+.media-viewer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  color: #666;
+  font-size: 13px;
+}
+
+.media-viewer-tip {
+  color: #999;
 }
 
 .typing-indicator {

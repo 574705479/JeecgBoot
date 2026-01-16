@@ -234,6 +234,38 @@ public class CsMessageServiceImpl implements ICsMessageService {
     }
 
     @Override
+    public CsMessage sendVisitorPrologue(String conversationId) {
+        if (oConvertUtils.isEmpty(conversationId)) {
+            return null;
+        }
+
+        String appId = redisTemplate.opsForValue().get(VISITOR_APP_REDIS_KEY);
+        if (oConvertUtils.isEmpty(appId)) {
+            return null;
+        }
+
+        AiragApp app = airagAppMapper.getByIdIgnoreTenant(appId);
+        if (app == null || oConvertUtils.isEmpty(app.getPrologue())) {
+            return null;
+        }
+
+        String displayName = oConvertUtils.isNotEmpty(app.getName()) ? app.getName() : "智能客服";
+        CsMessage aiMessage = CsMessage.createAiMessage(conversationId, displayName, app.getPrologue());
+
+        saveToMongo(aiMessage);
+        conversationService.updateLastMessage(conversationId, app.getPrologue());
+
+        pushToUser(conversationId, aiMessage);
+
+        CsConversation conversation = conversationService.getConversation(conversationId);
+        if (conversation != null) {
+            pushToAgents(conversation, aiMessage);
+        }
+
+        return aiMessage;
+    }
+
+    @Override
     public CsMessage sendMessage(CsMessage message) {
         // 保存到MongoDB
         saveToMongo(message);
@@ -248,6 +280,11 @@ public class CsMessageServiceImpl implements ICsMessageService {
 
     @Override
     public String generateAiSuggestion(String conversationId, String userMessage) {
+        return generateAiSuggestion(conversationId, userMessage, null);
+    }
+
+    @Override
+    public String generateAiSuggestion(String conversationId, String userMessage, String agentId) {
         try {
             log.info("[CS-Message] 开始生成流式AI建议: conversationId={}", conversationId);
             
@@ -258,7 +295,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
             }
             
             // 异步调用流式AI服务，通过WebSocket返回
-            generateAiSuggestionStream(conversation, userMessage);
+            generateAiSuggestionStream(conversation, userMessage, agentId);
             
             // 返回一个标识，表示正在生成
             return "__STREAMING__";
@@ -272,12 +309,13 @@ public class CsMessageServiceImpl implements ICsMessageService {
      * 流式生成AI建议，通过WebSocket推送给客服
      */
     @Async
-    public void generateAiSuggestionStream(CsConversation conversation, String userMessage) {
+    public void generateAiSuggestionStream(CsConversation conversation, String userMessage, String fallbackAgentId) {
         String conversationId = conversation.getId();
         String ownerAgentId = conversation.getOwnerAgentId();
-        
-        if (ownerAgentId == null) {
-            log.warn("[CS-Message] 会话没有分配客服，无法推送AI建议");
+        String targetAgentId = oConvertUtils.isNotEmpty(ownerAgentId) ? ownerAgentId : fallbackAgentId;
+
+        if (oConvertUtils.isEmpty(targetAgentId)) {
+            log.warn("[CS-Message] 会话没有分配客服且未指定请求客服，无法推送AI建议");
             return;
         }
         
@@ -300,7 +338,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
                                     .extra(Map.of("isComplete", false))
                                     .build();
                             
-                            sessionManager.sendToAgent(ownerAgentId, streamMsg);
+                            sessionManager.sendToAgent(targetAgentId, streamMsg);
                         }
                         
                         if (isComplete) {
@@ -320,7 +358,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
                                     .content(suggestion)
                                     .build();
                             
-                            sessionManager.sendToAgent(ownerAgentId, completeMsg);
+                            sessionManager.sendToAgent(targetAgentId, completeMsg);
                         }
                     } catch (Exception e) {
                         log.error("[CS-Message] 处理AI建议流式token失败", e);
@@ -338,7 +376,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
                     .error("AI建议生成失败: " + e.getMessage())
                     .build();
             
-            sessionManager.sendToAgent(ownerAgentId, errorMsg);
+            sessionManager.sendToAgent(targetAgentId, errorMsg);
         }
     }
 

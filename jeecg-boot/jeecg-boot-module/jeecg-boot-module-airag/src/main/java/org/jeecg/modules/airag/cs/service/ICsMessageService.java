@@ -66,6 +66,14 @@ public interface ICsMessageService {
     CsMessage sendSystemMessage(String conversationId, String content, boolean persist);
 
     /**
+     * 发送访客端开场白（AI消息，来自全局访客AI应用）
+     *
+     * @param conversationId 会话ID
+     * @return 开场白消息
+     */
+    CsMessage sendVisitorPrologue(String conversationId);
+
+    /**
      * 发送消息（通用）
      * 
      * @param message 消息实体
@@ -83,6 +91,16 @@ public interface ICsMessageService {
      * @return AI建议内容
      */
     String generateAiSuggestion(String conversationId, String userMessage);
+
+    /**
+     * 生成AI建议回复 (AI辅助模式) - 指定请求客服
+     *
+     * @param conversationId 会话ID
+     * @param userMessage    用户消息
+     * @param agentId        请求客服ID（会话未分配时用于推送）
+     * @return AI建议内容
+     */
+    String generateAiSuggestion(String conversationId, String userMessage, String agentId);
 
     /**
      * 确认并发送AI建议

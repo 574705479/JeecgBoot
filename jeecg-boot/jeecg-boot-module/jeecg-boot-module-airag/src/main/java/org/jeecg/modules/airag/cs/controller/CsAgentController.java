@@ -200,6 +200,7 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
      * 获取访客AI应用（全局配置）
      */
     @Operation(summary = "获取访客AI应用（全局）")
+    @org.jeecg.config.shiro.IgnoreAuth
     @GetMapping("/global/visitor-app")
     public Result<java.util.Map<String, String>> getGlobalVisitorApp() {
         String appId = redisTemplate.opsForValue().get(VISITOR_APP_REDIS_KEY);

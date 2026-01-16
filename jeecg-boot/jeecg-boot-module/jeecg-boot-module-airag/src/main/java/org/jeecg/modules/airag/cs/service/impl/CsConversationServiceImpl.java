@@ -74,6 +74,13 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         
         // ★ 广播新会话给所有在线客服
         broadcastNewConversation(conversation);
+
+        // 发送访客开场白（作为第一条消息）
+        try {
+            messageService.sendVisitorPrologue(conversation.getId());
+        } catch (Exception e) {
+            log.warn("[CS-Conversation] 发送开场白失败: {}", e.getMessage());
+        }
         
         return conversation;
     }
@@ -133,6 +140,13 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             
             // ★ 广播新会话给所有在线客服
             broadcastNewConversation(conversation);
+
+            // 发送访客开场白（作为第一条消息）
+            try {
+                messageService.sendVisitorPrologue(conversation.getId());
+            } catch (Exception e) {
+                log.warn("[CS-Conversation] 发送开场白失败: {}", e.getMessage());
+            }
             
             return conversation;
         }
