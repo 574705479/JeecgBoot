@@ -43,7 +43,8 @@ public interface ICsMessageService {
      * @param content        消息内容
      * @return 客服消息
      */
-    CsMessage sendAgentMessage(String conversationId, String agentId, String agentName, String content);
+    CsMessage sendAgentMessage(String conversationId, String agentId, String agentName, String content,
+                               Integer msgType, String extra);
 
     /**
      * 发送系统消息

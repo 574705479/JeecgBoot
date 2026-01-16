@@ -139,7 +139,8 @@ public class CsMessageServiceImpl implements ICsMessageService {
     }
 
     @Override
-    public CsMessage sendAgentMessage(String conversationId, String agentId, String agentName, String content) {
+    public CsMessage sendAgentMessage(String conversationId, String agentId, String agentName, String content,
+                                      Integer msgType, String extra) {
         log.info("[CS-Message] 客服发送消息: conversationId={}, agentId={}", conversationId, agentId);
         
         CsConversation conversation = conversationService.getConversation(conversationId);
@@ -162,27 +163,34 @@ public class CsMessageServiceImpl implements ICsMessageService {
         
         // 创建客服消息（用户看到的显示为"客服"）
         CsMessage agentMessage = CsMessage.createAgentMessage(conversationId, agentId, agentName, content);
+        if (msgType != null) {
+            agentMessage.setMsgType(msgType);
+        }
+        if (oConvertUtils.isNotEmpty(extra)) {
+            agentMessage.setExtra(extra);
+        }
         agentMessage.setSenderName(agentName); // 显示实际客服名称
         
         // 保存到MongoDB
         saveToMongo(agentMessage);
         
         // 更新会话最后消息
-        conversationService.updateLastMessage(conversationId, content);
+        String lastMessage = buildMessagePreview(content, msgType, extra);
+        conversationService.updateLastMessage(conversationId, lastMessage);
         
         // 推送给用户
         boolean delivered = pushToUser(conversationId, agentMessage);
         if (!delivered) {
             String userId = conversation != null ? conversation.getUserId() : null;
-            Map<String, Object> extra = new HashMap<>();
-            extra.put("reason", "USER_OFFLINE");
-            extra.put("userId", userId);
-            extra.put("messageId", agentMessage.getId());
+            Map<String, Object> notifyExtra = new HashMap<>();
+            notifyExtra.put("reason", "USER_OFFLINE");
+            notifyExtra.put("userId", userId);
+            notifyExtra.put("messageId", agentMessage.getId());
             CsWebSocketMessage deliveryFailed = CsWebSocketMessage.builder()
                     .type("delivery_failed")
                     .conversationId(conversationId)
                     .content("用户不在线，消息未送达")
-                    .extra(extra)
+                    .extra(notifyExtra)
                     .timestamp(agentMessage.getCreateTime())
                     .build();
             sessionManager.sendToAgent(agentId, deliveryFailed);
@@ -394,6 +402,10 @@ public class CsMessageServiceImpl implements ICsMessageService {
                 csMsg.setId(msg.getId());
                 csMsg.setConversationId(conversationId);
                 csMsg.setContent(msg.getContent());
+                csMsg.setMsgType(msg.getMsgType());
+                if (msg.getExtra() != null && !msg.getExtra().isEmpty()) {
+                    csMsg.setExtra(JSONObject.toJSONString(msg.getExtra()));
+                }
                 csMsg.setSenderType(msg.getSenderType() != null ? msg.getSenderType() : CsMessage.SENDER_USER);
                 csMsg.setSenderId(msg.getSenderId());
                 csMsg.setSenderName(msg.getSenderName());
@@ -449,6 +461,13 @@ public class CsMessageServiceImpl implements ICsMessageService {
             chatMessage.setCreateTime(message.getCreateTime() != null ? message.getCreateTime() : new Date());
             chatMessage.setSenderType(message.getSenderType());
             chatMessage.setMsgType(message.getMsgType() != null ? message.getMsgType() : ChatMessage.MSG_TYPE_TEXT);
+            if (oConvertUtils.isNotEmpty(message.getExtra())) {
+                try {
+                    chatMessage.setExtra(JSONObject.parseObject(message.getExtra()));
+                } catch (Exception e) {
+                    log.warn("[CS-Message] 解析extra失败，已忽略: {}", e.getMessage());
+                }
+            }
             
             chatMessageService.saveMessage(chatMessage);
         } catch (Exception e) {
@@ -456,18 +475,85 @@ public class CsMessageServiceImpl implements ICsMessageService {
         }
     }
 
+    private String buildMessagePreview(String content, Integer msgType, String extra) {
+        if (oConvertUtils.isNotEmpty(content)) {
+            return content;
+        }
+        if (msgType == null) {
+            return "";
+        }
+        if (msgType == CsMessage.MSG_TYPE_IMAGE) {
+            return "[图片]";
+        }
+        if (msgType == CsMessage.MSG_TYPE_VIDEO) {
+            return "[视频]";
+        }
+        if (msgType == CsMessage.MSG_TYPE_FILE) {
+            return "[文件]";
+        }
+        if (msgType == CsMessage.MSG_TYPE_VOICE) {
+            return "[语音]";
+        }
+        if (msgType == CsMessage.MSG_TYPE_CARD) {
+            return "[卡片]";
+        }
+        if (msgType == CsMessage.MSG_TYPE_RICH_TEXT && oConvertUtils.isNotEmpty(extra)) {
+            try {
+                JSONObject obj = JSONObject.parseObject(extra);
+                if (obj != null && obj.containsKey("attachments")) {
+                    com.alibaba.fastjson.JSONArray list = obj.getJSONArray("attachments");
+                    if (list != null && !list.isEmpty()) {
+                        java.util.Set<String> labels = new java.util.LinkedHashSet<>();
+                        for (int i = 0; i < list.size(); i++) {
+                            JSONObject item = list.getJSONObject(i);
+                            String type = item != null ? item.getString("type") : null;
+                            if ("image".equals(type)) {
+                                labels.add("图片");
+                            } else if ("video".equals(type)) {
+                                labels.add("视频");
+                            } else if ("file".equals(type)) {
+                                labels.add("文件");
+                            }
+                        }
+                        if (!labels.isEmpty()) {
+                            return "[" + String.join("/", labels) + "]";
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.debug("[CS-Message] 解析预览失败: {}", e.getMessage());
+            }
+        }
+        return "[消息]";
+    }
+
+    private Map<String, Object> parseExtraMap(String extra) {
+        if (oConvertUtils.isEmpty(extra)) {
+            return null;
+        }
+        try {
+            return JSONObject.parseObject(extra);
+        } catch (Exception e) {
+            log.debug("[CS-Message] 解析extra失败: {}", e.getMessage());
+            return null;
+        }
+    }
+
     /**
      * 推送消息给用户
      */
     private boolean pushToUser(String conversationId, CsMessage message) {
+        Map<String, Object> extraMap = parseExtraMap(message.getExtra());
         CsWebSocketMessage wsMessage = CsWebSocketMessage.builder()
                 .type("message")
                 .conversationId(conversationId)
                 .messageId(message.getId())
                 .content(message.getContent())
+                .msgType(message.getMsgType())
                 .senderId(message.getSenderId())
                 .senderName(message.getSenderName())
                 .senderType(message.getSenderType())
+                .extra(extraMap)
                 .timestamp(message.getCreateTime())
                 .build();
         
@@ -485,14 +571,17 @@ public class CsMessageServiceImpl implements ICsMessageService {
      * 2. 会话已分配 -> 推送给主负责人 + 所有活跃协作者 + 所有在线管理者（监控功能）
      */
     private void pushToAgents(CsConversation conversation, CsMessage message) {
+        Map<String, Object> extraMap = parseExtraMap(message.getExtra());
         CsWebSocketMessage wsMessage = CsWebSocketMessage.builder()
                 .type("message")
                 .conversationId(conversation.getId())
                 .messageId(message.getId())
                 .content(message.getContent())
+                .msgType(message.getMsgType())
                 .senderId(message.getSenderId())
                 .senderName(message.getSenderName())
                 .senderType(message.getSenderType())
+                .extra(extraMap)
                 .timestamp(message.getCreateTime())
                 .build();
         
@@ -541,15 +630,17 @@ public class CsMessageServiceImpl implements ICsMessageService {
         if (conversation == null) {
             return;
         }
-        
+        Map<String, Object> extraMap = parseExtraMap(message.getExtra());
         CsWebSocketMessage wsMessage = CsWebSocketMessage.builder()
                 .type("message")
                 .conversationId(conversationId)
                 .messageId(message.getId())
                 .content(message.getContent())
+                .msgType(message.getMsgType())
                 .senderId(message.getSenderId())
                 .senderName(message.getSenderName())
                 .senderType(message.getSenderType())
+                .extra(extraMap)
                 .timestamp(message.getCreateTime())
                 .build();
         

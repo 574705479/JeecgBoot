@@ -200,8 +200,10 @@ public class CsWebSocketHandler implements WebSocketHandler {
         String conversationId = json.getString("conversationId");
         String content = json.getString("content");
         String userName = json.getString("userName");
+        Integer msgType = json.getInteger("msgType");
+        String extra = json.getString("extra");
 
-        if (oConvertUtils.isEmpty(conversationId) || oConvertUtils.isEmpty(content)) {
+        if (oConvertUtils.isEmpty(conversationId) || (oConvertUtils.isEmpty(content) && oConvertUtils.isEmpty(extra))) {
             return;
         }
 
@@ -212,7 +214,7 @@ public class CsWebSocketHandler implements WebSocketHandler {
             // 客服发送消息
             var agent = agentService.getById(userId);
             String agentName = agent != null ? agent.getNickname() : "客服";
-            messageService.sendAgentMessage(conversationId, userId, agentName, content);
+            messageService.sendAgentMessage(conversationId, userId, agentName, content, msgType, extra);
         }
     }
 

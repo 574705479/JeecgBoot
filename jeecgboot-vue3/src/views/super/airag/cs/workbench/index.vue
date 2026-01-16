@@ -251,7 +251,38 @@
                   <span class="sender-name">{{ getVisitorDisplayName(msg) }}</span>
                 </div>
                 <div class="msg-bubble user-bubble">
-                  <div class="msg-text" v-html="renderMessage(msg.content)"></div>
+                  <div v-if="msg.content" class="msg-text" v-html="renderMessage(msg.content)"></div>
+                  <div
+                    v-if="getMediaGridData(msg).items.length"
+                    class="msg-media-grid"
+                    :class="`media-grid--${Math.min(getMediaGridData(msg).total, 4)}`"
+                  >
+                    <div
+                      class="media-item"
+                      v-for="(item, index) in getMediaGridData(msg).items"
+                      :key="`${item.url}_${index}`"
+                    >
+                      <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview(msg, item)" />
+                      <video v-else :src="getAttachmentUrl(item)" @click="openVideoPreview(item)" />
+                      <span v-if="item.type === 'video'" class="play-badge">▶</span>
+                      <div
+                        v-if="index === getMediaGridData(msg).items.length - 1 && getMediaGridData(msg).extraCount > 0"
+                        class="media-more"
+                      >
+                        +{{ getMediaGridData(msg).extraCount }}
+                      </div>
+                    </div>
+                  </div>
+                  <div v-if="getFileAttachments(msg).length" class="msg-file-list">
+                    <div
+                      class="file-item"
+                      v-for="(item, index) in getFileAttachments(msg)"
+                      :key="`${item.url}_${index}`"
+                      @click="openFilePreview(item)"
+                    >
+                      <span class="file-name">{{ item.name || item.url }}</span>
+                    </div>
+                  </div>
                 </div>
                 <div class="msg-meta">
                   {{ formatMessageTime(msg.createTime) }}
@@ -280,7 +311,38 @@
                   </a-avatar>
                 </div>
                 <div class="msg-bubble agent-bubble" :class="{ 'ai-bubble': msg.senderType === 1 || msg.isAiGenerated }">
-                  <div class="msg-text" v-html="renderMessage(msg.content)"></div>
+                  <div v-if="msg.content" class="msg-text" v-html="renderMessage(msg.content)"></div>
+                  <div
+                    v-if="getMediaGridData(msg).items.length"
+                    class="msg-media-grid"
+                    :class="`media-grid--${Math.min(getMediaGridData(msg).total, 4)}`"
+                  >
+                    <div
+                      class="media-item"
+                      v-for="(item, index) in getMediaGridData(msg).items"
+                      :key="`${item.url}_${index}`"
+                    >
+                      <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview(msg, item)" />
+                      <video v-else :src="getAttachmentUrl(item)" @click="openVideoPreview(item)" />
+                      <span v-if="item.type === 'video'" class="play-badge">▶</span>
+                      <div
+                        v-if="index === getMediaGridData(msg).items.length - 1 && getMediaGridData(msg).extraCount > 0"
+                        class="media-more"
+                      >
+                        +{{ getMediaGridData(msg).extraCount }}
+                      </div>
+                    </div>
+                  </div>
+                  <div v-if="getFileAttachments(msg).length" class="msg-file-list">
+                    <div
+                      class="file-item"
+                      v-for="(item, index) in getFileAttachments(msg)"
+                      :key="`${item.url}_${index}`"
+                      @click="openFilePreview(item)"
+                    >
+                      <span class="file-name">{{ item.name || item.url }}</span>
+                    </div>
+                  </div>
                 </div>
                 <div class="msg-meta">{{ formatMessageTime(msg.createTime) }}</div>
               </div>
@@ -310,6 +372,18 @@
           <a-tooltip title="表情">
             <SmileOutlined class="toolbar-icon" />
           </a-tooltip>
+          <a-upload
+            :action="uploadUrl"
+            :headers="uploadHeaders"
+            :showUploadList="false"
+            :multiple="true"
+            :beforeUpload="beforeUploadAttachment"
+            @change="handleAttachmentChange"
+          >
+            <a-tooltip title="上传附件">
+              <PaperClipOutlined class="toolbar-icon" />
+            </a-tooltip>
+          </a-upload>
           <a-tooltip title="快捷回复">
             <ThunderboltOutlined class="toolbar-icon" @click="toggleQuickReply" />
           </a-tooltip>
@@ -342,6 +416,20 @@
             <a-empty v-else description="暂无快捷回复" />
           </a-spin>
         </div>
+        <div class="attachment-preview" v-if="attachmentList.length">
+          <div
+            class="attachment-item"
+            v-for="(item, index) in attachmentList"
+            :key="`${item.url}_${index}`"
+          >
+            <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreviewFromList(attachmentList, item)" />
+            <video v-else-if="item.type === 'video'" :src="getAttachmentUrl(item)" @click="openVideoPreview(item)" />
+            <div v-else class="attachment-file">
+              <span class="file-name" @click="openFilePreview(item)">{{ item.name }}</span>
+            </div>
+            <CloseOutlined class="remove-attachment" @click="removeAttachment(index)" />
+          </div>
+        </div>
         <div class="input-wrapper">
           <a-textarea
             ref="inputRef"
@@ -353,7 +441,7 @@
         </div>
         <div class="input-footer">
           <span class="input-hint">Enter 发送 / Ctrl+Enter 或 Shift+Enter 换行</span>
-          <a-button type="primary" @click="sendMessage" :disabled="!inputMessage.trim()">
+          <a-button type="primary" @click="sendMessage" :disabled="!canSendMessage">
             发送
           </a-button>
         </div>
@@ -361,6 +449,9 @@
       <div class="chat-ended" v-else>
         <span>会话已结束</span>
       </div>
+      <a-modal v-model:open="videoPreviewVisible" :footer="null" width="720px">
+        <video v-if="videoPreviewUrl" :src="videoPreviewUrl" controls style="width: 100%;" />
+      </a-modal>
     </div>
 
     <!-- 空状态 -->
@@ -585,14 +676,20 @@ import {
   StarFilled, StarOutlined, SwapOutlined, MenuUnfoldOutlined, MenuFoldOutlined,
   CloseOutlined, EditOutlined, PlusOutlined, InboxOutlined, MessageOutlined,
   SmileOutlined, ThunderboltOutlined, RobotOutlined, EyeOutlined, SettingOutlined,
-  MoreOutlined, DeleteOutlined
+  MoreOutlined, DeleteOutlined, PaperClipOutlined
 } from '@ant-design/icons-vue';
 import { defHttp } from '/@/utils/http/axios';
+import { useGlobSetting } from '/@/hooks/setting';
+import { getFileAccessHttpUrl, getHeaders } from '/@/utils/common/compUtils';
+import { createImgPreview } from '/@/components/Preview';
 // ★ 为AI建议保留Markdown渲染能力
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
 
 const silentRequestOptions = { successMessageMode: 'none' as const };
+const globSetting = useGlobSetting();
+const uploadUrl = `${globSetting.uploadUrl}/airag/chat/upload`;
+const uploadHeaders = getHeaders();
 function httpGet<T = any>(config: any, options: any = {}) {
   return defHttp.get<T>(config, { ...silentRequestOptions, ...options });
 }
@@ -636,6 +733,10 @@ const closedCount = computed(() => statsData.value.closedCount);
 // 消息
 const messages = ref<any[]>([]);
 const inputMessage = ref('');
+const attachmentList = ref<any[]>([]);
+const uploadFileList = ref<any[]>([]);
+const videoPreviewVisible = ref(false);
+const videoPreviewUrl = ref('');
 const messagesRef = ref<HTMLElement | null>(null);
 const inputRef = ref();
 const messageAvatarSize = 32;
@@ -851,6 +952,133 @@ function toggleQuickReply() {
 function getConversationsCacheKey() {
   const supervisor = filter.value === 'monitor' && isSupervisor.value ? '1' : '0';
   return `${agentId.value || 'guest'}_${filter.value}_${supervisor}`;
+}
+
+const canSendMessage = computed(() => {
+  return inputMessage.value.trim().length > 0 || attachmentList.value.length > 0;
+});
+
+function getAttachmentType(file: any) {
+  const type = file?.type || '';
+  const name = (file?.name || '').toLowerCase();
+  if (type.startsWith('image/') || name.match(/\.(png|jpe?g|gif|webp|bmp)$/)) {
+    return 'image';
+  }
+  if (type.startsWith('video/') || name.match(/\.(mp4|webm|ogg|mov|avi|mkv)$/)) {
+    return 'video';
+  }
+  return 'file';
+}
+
+function beforeUploadAttachment() {
+  return true;
+}
+
+function handleAttachmentChange(info: any) {
+  const { file, fileList } = info;
+  uploadFileList.value = fileList;
+  if (file.status === 'error' || (file.response && file.response.code === 500)) {
+    message.error(file.response?.message || `${file.name} 上传失败`);
+    return;
+  }
+  if (file.status === 'done') {
+    const url = file.response?.message;
+    if (!url) return;
+    attachmentList.value.push({
+      name: file.name,
+      url,
+      size: file.size,
+      type: getAttachmentType(file),
+    });
+  }
+}
+
+function removeAttachment(index: number) {
+  attachmentList.value.splice(index, 1);
+  uploadFileList.value.splice(index, 1);
+}
+
+function getAttachmentUrl(attachment: any) {
+  return getFileAccessHttpUrl(attachment?.url);
+}
+
+function parseExtra(extra: any) {
+  if (!extra) return null;
+  if (typeof extra === 'string') {
+    try {
+      return JSON.parse(extra);
+    } catch {
+      return null;
+    }
+  }
+  return extra;
+}
+
+function getMessageAttachments(msg: any): any[] {
+  const extra = parseExtra(msg?.extra);
+  return extra?.attachments || [];
+}
+
+function getMediaAttachments(msg: any): any[] {
+  return getMessageAttachments(msg).filter(item => item.type === 'image' || item.type === 'video');
+}
+
+function getFileAttachments(msg: any): any[] {
+  return getMessageAttachments(msg).filter(item => item.type === 'file');
+}
+
+function getMediaGridData(msg: any) {
+  const media = getMediaAttachments(msg);
+  const maxItems = 4;
+  const items = media.slice(0, maxItems);
+  const extraCount = Math.max(0, media.length - maxItems);
+  return { items, extraCount, total: media.length };
+}
+
+function openImagePreview(msg: any, _item: any) {
+  const images = getMessageAttachments(msg).filter(att => att.type === 'image');
+  const imageList = images.map(att => getAttachmentUrl(att));
+  if (!imageList.length) return;
+  createImgPreview({
+    imageList,
+    defaultWidth: 700,
+    rememberState: true,
+  });
+}
+
+function openImagePreviewFromList(list: any[], _item: any) {
+  const images = (list || []).filter(att => att.type === 'image');
+  const imageList = images.map(att => getAttachmentUrl(att));
+  if (!imageList.length) return;
+  createImgPreview({
+    imageList,
+    defaultWidth: 700,
+    rememberState: true,
+  });
+}
+
+function openVideoPreview(item: any) {
+  videoPreviewUrl.value = getAttachmentUrl(item);
+  videoPreviewVisible.value = true;
+}
+
+function openFilePreview(item: any) {
+  const url = getAttachmentUrl(item);
+  if (url) {
+    window.open(url, '_blank');
+  }
+}
+
+function buildMessagePreview(content: string, attachments: any[]) {
+  if (content) return content;
+  if (!attachments || attachments.length === 0) return '';
+  const labels = new Set<string>();
+  attachments.forEach(att => {
+    if (att.type === 'image') labels.add('图片');
+    else if (att.type === 'video') labels.add('视频');
+    else labels.add('文件');
+  });
+  return `[${Array.from(labels).join('/')}]`;
 }
 
 function isMessagesAtBottom() {
@@ -1368,7 +1596,9 @@ function handleInputKeydown(e: KeyboardEvent) {
 // 发送消息
 async function sendMessage() {
   const content = inputMessage.value.trim();
-  if (!content || !currentConversation.value) return;
+  if (!currentConversation.value) return;
+  const attachments = attachmentList.value.slice();
+  if (!content && attachments.length === 0) return;
   
   const wasUnassigned = currentConversation.value.status === 0; // 记录是否是待接入状态
   
@@ -1377,26 +1607,30 @@ async function sendMessage() {
       await changeMode(1);
     }
     
+    const msgType = attachments.length > 0 ? 5 : 0;
+    const extra = attachments.length > 0 ? JSON.stringify({ attachments }) : undefined;
     await httpPost({
       url: '/cs/message/agent/send',
       data: {
         conversationId: currentConversation.value.id,
         agentId: agentId.value,
         agentName: agentName.value,
-        content: content
+        content: content,
+        msgType,
+        extra
       }
     });
     
     // 发送成功后，立即更新会话列表的最后消息和“对话中”客服
     const nowIso = new Date().toISOString();
-    currentConversation.value.lastMessage = content;
+    currentConversation.value.lastMessage = buildMessagePreview(content, attachments);
     currentConversation.value.lastMessageTime = nowIso;
     if (currentConversation.value.status === 1) {
       currentConversation.value.lastTalkingAgent = agentName.value;
     }
     const listItem = conversations.value.find(c => c.id === currentConversation.value?.id);
     if (listItem) {
-      listItem.lastMessage = content;
+      listItem.lastMessage = buildMessagePreview(content, attachments);
       listItem.lastMessageTime = nowIso;
       if (listItem.status === 1) {
         listItem.lastTalkingAgent = agentName.value;
@@ -1404,6 +1638,8 @@ async function sendMessage() {
     }
     
     inputMessage.value = '';
+    attachmentList.value = [];
+    uploadFileList.value = [];
     await loadMessages(currentConversation.value.id);
     
     // ★ 问题3修复：发送消息后清除未读数
@@ -1803,7 +2039,8 @@ function handleWsMessage(data: any) {
       const conv = conversations.value.find(c => c.id === data.conversationId);
       if (conv) {
         // ★ 问题1修复：更新最后消息和时间（包含客服消息）
-        conv.lastMessage = data.content;
+        const previewText = buildMessagePreview(data.content || '', getMessageAttachments({ extra: data.extra }));
+        conv.lastMessage = previewText || data.content;
         conv.lastMessageTime = new Date().toISOString();
         if (data.senderType === 0) {
           conv.userOnline = true;
@@ -1836,6 +2073,8 @@ function handleWsMessage(data: any) {
           id: data.messageId || Date.now().toString(),
           conversationId: data.conversationId,
           content: data.content,
+          msgType: data.msgType,
+          extra: data.extra,
           senderType: data.senderType,
           senderId: data.senderId,
           senderName: data.senderName,
@@ -3004,6 +3243,159 @@ function scrollToBottom() {
       font-size: 12px;
       color: #bbb;
     }
+  }
+
+  .attachment-preview {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 8px;
+
+    .attachment-item {
+      position: relative;
+      width: 72px;
+      height: 72px;
+      border: 1px solid #f0f0f0;
+      border-radius: 6px;
+      overflow: hidden;
+      background: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      img,
+      video {
+        max-width: 100%;
+        max-height: 100%;
+        cursor: pointer;
+      }
+
+      .attachment-file {
+        font-size: 12px;
+        padding: 4px;
+        text-align: center;
+        cursor: pointer;
+      }
+
+      .remove-attachment {
+        position: absolute;
+        top: 2px;
+        right: 2px;
+        font-size: 12px;
+        color: #666;
+        background: #fff;
+        border-radius: 50%;
+        cursor: pointer;
+      }
+    }
+  }
+}
+
+.msg-attachments {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+
+  .attachment-item {
+    max-width: 240px;
+    img,
+    video {
+      max-width: 100%;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+  }
+}
+
+.msg-media-grid {
+  display: grid;
+  gap: 6px;
+  margin-top: 6px;
+
+  .media-item {
+    position: relative;
+    border-radius: 6px;
+    overflow: hidden;
+    background: #f5f5f5;
+    cursor: pointer;
+
+    img,
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .play-badge {
+      position: absolute;
+      right: 6px;
+      bottom: 6px;
+      background: rgba(0, 0, 0, 0.6);
+      color: #fff;
+      font-size: 12px;
+      padding: 2px 4px;
+      border-radius: 4px;
+    }
+
+    .media-more {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.55);
+      color: #fff;
+      font-size: 16px;
+      font-weight: 600;
+    }
+  }
+}
+
+.media-grid--1 {
+  grid-template-columns: 1fr;
+  .media-item {
+    aspect-ratio: 4 / 3;
+  }
+}
+
+.media-grid--2 {
+  grid-template-columns: repeat(2, 1fr);
+  .media-item {
+    aspect-ratio: 1 / 1;
+  }
+}
+
+.media-grid--3 {
+  grid-template-columns: repeat(2, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+  .media-item {
+    aspect-ratio: 1 / 1;
+  }
+  .media-item:nth-child(1) {
+    grid-row: span 2;
+  }
+}
+
+.media-grid--4 {
+  grid-template-columns: repeat(2, 1fr);
+  .media-item {
+    aspect-ratio: 1 / 1;
+  }
+}
+
+.msg-file-list {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+
+  .file-item {
+    padding: 6px 8px;
+    background: #f7f7f7;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
   }
 }
 

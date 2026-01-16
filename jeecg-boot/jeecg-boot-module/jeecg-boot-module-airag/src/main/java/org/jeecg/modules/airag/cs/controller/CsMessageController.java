@@ -38,6 +38,8 @@ public class CsMessageController {
         String content = (String) params.get("content");
         String senderId = (String) params.get("senderId");
         String senderName = (String) params.get("senderName");
+        Integer msgType = params.get("msgType") instanceof Integer ? (Integer) params.get("msgType") : null;
+        String extra = params.get("extra") != null ? String.valueOf(params.get("extra")) : null;
         
         // 兼容处理 senderType，可能是字符串或数字
         Object senderTypeObj = params.get("senderType");
@@ -57,7 +59,7 @@ public class CsMessageController {
         if ("user".equals(senderType)) {
             message = messageService.sendUserMessage(conversationId, senderId, senderName, content);
         } else {
-            message = messageService.sendAgentMessage(conversationId, senderId, senderName, content);
+            message = messageService.sendAgentMessage(conversationId, senderId, senderName, content, msgType, extra);
         }
         
         return Result.OK(message);
@@ -83,13 +85,15 @@ public class CsMessageController {
      */
     @Operation(summary = "客服发送消息")
     @PostMapping("/agent/send")
-    public Result<CsMessage> sendAgentMessage(@RequestBody Map<String, String> params) {
-        String conversationId = params.get("conversationId");
-        String agentId = params.get("agentId");
-        String agentName = params.get("agentName");
-        String content = params.get("content");
+    public Result<CsMessage> sendAgentMessage(@RequestBody Map<String, Object> params) {
+        String conversationId = params.get("conversationId") != null ? String.valueOf(params.get("conversationId")) : null;
+        String agentId = params.get("agentId") != null ? String.valueOf(params.get("agentId")) : null;
+        String agentName = params.get("agentName") != null ? String.valueOf(params.get("agentName")) : null;
+        String content = params.get("content") != null ? String.valueOf(params.get("content")) : null;
+        Integer msgType = params.get("msgType") instanceof Integer ? (Integer) params.get("msgType") : null;
+        String extra = params.get("extra") != null ? String.valueOf(params.get("extra")) : null;
         
-        CsMessage message = messageService.sendAgentMessage(conversationId, agentId, agentName, content);
+        CsMessage message = messageService.sendAgentMessage(conversationId, agentId, agentName, content, msgType, extra);
         return Result.OK(message);
     }
 

@@ -40,7 +40,37 @@
           <!-- 用户消息 (senderType === 0 表示用户) -->
           <div v-else-if="isUserMessage(msg)" class="user-message">
             <div class="message-content">
-              <div class="message-text">{{ msg.content }}</div>
+              <div v-if="msg.content" class="message-text">{{ msg.content }}</div>
+              <div
+                v-if="getMediaGridData(msg).items.length"
+                class="message-media-grid"
+                :class="`media-grid--${Math.min(getMediaGridData(msg).total, 4)}`"
+              >
+                <div
+                  class="media-item"
+                  v-for="(item, index) in getMediaGridData(msg).items"
+                  :key="`${item.url}_${index}`"
+                >
+                  <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview(msg, item)" />
+                  <video v-else :src="getAttachmentUrl(item)" controls @click="openFilePreview(item)" />
+                  <div
+                    v-if="index === getMediaGridData(msg).items.length - 1 && getMediaGridData(msg).extraCount > 0"
+                    class="media-more"
+                  >
+                    +{{ getMediaGridData(msg).extraCount }}
+                  </div>
+                </div>
+              </div>
+              <div v-if="getFileAttachments(msg).length" class="message-file-list">
+                <div
+                  class="file-item"
+                  v-for="(item, index) in getFileAttachments(msg)"
+                  :key="`${item.url}_${index}`"
+                  @click="openFilePreview(item)"
+                >
+                  {{ item.name || item.url }}
+                </div>
+              </div>
               <div class="message-time">{{ formatTime(msg.createTime) }}</div>
             </div>
             <img class="avatar" :src="defaultUserAvatar" />
@@ -53,7 +83,37 @@
                 <span class="sender-name">{{ msg.senderName || '客服' }}</span>
                 <a-tag v-if="msg.senderType === 1" color="blue" size="small">AI</a-tag>
               </div>
-              <div class="message-text" v-html="renderMessage(msg.content)"></div>
+              <div v-if="msg.content" class="message-text" v-html="renderMessage(msg.content)"></div>
+              <div
+                v-if="getMediaGridData(msg).items.length"
+                class="message-media-grid"
+                :class="`media-grid--${Math.min(getMediaGridData(msg).total, 4)}`"
+              >
+                <div
+                  class="media-item"
+                  v-for="(item, index) in getMediaGridData(msg).items"
+                  :key="`${item.url}_${index}`"
+                >
+                  <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview(msg, item)" />
+                  <video v-else :src="getAttachmentUrl(item)" controls @click="openFilePreview(item)" />
+                  <div
+                    v-if="index === getMediaGridData(msg).items.length - 1 && getMediaGridData(msg).extraCount > 0"
+                    class="media-more"
+                  >
+                    +{{ getMediaGridData(msg).extraCount }}
+                  </div>
+                </div>
+              </div>
+              <div v-if="getFileAttachments(msg).length" class="message-file-list">
+                <div
+                  class="file-item"
+                  v-for="(item, index) in getFileAttachments(msg)"
+                  :key="`${item.url}_${index}`"
+                  @click="openFilePreview(item)"
+                >
+                  {{ item.name || item.url }}
+                </div>
+              </div>
               <div class="message-time">{{ formatTime(msg.createTime) }}</div>
             </div>
           </div>
@@ -120,6 +180,8 @@ import { ref, onMounted, onUnmounted, nextTick, computed, watch } from 'vue';
 import { message } from 'ant-design-vue';
 import { DeleteOutlined, MessageOutlined, SendOutlined, BulbOutlined } from '@ant-design/icons-vue';
 import { defHttp } from '/@/utils/http/axios';
+import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
+import { createImgPreview } from '/@/components/Preview';
 
 const silentRequestOptions = { successMessageMode: 'none' as const };
 function httpGet<T = any>(config: any, options: any = {}) {
@@ -462,6 +524,8 @@ function handleWsMessage(data: any) {
         id: data.messageId || Date.now().toString(),
         conversationId: data.conversationId,
         content: data.content,
+        msgType: data.msgType,
+        extra: data.extra,
         senderType: msgSenderType,
         senderId: data.senderId,
         senderName: data.senderName,
@@ -787,6 +851,61 @@ function getMessageClass(msg: any) {
   return msg.senderType === 1 ? 'is-ai' : 'is-agent';
 }
 
+function parseExtra(extra: any) {
+  if (!extra) return null;
+  if (typeof extra === 'string') {
+    try {
+      return JSON.parse(extra);
+    } catch {
+      return null;
+    }
+  }
+  return extra;
+}
+
+function getMessageAttachments(msg: any): any[] {
+  const extra = parseExtra(msg?.extra);
+  return extra?.attachments || [];
+}
+
+function getMediaAttachments(msg: any): any[] {
+  return getMessageAttachments(msg).filter(item => item.type === 'image' || item.type === 'video');
+}
+
+function getFileAttachments(msg: any): any[] {
+  return getMessageAttachments(msg).filter(item => item.type === 'file');
+}
+
+function getMediaGridData(msg: any) {
+  const media = getMediaAttachments(msg);
+  const maxItems = 4;
+  const items = media.slice(0, maxItems);
+  const extraCount = Math.max(0, media.length - maxItems);
+  return { items, extraCount, total: media.length };
+}
+
+function getAttachmentUrl(attachment: any) {
+  return getFileAccessHttpUrl(attachment?.url);
+}
+
+function openFilePreview(item: any) {
+  const url = getAttachmentUrl(item);
+  if (url) {
+    window.open(url, '_blank');
+  }
+}
+
+function openImagePreview(msg: any, item: any) {
+  const images = getMessageAttachments(msg).filter(att => att.type === 'image');
+  const imageList = images.map(att => getAttachmentUrl(att));
+  if (!imageList.length) return;
+  createImgPreview({
+    imageList,
+    defaultWidth: 700,
+    rememberState: true,
+  });
+}
+
 // 渲染消息内容（简单HTML转换）
 function renderMessage(content: string) {
   if (!content) return '';
@@ -1022,6 +1141,84 @@ watch(messages, () => {
     font-size: 11px;
     color: #999;
     margin-top: 4px;
+  }
+}
+
+.message-media-grid {
+  margin-top: 6px;
+  display: grid;
+  gap: 6px;
+
+  .media-item {
+    border-radius: 6px;
+    overflow: hidden;
+    background: #f5f5f5;
+    position: relative;
+    img,
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .media-more {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.55);
+      color: #fff;
+      font-size: 16px;
+      font-weight: 600;
+    }
+  }
+}
+
+.media-grid--1 {
+  grid-template-columns: 1fr;
+  .media-item {
+    aspect-ratio: 4 / 3;
+  }
+}
+
+.media-grid--2 {
+  grid-template-columns: repeat(2, 1fr);
+  .media-item {
+    aspect-ratio: 1 / 1;
+  }
+}
+
+.media-grid--3 {
+  grid-template-columns: repeat(2, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+  .media-item {
+    aspect-ratio: 1 / 1;
+  }
+  .media-item:nth-child(1) {
+    grid-row: span 2;
+  }
+}
+
+.media-grid--4 {
+  grid-template-columns: repeat(2, 1fr);
+  .media-item {
+    aspect-ratio: 1 / 1;
+  }
+}
+
+.message-file-list {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+
+  .file-item {
+    padding: 6px 8px;
+    background: #f7f7f7;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
   }
 }
 
