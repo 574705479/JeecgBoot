@@ -32,6 +32,7 @@ public class CsMessageController {
      * 发送消息 (通用)
      */
     @Operation(summary = "发送消息")
+    @org.jeecg.config.shiro.IgnoreAuth
     @PostMapping("/send")
     public Result<CsMessage> send(@RequestBody Map<String, Object> params) {
         String conversationId = (String) params.get("conversationId");
@@ -69,6 +70,7 @@ public class CsMessageController {
      * 用户发送消息
      */
     @Operation(summary = "用户发送消息")
+    @org.jeecg.config.shiro.IgnoreAuth
     @PostMapping("/user/send")
     public Result<CsMessage> sendUserMessage(@RequestBody Map<String, String> params) {
         String conversationId = params.get("conversationId");
@@ -101,6 +103,7 @@ public class CsMessageController {
      * 获取会话消息
      */
     @Operation(summary = "获取会话消息")
+    @org.jeecg.config.shiro.IgnoreAuth
     @GetMapping("/{conversationId}")
     public Result<List<CsMessage>> getMessages(
             @PathVariable String conversationId,
@@ -113,6 +116,7 @@ public class CsMessageController {
      * 获取会话消息（通过参数）
      */
     @Operation(summary = "获取会话消息列表")
+    @org.jeecg.config.shiro.IgnoreAuth
     @GetMapping("/list")
     public Result<List<CsMessage>> getMessageList(
             @RequestParam String conversationId,

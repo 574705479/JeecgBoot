@@ -218,47 +218,67 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             agentService.goOnline(agentId);
         }
         
+        boolean alreadyAssignedToSame = conversation.getStatus() == CsConversation.STATUS_ASSIGNED
+                && oConvertUtils.isNotEmpty(conversation.getOwnerAgentId())
+                && conversation.getOwnerAgentId().equals(agentId);
+
         // 检查是否已被其他客服接入
-        if (conversation.getStatus() == CsConversation.STATUS_ASSIGNED 
+        if (!alreadyAssignedToSame
+                && conversation.getStatus() == CsConversation.STATUS_ASSIGNED 
                 && oConvertUtils.isNotEmpty(conversation.getOwnerAgentId())
                 && !conversation.getOwnerAgentId().equals(agentId)) {
             log.warn("[CS-Conversation] 会话已被其他客服接入: conversationId={}", conversationId);
             return false;
         }
         
-        // 更新会话状态
-        conversation.setOwnerAgentId(agentId);
-        conversation.setStatus(CsConversation.STATUS_ASSIGNED);
-        conversation.setAssignTime(new Date());
-        conversation.setUpdateTime(new Date());
-        // ★ 客服接入后切换为手动模式，终止AI自动回复
-        conversation.setReplyMode(CsConversation.REPLY_MODE_MANUAL);
-        updateById(conversation);
+        // 更新会话状态（已是本人接入则跳过重复更新）
+        if (!alreadyAssignedToSame) {
+            conversation.setOwnerAgentId(agentId);
+            conversation.setStatus(CsConversation.STATUS_ASSIGNED);
+            conversation.setAssignTime(new Date());
+            conversation.setUpdateTime(new Date());
+            // ★ 客服接入后切换为手动模式，终止AI自动回复
+            conversation.setReplyMode(CsConversation.REPLY_MODE_MANUAL);
+            updateById(conversation);
+        }
         
-        // 创建协作者记录（主负责人）
-        CsCollaborator collaborator = new CsCollaborator();
-        collaborator.setConversationId(conversationId);
-        collaborator.setAgentId(agentId);
-        collaborator.setRole(CsCollaborator.ROLE_OWNER);
-        collaborator.setJoinTime(new Date());
-        collaboratorMapper.insert(collaborator);
+        // 创建或更新协作者记录（主负责人）
+        LambdaQueryWrapper<CsCollaborator> checkWrapper = new LambdaQueryWrapper<>();
+        checkWrapper.eq(CsCollaborator::getConversationId, conversationId)
+                .eq(CsCollaborator::getAgentId, agentId);
+        CsCollaborator existingCollaborator = collaboratorMapper.selectOne(checkWrapper);
+        if (existingCollaborator != null) {
+            existingCollaborator.setRole(CsCollaborator.ROLE_OWNER);
+            existingCollaborator.setJoinTime(new Date());
+            existingCollaborator.setLeaveTime(null);
+            collaboratorMapper.updateById(existingCollaborator);
+        } else {
+            CsCollaborator collaborator = new CsCollaborator();
+            collaborator.setConversationId(conversationId);
+            collaborator.setAgentId(agentId);
+            collaborator.setRole(CsCollaborator.ROLE_OWNER);
+            collaborator.setJoinTime(new Date());
+            collaboratorMapper.insert(collaborator);
+        }
         
-        // 更新客服会话数
-        agentService.incrementSessions(agentId);
-        
-        // 广播会话被接入事件给所有客服（实时推送）
-        Map<String, Object> assignData = new HashMap<>();
-        assignData.put("conversationId", conversationId);
-        assignData.put("agentId", agentId);
-        assignData.put("agentName", agent.getNickname());
-        assignData.put("assignTime", new Date());
-        broadcastToAllAgents("conversation_assigned", assignData);
-        
-        // 通知用户客服已接入，同时告知已切换为手动模式
-        Map<String, Object> extra = new HashMap<>();
-        extra.put("replyMode", CsConversation.REPLY_MODE_MANUAL);
-        extra.put("agentName", agent.getNickname());
-        notifyUser(conversationId, "agent_connected", "客服 " + agent.getNickname() + " 为您服务", extra);
+        if (!alreadyAssignedToSame) {
+            // 更新客服会话数
+            agentService.incrementSessions(agentId);
+            
+            // 广播会话被接入事件给所有客服（实时推送）
+            Map<String, Object> assignData = new HashMap<>();
+            assignData.put("conversationId", conversationId);
+            assignData.put("agentId", agentId);
+            assignData.put("agentName", agent.getNickname());
+            assignData.put("assignTime", new Date());
+            broadcastToAllAgents("conversation_assigned", assignData);
+            
+            // 通知用户客服已接入，同时告知已切换为手动模式
+            Map<String, Object> extra = new HashMap<>();
+            extra.put("replyMode", CsConversation.REPLY_MODE_MANUAL);
+            extra.put("agentName", agent.getNickname());
+            notifyUser(conversationId, "agent_connected", "客服 " + agent.getNickname() + " 为您服务", extra);
+        }
         
         log.info("[CS-Conversation] 客服接入成功: conversationId={}, agentId={}", conversationId, agentId);
         return true;
@@ -440,8 +460,16 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             agentService.decrementSessions(fromAgentId);
         }
         
+        boolean wasUnassigned = conversation.getStatus() == CsConversation.STATUS_UNASSIGNED
+                || oConvertUtils.isEmpty(conversation.getOwnerAgentId());
+
         // 更新会话
         conversation.setOwnerAgentId(toAgentId);
+        if (wasUnassigned) {
+            conversation.setStatus(CsConversation.STATUS_ASSIGNED);
+            conversation.setAssignTime(new Date());
+            conversation.setReplyMode(CsConversation.REPLY_MODE_MANUAL);
+        }
         conversation.setUpdateTime(new Date());
         updateById(conversation);
         

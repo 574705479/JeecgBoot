@@ -16,6 +16,8 @@ import org.jeecg.modules.airag.cs.entity.CsAgent;
 import org.jeecg.modules.airag.cs.entity.CsCollaborator;
 import org.jeecg.modules.airag.cs.entity.CsConversation;
 import org.jeecg.modules.airag.cs.entity.CsMessage;
+import org.jeecg.modules.airag.cs.mapper.CsGlobalConfigMapper;
+import org.jeecg.modules.airag.cs.entity.CsGlobalConfig;
 import org.jeecg.modules.airag.cs.service.ICsAgentService;
 import org.jeecg.modules.airag.cs.service.ICsCollaboratorService;
 import org.jeecg.modules.airag.cs.service.ICsConversationService;
@@ -50,12 +52,16 @@ public class CsMessageServiceImpl implements ICsMessageService {
 
     /** 访客AI应用全局配置的Redis Key */
     private static final String VISITOR_APP_REDIS_KEY = "cs:global:visitor_app_id";
+    private static final String VISITOR_APP_CONFIG_KEY = "visitor_app_id";
 
     @Autowired
     private IChatMessageService chatMessageService;
 
     @Autowired
     private RedisTemplate<String, String> redisTemplate;
+
+    @Autowired
+    private CsGlobalConfigMapper csGlobalConfigMapper;
 
     @Autowired
     @Lazy
@@ -177,6 +183,9 @@ public class CsMessageServiceImpl implements ICsMessageService {
         // 更新会话最后消息
         String lastMessage = buildMessagePreview(content, msgType, extra);
         conversationService.updateLastMessage(conversationId, lastMessage);
+
+        // ★ 客服发送消息后，清除该会话未读数
+        conversationService.clearUnread(conversationId);
         
         // 推送给用户
         boolean delivered = pushToUser(conversationId, agentMessage);
@@ -239,7 +248,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
             return null;
         }
 
-        String appId = redisTemplate.opsForValue().get(VISITOR_APP_REDIS_KEY);
+        String appId = getGlobalVisitorAppId();
         if (oConvertUtils.isEmpty(appId)) {
             return null;
         }
@@ -312,7 +321,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
     public void generateAiSuggestionStream(CsConversation conversation, String userMessage, String fallbackAgentId) {
         String conversationId = conversation.getId();
         String ownerAgentId = conversation.getOwnerAgentId();
-        String targetAgentId = oConvertUtils.isNotEmpty(ownerAgentId) ? ownerAgentId : fallbackAgentId;
+        String targetAgentId = oConvertUtils.isNotEmpty(fallbackAgentId) ? fallbackAgentId : ownerAgentId;
 
         if (oConvertUtils.isEmpty(targetAgentId)) {
             log.warn("[CS-Message] 会话没有分配客服且未指定请求客服，无法推送AI建议");
@@ -889,7 +898,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
             
             if (forVisitor) {
                 // ★ 访客AI应用：从Redis获取全局配置
-                appIdToUse = redisTemplate.opsForValue().get(VISITOR_APP_REDIS_KEY);
+                appIdToUse = getGlobalVisitorAppId();
                 if (oConvertUtils.isNotEmpty(appIdToUse)) {
                     log.info("[CS-Message] 使用全局访客AI应用: appId={}", appIdToUse);
                 }
@@ -1032,6 +1041,19 @@ public class CsMessageServiceImpl implements ICsMessageService {
                 callback.onToken("抱歉，AI服务暂时不可用: " + (errorMsg != null ? errorMsg : ""), true);
             }
         }
+    }
+
+    private String getGlobalVisitorAppId() {
+        String appId = redisTemplate.opsForValue().get(VISITOR_APP_REDIS_KEY);
+        if (oConvertUtils.isNotEmpty(appId)) {
+            return appId;
+        }
+        CsGlobalConfig config = csGlobalConfigMapper.selectById(VISITOR_APP_CONFIG_KEY);
+        appId = config != null ? config.getConfigValue() : null;
+        if (oConvertUtils.isNotEmpty(appId)) {
+            redisTemplate.opsForValue().set(VISITOR_APP_REDIS_KEY, appId);
+        }
+        return appId;
     }
 
     /**

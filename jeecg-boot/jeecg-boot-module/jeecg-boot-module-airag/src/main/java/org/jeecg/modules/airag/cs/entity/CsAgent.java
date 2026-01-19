@@ -68,7 +68,7 @@ public class CsAgent implements Serializable {
     @Schema(description = "客服AI建议应用ID，用于AI辅助模式下生成建议")
     private String defaultAppId;
 
-    // 注意：访客AI应用已改为全局配置，存储在Redis中，Key: cs:global:visitor_app_id
+    // 注意：访客AI应用为全局配置，优先从Redis读取，持久化存储在cs_global_config表中
 
     @Excel(name = "角色", width = 10)
     @Schema(description = "角色: 0-普通客服 1-管理者(可监控所有会话)")

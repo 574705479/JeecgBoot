@@ -11,6 +11,8 @@ import org.jeecg.common.aspect.annotation.AutoLog;
 import org.jeecg.common.system.base.controller.JeecgController;
 import org.jeecg.common.system.query.QueryGenerator;
 import org.jeecg.modules.airag.cs.entity.CsAgent;
+import org.jeecg.modules.airag.cs.entity.CsGlobalConfig;
+import org.jeecg.modules.airag.cs.mapper.CsGlobalConfigMapper;
 import org.jeecg.modules.airag.cs.service.ICsAgentService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -18,6 +20,7 @@ import org.springframework.web.bind.annotation.*;
 
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Arrays;
+import java.util.Date;
 import java.util.List;
 
 /**
@@ -34,12 +37,16 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
 
     /** 访客AI应用全局配置的Redis Key */
     private static final String VISITOR_APP_REDIS_KEY = "cs:global:visitor_app_id";
+    private static final String VISITOR_APP_CONFIG_KEY = "visitor_app_id";
 
     @Autowired
     private ICsAgentService csAgentService;
 
     @Autowired
     private RedisTemplate<String, String> redisTemplate;
+
+    @Autowired
+    private CsGlobalConfigMapper csGlobalConfigMapper;
 
     /**
      * 分页列表查询
@@ -188,8 +195,10 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     public Result<String> setGlobalVisitorApp(@RequestBody java.util.Map<String, String> params) {
         String appId = params.get("appId");
         if (appId == null || appId.isEmpty()) {
+            csGlobalConfigMapper.deleteById(VISITOR_APP_CONFIG_KEY);
             redisTemplate.delete(VISITOR_APP_REDIS_KEY);
         } else {
+            saveGlobalConfigValue(VISITOR_APP_CONFIG_KEY, appId);
             redisTemplate.opsForValue().set(VISITOR_APP_REDIS_KEY, appId);
         }
         log.info("[CS-Agent] 全局访客AI应用已更新: appId={}", appId);
@@ -204,9 +213,37 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     @GetMapping("/global/visitor-app")
     public Result<java.util.Map<String, String>> getGlobalVisitorApp() {
         String appId = redisTemplate.opsForValue().get(VISITOR_APP_REDIS_KEY);
+        if (appId == null || appId.isEmpty()) {
+            appId = getGlobalConfigValue(VISITOR_APP_CONFIG_KEY);
+            if (appId != null && !appId.isEmpty()) {
+                redisTemplate.opsForValue().set(VISITOR_APP_REDIS_KEY, appId);
+            }
+        }
         java.util.Map<String, String> result = new java.util.HashMap<>();
         result.put("appId", appId);
         return Result.OK(result);
+    }
+
+    private String getGlobalConfigValue(String configKey) {
+        CsGlobalConfig config = csGlobalConfigMapper.selectById(configKey);
+        return config != null ? config.getConfigValue() : null;
+    }
+
+    private void saveGlobalConfigValue(String configKey, String configValue) {
+        CsGlobalConfig existing = csGlobalConfigMapper.selectById(configKey);
+        Date now = new Date();
+        if (existing == null) {
+            CsGlobalConfig config = new CsGlobalConfig();
+            config.setConfigKey(configKey);
+            config.setConfigValue(configValue);
+            config.setCreateTime(now);
+            config.setUpdateTime(now);
+            csGlobalConfigMapper.insert(config);
+        } else {
+            existing.setConfigValue(configValue);
+            existing.setUpdateTime(now);
+            csGlobalConfigMapper.updateById(existing);
+        }
     }
 
 }

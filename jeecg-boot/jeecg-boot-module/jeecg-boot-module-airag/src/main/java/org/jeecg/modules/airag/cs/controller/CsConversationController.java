@@ -43,6 +43,7 @@ public class CsConversationController extends JeecgController<CsConversation, IC
      * 创建会话 (用户端调用)
      */
     @Operation(summary = "创建会话")
+    @org.jeecg.config.shiro.IgnoreAuth
     @PostMapping("/create")
     public Result<CsConversation> create(@RequestBody Map<String, String> params) {
         String appId = params.get("appId");
@@ -58,6 +59,7 @@ public class CsConversationController extends JeecgController<CsConversation, IC
      * 获取或创建会话
      */
     @Operation(summary = "获取或创建会话")
+    @org.jeecg.config.shiro.IgnoreAuth
     @PostMapping("/get-or-create")
     public Result<CsConversation> getOrCreate(@RequestBody Map<String, String> params) {
         String conversationId = params.get("conversationId");
@@ -74,6 +76,7 @@ public class CsConversationController extends JeecgController<CsConversation, IC
      * 获取会话详情
      */
     @Operation(summary = "获取会话详情")
+    @org.jeecg.config.shiro.IgnoreAuth
     @GetMapping("/{id}")
     public Result<CsConversation> get(@PathVariable String id) {
         CsConversation conversation = conversationService.getConversation(id);

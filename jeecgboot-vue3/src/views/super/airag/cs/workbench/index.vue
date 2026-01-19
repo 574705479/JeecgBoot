@@ -768,6 +768,7 @@ const videoPreviewVisible = ref(false);
 const videoPreviewUrl = ref('');
 const mediaViewerVisible = ref(false);
 const mediaViewerList = ref<any[]>([]);
+const lastNotifyMap = new Map<string, number>();
 const showEmojiPanel = ref(false);
 const emojiList = [
   '😀','😁','😂','🤣','😊','😍','😘','😗','😙','😚','😋','😜',
@@ -1746,15 +1747,13 @@ async function sendMessage() {
     uploadFileList.value = [];
     await loadMessages(currentConversation.value.id);
     
-    // ★ 问题3修复：发送消息后清除未读数
-    if (currentConversation.value.unreadCount > 0) {
-      await httpPost({ url: `/cs/conversation/${currentConversation.value.id}/clear-unread` });
-      currentConversation.value.unreadCount = 0;
-      
-      // 同步更新会话列表中的未读数
-      if (listItem) {
-        listItem.unreadCount = 0;
-      }
+    // ★ 发送消息后清除未读数（无论当前计数是否为0）
+    await httpPost({ url: `/cs/conversation/${currentConversation.value.id}/clear-unread` });
+    currentConversation.value.unreadCount = 0;
+    
+    // 同步更新会话列表中的未读数
+    if (listItem) {
+      listItem.unreadCount = 0;
     }
     
     // 如果之前是待接入状态，刷新会话列表（因为后端会自动接入）
@@ -1861,9 +1860,10 @@ async function loadAvailableAgents() {
       params: { pageNo: 1, pageSize: 100 } // 获取所有客服
     });
     const agents = res?.records || res || [];
+    const ownerAgentId = currentConversation.value?.ownerAgentId;
     // 过滤掉当前客服自己，保留完整信息
     availableAgents.value = agents
-      .filter((a: any) => a.id !== agentId.value && a.status === 1); // 只显示在线客服
+      .filter((a: any) => a.id !== agentId.value && a.id !== ownerAgentId && a.status === 1); // 只显示在线客服
   } catch (e) {
     console.error('加载可用客服列表失败', e);
     availableAgents.value = [];
@@ -2197,6 +2197,11 @@ function handleWsMessage(data: any) {
       
       // 延迟刷新统计数据（防抖）
       loadStatsDebounced();
+
+      // 浏览器弹窗通知（仅用户消息且页面不在前台）
+      if (data.senderType === 0) {
+        notifyNewMessage(conv || currentConversation.value, data);
+      }
       break;
     case 'delivery_failed': {
       const failedConversationId = data.conversationId;
@@ -2344,6 +2349,7 @@ function handleWsMessage(data: any) {
       {
         // ★ 数据在 extra 字段中
         const extraData = data.extra || data;
+        const newStatus = extraData.conversation?.status;
         
         console.log('[Workbench] 收到转接事件:', {
           conversationId: extraData.conversationId || data.conversationId,
@@ -2409,6 +2415,17 @@ function handleWsMessage(data: any) {
             currentConversation.value.ownerAgentId = extraData.toAgentId;
             currentConversation.value.ownerAgentName = extraData.toAgentName;
           }
+
+          // 如果在待接入列表里且已分配，移除该会话
+          if (filter.value === 'unassigned' && newStatus === 1 && transferredConv) {
+            const index = conversations.value.findIndex(c => c.id === conversationId);
+            if (index > -1) {
+              conversations.value.splice(index, 1);
+            }
+          }
+
+          // 刷新统计数据
+          loadStatsDebounced();
         }
       }
       break;
@@ -2525,6 +2542,46 @@ function handleWsMessage(data: any) {
       }
       loadConversations();
       break;
+  }
+}
+
+function notifyNewMessage(conv: any, data: any) {
+  if (!document.hidden) return;
+  if (typeof Notification === 'undefined') return;
+
+  const conversationId = data.conversationId;
+  const now = Date.now();
+  const lastNotify = lastNotifyMap.get(conversationId) || 0;
+  if (now - lastNotify < 2000) return;
+  lastNotifyMap.set(conversationId, now);
+
+  const title = conv ? getDisplayName(conv) : '新消息';
+  const attachments = getMessageAttachments({ extra: data.extra });
+  const body = buildMessagePreview(data.content || '', attachments) || '收到一条新消息';
+
+  const showNotification = () => {
+    try {
+      const notification = new Notification(title, { body, tag: conversationId });
+      notification.onclick = () => {
+        window.focus();
+        if (conv && conv.id) {
+          selectConversation(conv);
+        }
+        notification.close();
+      };
+    } catch (e) {
+      // 忽略通知错误
+    }
+  };
+
+  if (Notification.permission === 'granted') {
+    showNotification();
+  } else if (Notification.permission === 'default') {
+    Notification.requestPermission().then(permission => {
+      if (permission === 'granted') {
+        showNotification();
+      }
+    });
   }
 }
 
