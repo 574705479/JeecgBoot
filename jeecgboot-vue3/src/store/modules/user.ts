@@ -252,6 +252,8 @@ export const useUserStore = defineStore({
       }
       const { userInfo, sysAllDictItems } = await getUserInfo();
       if (userInfo) {
+        // 默认进入客服工作台
+        userInfo.homePath = '/cs/workbench';
         const { roles = [] } = userInfo;
         if (isArray(roles)) {
           const roleList = roles.map((item) => item.value) as RoleEnum[];
