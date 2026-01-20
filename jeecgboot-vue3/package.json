@@ -1,6 +1,7 @@
 {
   "name": "jeecgboot-vue3",
   "version": "3.9.0",
+  "main": "dist/electron/main.js",
   "author": {
     "name": "北京国炬信息技术有限公司",
     "email": "jeecgos@163.com",
@@ -10,9 +11,14 @@
     "pinstall": "pnpm install",
     "clean:cache": "rimraf node_modules/.cache/ && rimraf node_modules/.vite",
     "dev": "vite",
+    "electron:dev": "cross-env VITE_GLOB_RUN_PLATFORM=electron npm run dev",
     "build": "cross-env NODE_ENV=production NODE_OPTIONS=--max-old-space-size=8192 vite build && esno ./build/script/postBuild.ts && esno ./build/script/copyChat.ts",
     "build:docker": "cross-env NODE_ENV=docker NODE_OPTIONS=--max-old-space-size=8192 vite build --mode docker && esno ./build/script/postBuild.ts && esno ./build/script/copyChat.ts",
     "build:dockercloud": "cross-env NODE_ENV=dockercloud NODE_OPTIONS=--max-old-space-size=8192 vite build --mode dockercloud && esno ./build/script/postBuild.ts && esno ./build/script/copyChat.ts",
+    "electron:build-all": "npm run electron:build-web && npm run electron:build-app",
+    "electron:build-web": "cross-env VITE_GLOB_RUN_PLATFORM=electron NODE_ENV=production NODE_OPTIONS=--max-old-space-size=8192 vite build --mode prod_electron && cross-env VITE_GLOB_RUN_PLATFORM=electron esno ./build/script/postBuild.ts && esno ./build/script/copyChat.ts",
+    "electron:build-app": "esno ./electron/script/buildBefore.ts && electron-builder && esno ./electron/script/buildAfter.ts",
+    "electron:install": "cross-env ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ node node_modules/electron/install.js",
     "build:report": "pnpm clean:cache && cross-env REPORT=true npm run build",
     "preview": "npm run build && vite preview",
     "reinstall": "rimraf pnpm-lock.yaml && rimraf yarn.lock && rimraf package.lock.json && rimraf node_modules && npm run install",
@@ -170,7 +176,10 @@
     "vue-eslint-parser": "^9.4.3",
     "vue-tsc": "^1.8.27",
     "dingtalk-jsapi": "^3.2.0",
-    "big.js": "^6.2.2"
+    "big.js": "^6.2.2",
+    "electron": "35.1.4",
+    "electron-builder": "^26.0.12",
+    "vite-plugin-electron": "^0.29.0"
   },
   "repository": {
     "type": "git",

@@ -1,0 +1,10 @@
+ignoredBuiltDependencies:
+  - '@scarf/scarf'
+  - core-js
+  - less
+  - vue-demi
+
+onlyBuiltDependencies:
+  - electron
+  - electron-winstaller
+  - esbuild
