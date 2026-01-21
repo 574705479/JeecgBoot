@@ -3,9 +3,12 @@
     <div class="aui-container">
       <div class="aui-form">
         <div class="aui-image">
-          <div class="aui-image-text">
-            <img :src="adTextImg" alt="" />
+        <div class="aui-image-text">
+          <div class="login-brand-text">
+            <div class="login-brand-title">{{ appTitle }}</div>
+            <div class="login-brand-subtitle" v-if="appSubtitle">{{ appSubtitle }}</div>
           </div>
+        </div>
         </div>
         <div class="aui-formBox">
           <div class="aui-formWell">
@@ -98,8 +101,7 @@
   import { SmsEnum, useFormRules, useFormValid, useLoginState } from '/@/views/sys/login/useLogin';
   import { useMessage } from '/@/hooks/web/useMessage';
   import { getCaptcha, passwordChange, phoneVerify } from '/@/api/sys/user';
-  import logoImg from '/@/assets/loginmini/icon/jeecg_logo.png'
-  import adTextImg from '/@/assets/loginmini/icon/jeecg_ad_text.png'
+  import { getBrandSetting } from '/@/settings/brandSetting';
   import successImg from '/@/assets/loginmini/icon/icon-success.png'
   import CaptchaModal from '@/components/jeecg/captcha/CaptchaModal.vue';
   import { useModal } from "@/components/Modal";
@@ -109,6 +111,7 @@
   //下一步控制
   const activeKey = ref<number>(1);
   const { t } = useI18n();
+  const { appTitle, appSubtitle } = getBrandSetting();
   const { handleBackLogin } = useLoginState();
   const { notification, createMessage, createErrorModal } = useMessage();
   //是否显示获取验证码

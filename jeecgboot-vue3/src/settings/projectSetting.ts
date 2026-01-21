@@ -88,9 +88,9 @@ const setting: ProjectConfig = {
     // 显示官网按钮
     showDoc: false,
     // 显示消息中心按钮
-    showNotice: true,
+    showNotice: false,
     // 显示菜单搜索按钮
-    showSearch: true,
+    showSearch: false,
   },
 
   // 菜单配置

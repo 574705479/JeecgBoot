@@ -1,34 +1,37 @@
 <template>
-  <div :class="prefixCls" class="login-background-img">
+  <div :class="prefixCls" class="login-background-img" :style="loginBgStyle">
     <AppLocalePicker class="absolute top-4 right-4 enter-x xl:text-gray-600" :showText="false"/>
     <AppDarkModeToggle class="absolute top-3 right-7 enter-x" />
     <div class="aui-logo" v-if="!getIsMobile">
       <div>
         <h3>
-          <img :src="logoImg" alt="jeecg" />
+          <img :src="logoDisplayUrl || logoUrl" :alt="appTitle" />
         </h3>
       </div>
     </div>
     <div v-else class="aui-phone-logo">
-      <img :src="logoImg" alt="jeecg" />
+      <img :src="logoDisplayUrl || logoUrl" :alt="appTitle" />
     </div>
     <div v-show="type === 'login'">
       <div class="aui-content">
         <div class="aui-container">
           <div class="aui-form">
             <div class="aui-image">
-              <div class="aui-image-text">
-                <img :src="adTextImg" />
+            <div class="aui-image-text">
+              <div class="login-brand-text">
+                <div class="login-brand-title">{{ appTitle }}</div>
+                <div class="login-brand-subtitle" v-if="appSubtitle">{{ appSubtitle }}</div>
               </div>
+            </div>
             </div>
             <div class="aui-formBox">
               <div class="aui-formWell">
                 <div class="aui-flex aui-form-nav investment_title">
-                  <div class="aui-flex-box" :class="activeIndex === 'accountLogin' ? 'activeNav on' : ''" @click="loginClick('accountLogin')"
-                    >{{ t('sys.login.signInFormTitle') }}
+                  <div class="aui-flex-box activeNav on">
+                    {{ t('sys.login.signInFormTitle') }}
                   </div>
-                  <div class="aui-flex-box" :class="activeIndex === 'phoneLogin' ? 'activeNav on' : ''" @click="loginClick('phoneLogin')"
-                    >{{ t('sys.login.mobileSignInFormTitle') }}
+                  <div class="aui-flex-box" v-show="!hideExtraLogin">
+                    {{ t('sys.login.mobileSignInFormTitle') }}
                   </div>
                 </div>
                 <div class="aui-form-box" style="height: 240px">
@@ -75,13 +78,13 @@
                             <a-checkbox v-model:checked="rememberMe">{{ t('sys.login.rememberMe') }}</a-checkbox>
                           </div>
                         </div>
-                        <div class="aui-forget">
+                        <div class="aui-forget" v-show="!hideExtraLogin">
                           <a @click="forgetHandelClick"> {{ t('sys.login.forgetPassword') }}</a>
                         </div>
                       </div>
                     </div>
                   </a-form>
-                  <a-form v-else ref="phoneFormRef" :model="phoneFormData" @keyup.enter.native="loginHandleClick">
+                  <a-form v-else-if="!hideExtraLogin" ref="phoneFormRef" :model="phoneFormData" @keyup.enter.native="loginHandleClick">
                     <div class="aui-account phone">
                       <div class="aui-inputClear phoneClear">
                         <a-input class="fix-auto-fill" :placeholder="t('sys.login.mobile')" v-model:value="phoneFormData.mobile" />
@@ -115,15 +118,15 @@
                     <a-button :loading="loginLoading" class="aui-link-login" type="primary" @click="loginHandleClick">
                       {{ t('sys.login.loginButton') }}</a-button>
                   </div>
-                  <div class="aui-flex">
+                  <div class="aui-flex" v-if="!hideExtraLogin">
                     <a class="aui-linek-code aui-flex-box" @click="codeHandleClick">{{ t('sys.login.qrSignInFormTitle') }}</a>
                   </div>
-                  <div class="aui-flex">
+                  <div class="aui-flex" v-if="!hideExtraLogin">
                     <a class="aui-linek-code aui-flex-box" @click="registerHandleClick">{{ t('sys.login.registerButton') }}</a>
                   </div>
                 </div>
               </div>
-              <a-form @keyup.enter.native="loginHandleClick">
+              <a-form @keyup.enter.native="loginHandleClick" v-if="!hideExtraLogin">
                 <div class="aui-flex aui-third-text">
                   <div class="aui-flex-box aui-third-border">
                     <span>{{ t('sys.login.otherSignIn') }}</span>
@@ -157,13 +160,13 @@
         </div>
       </div>
     </div>
-    <div v-show="type === 'forgot'" :class="`${prefixCls}-form`">
+    <div v-if="type === 'forgot' && !hideExtraLogin" :class="`${prefixCls}-form`">
       <MiniForgotpad ref="forgotRef" @go-back="goBack" @success="handleSuccess" />
     </div>
-    <div v-show="type === 'register'" :class="`${prefixCls}-form`">
+    <div v-if="type === 'register' && !hideExtraLogin" :class="`${prefixCls}-form`">
       <MiniRegister ref="registerRef" @go-back="goBack" @success="handleSuccess" />
     </div>
-    <div v-show="type === 'codeLogin'" :class="`${prefixCls}-form`">
+    <div v-if="type === 'codeLogin' && !hideExtraLogin" :class="`${prefixCls}-form`">
       <MiniCodelogin ref="codeRef" @go-back="goBack" @success="handleSuccess" />
     </div>
     <!-- 第三方登录相关弹框 -->
@@ -186,8 +189,8 @@
   import MiniForgotpad from './MiniForgotpad.vue';
   import MiniRegister from './MiniRegister.vue';
   import MiniCodelogin from './MiniCodelogin.vue';
-  import logoImg from '/@/assets/loginmini/icon/jeecg_logo.png';
-  import adTextImg from '/@/assets/loginmini/icon/jeecg_ad_text.png';
+  import { getBrandSetting } from '/@/settings/brandSetting';
+  import { resolveBrandUrl } from '/@/utils/brand';
   import { AppLocalePicker, AppDarkModeToggle } from '/@/components/Application';
   import { useLocaleStore } from '/@/store/modules/locale';
   import { createLocalStorage } from '/@/utils/cache';
@@ -204,6 +207,18 @@
     scriptUrl: '//at.alicdn.com/t/font_2316098_umqusozousr.js',
   });
   const { prefixCls } = useDesign('mini-login');
+  const { appTitle, appSubtitle, logoUrl, loginBgUrl } = getBrandSetting();
+  const hideExtraLogin = true;
+  const logoDisplayUrl = computed(() => resolveBrandUrl(logoUrl));
+  const loginBgStyle = computed(() => {
+    if (!loginBgUrl) return {};
+    const bgUrl = resolveBrandUrl(loginBgUrl);
+    return {
+      backgroundImage: `url(${bgUrl})`,
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
+    };
+  });
   const { notification, createMessage } = useMessage();
   const userStore = useUserStore();
   const { t } = useI18n();
@@ -558,6 +573,10 @@
   }
 
   onMounted(() => {
+    if (hideExtraLogin) {
+      activeIndex.value = 'accountLogin';
+      type.value = 'login';
+    }
     //加载验证码
     handleChangeCheckCode();
     // 恢复已记住的用户名

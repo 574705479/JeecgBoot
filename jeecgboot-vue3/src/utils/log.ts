@@ -1,4 +1,6 @@
-const projectName = import.meta.env.VITE_GLOB_APP_TITLE;
+import { getBrandSetting } from '/@/settings/brandSetting';
+
+const projectName = getBrandSetting().appTitle || import.meta.env.VITE_GLOB_APP_TITLE;
 
 export function warn(message: string) {
   console.warn(`[${projectName} warn]:${message}`);

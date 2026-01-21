@@ -1,11 +1,11 @@
 <template>
     <div class="app-loading">
         <div class="app-loading-wrap">
-            <img src="/resource/img/logo.png" class="app-loading-logo" alt="Logo">
+            <img :src="logoUrl" class="app-loading-logo" alt="Logo">
             <div class="app-loading-dots">
                 <span class="dot dot-spin"><i></i><i></i><i></i><i></i></span>
             </div>
-            <div class="app-loading-title">JeecgBoot 企业级低代码平台</div>
+            <div class="app-loading-title">{{ appTitle }}</div>
         </div>
     </div>
 </template>
@@ -19,10 +19,12 @@
   import { useMessage } from '/@/hooks/web/useMessage';
   import { useUserStore } from '/@/store/modules/user';
   import { useI18n } from '/@/hooks/web/useI18n';
+  import { getBrandSetting } from '/@/settings/brandSetting';
   
   export default {
     name: "TokenLogin",
     setup(){
+      const { appTitle, logoUrl } = getBrandSetting();
       const route = useRoute();
       let router = useRouter();
       const {createMessage, notification} = useMessage()
@@ -82,6 +84,10 @@
           });
         }
       }
+      return {
+        appTitle,
+        logoUrl,
+      };
     }
   }
 </script>

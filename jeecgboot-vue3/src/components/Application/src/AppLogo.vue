@@ -4,7 +4,7 @@
 -->
 <template>
   <div class="anticon" :class="getAppLogoClass" @click="goHome">
-    <img src="../../../assets/images/logo.png" />
+    <img :src="logoDisplayUrl || logoUrl" />
     <div class="ml-2 truncate md:opacity-100" :class="getTitleClass" v-show="showTitle">
       {{ shortTitle }}
     </div>
@@ -18,6 +18,8 @@
   import { useDesign } from '/@/hooks/web/useDesign';
   import { PageEnum } from '/@/enums/pageEnum';
   import { useUserStore } from '/@/store/modules/user';
+  import { getBrandSetting } from '/@/settings/brandSetting';
+  import { resolveBrandUrl } from '/@/utils/brand';
 
   const props = defineProps({
     /**
@@ -37,7 +39,9 @@
   const { prefixCls } = useDesign('app-logo');
   const { getCollapsedShowTitle } = useMenuSetting();
   const userStore = useUserStore();
-  const { title, shortTitle } = useGlobSetting();
+  const { shortTitle } = useGlobSetting();
+  const { logoUrl } = getBrandSetting();
+  const logoDisplayUrl = computed(() => resolveBrandUrl(logoUrl));
   
   const go = useGo();
 

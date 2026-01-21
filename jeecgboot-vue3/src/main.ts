@@ -22,6 +22,7 @@ import { useSso } from '/@/hooks/web/useSso';
 import { checkIsQiankunMicro } from "/@/qiankun/micro";
 import { autoUseQiankunMicro } from "/@/qiankun/micro/qiankunMicro";
 import { useAppStoreWithOut } from "@/store/modules/app";
+import { loadBrandConfig } from '/@/utils/brand';
 
 // 注册online模块lib
 import { registerPackages } from '/@/utils/monorepo/registerPackages';
@@ -53,6 +54,9 @@ async function bootstrap(props?: MainAppProps) {
 
   // 配置存储
   setupStore(app);
+
+  // 读取品牌配置（用于登录页/标题/Logo）
+  await loadBrandConfig();
 
   // 配置参数
   setupProps(props);

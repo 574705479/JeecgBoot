@@ -10,10 +10,26 @@
     />
 
     <title><%= title %></title>
-    <link rel="icon" href="<%= basePublicPath %>/logo.png" />
+    <link rel="icon" href="<%= basePublicPath %>/logo.svg" />
     <!-- 全局配置 -->
     <script>
       window._CONFIG = {};
+      // 品牌配置（用于登录加载页等，避免残留默认文案）
+      try {
+        var storedBrand = localStorage.getItem('CS_BRAND_CONFIG');
+        if (storedBrand) {
+          window.__APP_BRAND__ = Object.assign({}, window.__APP_BRAND__ || {}, JSON.parse(storedBrand));
+        }
+      } catch (e) {}
+      window.__APP_BRAND__ = window.__APP_BRAND__ || {
+        title: '客服系统',
+        shortTitle: '客服系统',
+        subtitle: '欢迎使用客服系统',
+        logoUrl: '<%= basePublicPath %>/logo.svg',
+        faviconUrl: '<%= basePublicPath %>/logo.svg',
+        loginBgUrl: '',
+        loadingTitle: '客服系统',
+      };
     </script>
   </head>
   <body>
@@ -157,13 +173,20 @@
       </style>
       <div class="app-loading">
         <div class="app-loading-wrap">
-          <img src="<%= basePublicPath %>/resource/img/logo.png" class="app-loading-logo" alt="Logo" />
+          <img src="<%= basePublicPath %>/logo.svg" class="app-loading-logo" alt="Logo" />
           <div class="app-loading-dots">
             <span class="dot dot-spin"><i></i><i></i><i></i><i></i></span>
           </div>
-          <div class="app-loading-title"><%= title %></div>
+          <div class="app-loading-title" id="app-loading-title"><%= title %></div>
         </div>
       </div>
+      <script>
+        (function () {
+          var brand = window.__APP_BRAND__ || {};
+          var el = document.getElementById('app-loading-title');
+          if (el) el.textContent = brand.loadingTitle || brand.title || el.textContent || '';
+        })();
+      </script>
     </div>
     <script type="module" src="/src/main.ts"></script>
     <!-- 百度统计 -->

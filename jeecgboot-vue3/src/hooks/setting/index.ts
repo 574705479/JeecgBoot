@@ -1,6 +1,7 @@
 import type { GlobConfig } from '/#/config';
 
 import { getAppEnvConfig } from '/@/utils/env';
+import { getBrandSetting } from '/@/settings/brandSetting';
 
 export const useGlobSetting = (): Readonly<GlobConfig> => {
   const {
@@ -26,14 +27,17 @@ export const useGlobSetting = (): Readonly<GlobConfig> => {
   //   );
   // }
 
+  const brand = getBrandSetting();
+  const appTitle = brand.appTitle || VITE_GLOB_APP_TITLE;
+  const appShortTitle = brand.appShortTitle || VITE_GLOB_APP_SHORT_NAME;
   // 短标题：替换shortName的下划线为空格
-  const shortTitle = VITE_GLOB_APP_SHORT_NAME.replace(/_/g, " ");
+  const shortTitle = appShortTitle.replace(/_/g, ' ');
   // Take global configuration
   const glob: Readonly<GlobConfig> = {
-    title: VITE_GLOB_APP_TITLE,
+    title: appTitle,
     domainUrl: VITE_GLOB_DOMAIN_URL,
     apiUrl: VITE_GLOB_API_URL,
-    shortName: VITE_GLOB_APP_SHORT_NAME,
+    shortName: appShortTitle,
     shortTitle: shortTitle,
     openSso: VITE_GLOB_APP_OPEN_SSO,
     openQianKun: VITE_GLOB_APP_OPEN_QIANKUN,

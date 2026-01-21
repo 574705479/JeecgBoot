@@ -261,6 +261,29 @@ export const usePermissionStore = defineStore({
           }
           // 组件地址前加斜杠处理  author: lsq date:2021-09-08
           routeList = addSlashToRouteComponent(routeList);
+          // 隐藏首页菜单（dashboard）
+          const hideHomeMenu = (list: AppRouteRecordRaw[]): AppRouteRecordRaw[] => {
+            return list
+              .filter((route) => {
+                const path = route.path || '';
+                const title = route.meta?.title;
+                const component = typeof route.component === 'string' ? route.component : '';
+                const isDashboard =
+                  path === '/dashboard' ||
+                  path.startsWith('/dashboard/') ||
+                  component.includes('dashboard/') ||
+                  title === '首页' ||
+                  title === 'Dashboard';
+                return !isDashboard;
+              })
+              .map((route) => {
+                if (route.children && route.children.length) {
+                  route.children = hideHomeMenu(route.children);
+                }
+                return route;
+              });
+          };
+          routeList = hideHomeMenu(routeList);
           // 动态引入组件
           routeList = transformObjToRoute(routeList);
 

@@ -4,7 +4,10 @@
       <div class="aui-form">
         <div class="aui-image">
           <div class="aui-image-text">
-            <img :src="jeecgAdTextImg" alt="" />
+            <div class="login-brand-text">
+              <div class="login-brand-title">{{ appTitle }}</div>
+              <div class="login-brand-subtitle" v-if="appSubtitle">{{ appSubtitle }}</div>
+            </div>
           </div>
         </div>
         <div class="aui-formBox">
@@ -90,8 +93,7 @@
   import { getCaptcha, register } from '/@/api/sys/user';
   import { SmsEnum } from '/@/views/sys/login/useLogin';
   import { useMessage } from '/@/hooks/web/useMessage';
-  import logoImg from '/@/assets/loginmini/icon/jeecg_logo.png';
-  import jeecgAdTextImg from '/@/assets/loginmini/icon/jeecg_ad_text.png';
+  import { getBrandSetting } from '/@/settings/brandSetting';
   import eyeKImg from '/@/assets/loginmini/icon/icon-eye-k.png';
   import eyeGImg from '/@/assets/loginmini/icon/icon-eye-g.png';
   import { useI18n } from "/@/hooks/web/useI18n";
@@ -100,6 +102,7 @@
   import { ExceptionEnum } from "@/enums/exceptionEnum";
 
   const { t } = useI18n();
+  const { appTitle, appSubtitle } = getBrandSetting();
   const { notification, createErrorModal, createMessage } = useMessage();
   const emit = defineEmits(['go-back', 'success', 'register']);
   const formRef = ref();

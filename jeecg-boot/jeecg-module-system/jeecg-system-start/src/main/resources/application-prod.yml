@@ -207,7 +207,7 @@ jeecg:
     # 低代码模式（dev:开发模式，prod:发布模式——关闭所有在线开发配置能力）
     lowCodeMode: prod
     # 是否允许同一账号多地同时登录 （为 true 时允许一起登录, 为 false 时新登录挤掉旧登录）
-    is-concurrent: true
+    is-concurrent: false
   # 签名密钥串(前后端要一致，正式发布请自行修改)
   signatureSecret: dd05f1c54d63749eda95f9fa6d49v442a
   #签名拦截接口
