@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="cs-workbench">
     <!-- 左侧会话列表 -->
     <div class="sidebar">
@@ -307,7 +307,7 @@
                 <div class="msg-info">
                   <span class="sender-name">{{ msg.actualSenderName || msg.senderName }}</span>
                   <a-tag v-if="msg.senderType === 1 || msg.isAiGenerated" color="purple" size="small">AI</a-tag>
-                  <a-avatar :size="messageAvatarSize" class="msg-avatar-inline">
+                  <a-avatar :size="messageAvatarSize" class="msg-avatar-inline" :src="getMessageAvatarUrl(msg)">
                     {{ (msg.actualSenderName || msg.senderName)?.charAt(0) || (msg.senderType === 1 ? 'AI' : '客') }}
                   </a-avatar>
                 </div>
@@ -1094,6 +1094,11 @@ function removeAttachment(index: number) {
 
 function getAttachmentUrl(attachment: any) {
   return getFileAccessHttpUrl(attachment?.url);
+}
+
+function getMessageAvatarUrl(msg: any) {
+  const avatar = msg?.senderAvatar;
+  return avatar ? getFileAccessHttpUrl(avatar) : '';
 }
 
 function parseExtra(extra: any) {
@@ -2182,6 +2187,7 @@ function handleWsMessage(data: any) {
           senderType: data.senderType,
           senderId: data.senderId,
           senderName: data.senderName,
+          senderAvatar: data.senderAvatar,
           createTime: data.timestamp || new Date().toISOString(),
         };
         // 避免重复添加

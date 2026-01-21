@@ -169,6 +169,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
         
         // 创建客服消息（用户看到的显示为"客服"）
         CsMessage agentMessage = CsMessage.createAgentMessage(conversationId, agentId, agentName, content);
+        agentMessage.setSenderAvatar(resolveAgentAvatar(agentId));
         if (msgType != null) {
             agentMessage.setMsgType(msgType);
         }
@@ -405,6 +406,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
         
         // 创建消息
         CsMessage message = CsMessage.createAgentMessage(conversationId, agentId, agentName, content);
+        message.setSenderAvatar(resolveAgentAvatar(agentId));
         message.setIsAiGenerated(true);
         message.setAiConfirmed(true);
         message.setAiSuggestionId(suggestionId);
@@ -457,6 +459,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
                 csMsg.setSenderId(msg.getSenderId());
                 csMsg.setSenderName(msg.getSenderName());
                 csMsg.setCreateTime(msg.getCreateTime());
+                csMsg.setSenderAvatar(msg.getSenderAvatar());
                 messages.add(csMsg);
             }
             
@@ -507,6 +510,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
             chatMessage.setSenderName(message.getSenderName());
             chatMessage.setCreateTime(message.getCreateTime() != null ? message.getCreateTime() : new Date());
             chatMessage.setSenderType(message.getSenderType());
+            chatMessage.setSenderAvatar(message.getSenderAvatar());
             chatMessage.setMsgType(message.getMsgType() != null ? message.getMsgType() : ChatMessage.MSG_TYPE_TEXT);
             if (oConvertUtils.isNotEmpty(message.getExtra())) {
                 try {
@@ -586,6 +590,19 @@ public class CsMessageServiceImpl implements ICsMessageService {
         }
     }
 
+    private String resolveAgentAvatar(String agentId) {
+        if (oConvertUtils.isEmpty(agentId)) {
+            return null;
+        }
+        try {
+            CsAgent agent = agentService.getById(agentId);
+            return agent != null ? agent.getAvatar() : null;
+        } catch (Exception e) {
+            log.debug("[CS-Message] 获取客服头像失败: {}", e.getMessage());
+            return null;
+        }
+    }
+
     /**
      * 推送消息给用户
      */
@@ -599,6 +616,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
                 .msgType(message.getMsgType())
                 .senderId(message.getSenderId())
                 .senderName(message.getSenderName())
+                .senderAvatar(message.getSenderAvatar())
                 .senderType(message.getSenderType())
                 .extra(extraMap)
                 .timestamp(message.getCreateTime())
@@ -627,6 +645,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
                 .msgType(message.getMsgType())
                 .senderId(message.getSenderId())
                 .senderName(message.getSenderName())
+                .senderAvatar(message.getSenderAvatar())
                 .senderType(message.getSenderType())
                 .extra(extraMap)
                 .timestamp(message.getCreateTime())
@@ -686,6 +705,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
                 .msgType(message.getMsgType())
                 .senderId(message.getSenderId())
                 .senderName(message.getSenderName())
+                .senderAvatar(message.getSenderAvatar())
                 .senderType(message.getSenderType())
                 .extra(extraMap)
                 .timestamp(message.getCreateTime())

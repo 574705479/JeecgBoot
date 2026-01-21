@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="user-chat-container">
     <!-- 头部 -->
     <div class="chat-header">
@@ -74,11 +74,11 @@
               </div>
               <div class="message-time">{{ formatTime(msg.createTime) }}</div>
             </div>
-            <img class="avatar" :src="defaultUserAvatar" />
+            <img class="avatar" :src="getUserAvatar(msg)" />
           </div>
           <!-- 客服/AI消息 (senderType === 1 AI, 2 客服) -->
           <div v-else class="agent-message">
-            <img class="avatar" :src="appInfo.avatar || defaultAvatar" />
+            <img class="avatar" :src="getAgentAvatar(msg)" />
             <div class="message-content">
               <div class="sender-info">
                 <span class="sender-name">{{ msg.senderName || '客服' }}</span>
@@ -122,7 +122,7 @@
         </div>
         <!-- 客服正在输入提示 -->
         <div v-if="agentTyping" class="typing-indicator">
-          <img class="avatar" :src="appInfo.avatar || defaultAvatar" />
+          <img class="avatar" :src="getAgentAvatar()" />
           <div class="typing-dots">
             <span></span><span></span><span></span>
           </div>
@@ -220,6 +220,21 @@ const appInfo = ref({
 });
 const defaultAvatar = 'https://gw.alipayobjects.com/zos/rmsportal/KDpgvguMpGfqaHPjicRK.svg';
 const defaultUserAvatar = 'https://gw.alipayobjects.com/zos/antfincdn/XAosXuNZyF/BiazfanxmamNRoxxVxka.png';
+
+function resolveAvatarUrl(avatar?: string) {
+  if (!avatar) return '';
+  return getFileAccessHttpUrl(avatar);
+}
+
+function getAgentAvatar(msg?: any) {
+  const avatar = msg?.senderAvatar || appInfo.value.avatar;
+  return resolveAvatarUrl(avatar) || defaultAvatar;
+}
+
+function getUserAvatar(msg?: any) {
+  const avatar = msg?.senderAvatar;
+  return resolveAvatarUrl(avatar) || defaultUserAvatar;
+}
 
 // 预设问题列表
 const presetQuestions = computed(() => {
@@ -574,6 +589,7 @@ function handleWsMessage(data: any) {
         senderType: msgSenderType,
         senderId: data.senderId,
         senderName: data.senderName,
+        senderAvatar: data.senderAvatar,
         createTime: data.timestamp || new Date().toISOString(),
       };
       // 避免重复添加
