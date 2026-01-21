@@ -1,6 +1,6 @@
 appId: 'com.jeecg.boot3'
 # 产品名称
-productName: 'jeecgboot'
+productName: '在线客服系统'
 files:
   # 仅包含 dist 目录下所有文件
   - 'dist/**/*'
@@ -12,7 +12,7 @@ directories:
 win:
   # win exe 程序图标
   icon: 'electron/icons/app.ico'
-  artifactName: 'jeecgboot-setup-${version}.exe'
+  artifactName: '客服系统-安装包-1.0.0.exe'
 # 安装包配置
 nsis:
   oneClick: false

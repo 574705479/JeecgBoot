@@ -199,9 +199,11 @@ import MarkdownIt from 'markdown-it';
 import { message } from 'ant-design-vue';
 import { DeleteOutlined, MessageOutlined, SendOutlined, BulbOutlined } from '@ant-design/icons-vue';
 import { defHttp } from '/@/utils/http/axios';
+import { useGlobSetting } from '/@/hooks/setting';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
 import { createImgPreview } from '/@/components/Preview';
 
+const globSetting = useGlobSetting();
 const silentRequestOptions = { successMessageMode: 'none' as const };
 function httpGet<T = any>(config: any, options: any = {}) {
   return defHttp.get<T>(config, { ...silentRequestOptions, ...options });
@@ -466,6 +468,30 @@ async function loadMessages() {
 }
 
 // 连接WebSocket
+function getWsBaseUrl() {
+  const { apiUrl, domainUrl, urlPrefix } = globSetting;
+  let base = /^https?:\/\//.test(apiUrl) ? apiUrl : '';
+  if (!base && /^https?:\/\//.test(domainUrl)) {
+    base = domainUrl;
+  }
+  if (!base) {
+    base = window.location.origin;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(base);
+  } catch {
+    parsed = new URL(window.location.origin);
+  }
+  const wsProtocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
+  let prefix = urlPrefix || parsed.pathname || '';
+  if (prefix && !prefix.startsWith('/')) {
+    prefix = `/${prefix}`;
+  }
+  prefix = prefix.replace(/\/$/, '');
+  return `${wsProtocol}//${parsed.host}${prefix}`;
+}
+
 function connectWebSocket() {
   if (!conversationId.value || !userId.value) {
     console.warn('缺少conversationId或userId，无法连接WebSocket');
@@ -480,10 +506,8 @@ function connectWebSocket() {
   }
   wsManuallyClosed = false;
 
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const host = window.location.host; // 使用当前页面的host（包含端口），通过代理连接
-  // 通过前端代理连接后端WebSocket，路径前缀 /jeecgboot（不再需要appId）
-  const wsUrl = `${protocol}//${host}/jeecgboot/ws/cs/user?userId=${userId.value}&conversationId=${conversationId.value}`;
+  const wsBase = getWsBaseUrl();
+  const wsUrl = `${wsBase}/ws/cs/user?userId=${userId.value}&conversationId=${conversationId.value}`;
 
   console.log('[UserChat] 连接WebSocket:', wsUrl);
 

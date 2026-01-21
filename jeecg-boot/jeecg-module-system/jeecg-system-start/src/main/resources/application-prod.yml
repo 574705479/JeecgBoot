@@ -144,9 +144,9 @@ spring:
           slow-sql-millis: 5000
       datasource:
         master:
-          url: jdbc:mysql://127.0.0.1:3306/jeecg-boot?characterEncoding=UTF-8&useUnicode=true&useSSL=false&tinyInt1isBit=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+          url: jdbc:mysql://kefu-mysql:3306/jeecg-boot?characterEncoding=UTF-8&useUnicode=true&useSSL=false&tinyInt1isBit=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
           username: root
-          password: root
+          password: 92400bda284afba53b21162911f98d00Z
           driver-class-name: com.mysql.cj.jdbc.Driver
           # 多数据源配置
           #multi-datasource1:
@@ -158,9 +158,9 @@ spring:
   data:
     redis:
       database: 0
-      host: 127.0.0.1
+      host: kefu-redis
       port: 6379
-      password:
+      password: 92400bda284afba53b21162911f98d00Z
 #mybatis plus 设置
 mybatis-plus:
   mapper-locations: classpath*:org/jeecg/**/xml/*Mapper.xml
@@ -191,11 +191,11 @@ jeecg:
   # AIRag向量库
   ai-rag:
     embed-store:
-      host: 127.0.0.1
+      host: kefu-pgvector
       port: 5432
       database: postgres
       user: postgres
-      password: postgres
+      password: 92400bda284afba53b21162911f98d00Z
       table: embeddings
   #  Unipush配置 云函数调用 URL 化地址
   unicloud:
@@ -213,7 +213,7 @@ jeecg:
   #签名拦截接口
   signUrls: /sys/dict/getDictItems/*,/sys/dict/loadDict/*,/sys/dict/loadDictOrderByValue/*,/sys/dict/loadDictItem/*,/sys/dict/loadTreeData,/sys/api/queryTableDictItemsByCode,/sys/api/queryFilterTableDictInfo,/sys/api/queryTableDictByKeys,/sys/api/translateDictFromTable,/sys/api/translateDictFromTableByKeys,/sys/sendChangePwdSms,/sys/user/sendChangePhoneSms,/sys/sms,/desform/api/sendVerifyCode
   # local\minio\alioss
-  uploadType: alioss
+  uploadType: local
   # 前端访问地址
   domainUrl:
     pc: http://localhost:3100

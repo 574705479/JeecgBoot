@@ -2088,6 +2088,30 @@ function useSuggestion(direct: boolean) {
 }
 
 // WebSocket
+function getWsBaseUrl() {
+  const { apiUrl, domainUrl, urlPrefix } = globSetting;
+  let base = /^https?:\/\//.test(apiUrl) ? apiUrl : '';
+  if (!base && /^https?:\/\//.test(domainUrl)) {
+    base = domainUrl;
+  }
+  if (!base) {
+    base = window.location.origin;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(base);
+  } catch {
+    parsed = new URL(window.location.origin);
+  }
+  const wsProtocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
+  let prefix = urlPrefix || parsed.pathname || '';
+  if (prefix && !prefix.startsWith('/')) {
+    prefix = `/${prefix}`;
+  }
+  prefix = prefix.replace(/\/$/, '');
+  return `${wsProtocol}//${parsed.host}${prefix}`;
+}
+
 function connectWebSocket() {
   if (!agentId.value) {
     console.warn('[CS-WS] 缺少agentId，无法连接WebSocket');
@@ -2108,10 +2132,8 @@ function connectWebSocket() {
     clearTimeout(wsReconnectTimer);
     wsReconnectTimer = null;
   }
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const host = window.location.host; // 使用当前页面的host（包含端口），通过代理连接
-  // 通过前端代理连接后端WebSocket，路径前缀 /jeecgboot
-  const wsUrl = `${protocol}//${host}/jeecgboot/ws/cs/agent?userId=${agentId.value}`;
+  const wsBase = getWsBaseUrl();
+  const wsUrl = `${wsBase}/ws/cs/agent?userId=${agentId.value}`;
   
   console.log('[CS-WS] 连接WebSocket:', wsUrl);
   ws = new WebSocket(wsUrl);

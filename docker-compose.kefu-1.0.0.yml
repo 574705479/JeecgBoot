@@ -1,15 +1,13 @@
 version: '2'
 services:
   kefu-mysql:
-    build:
-      context: ./jeecg-boot/db
+    image: cangku.chatgpt168.net/kefu-mysql:1.0.0
     environment:
       MYSQL_ROOT_PASSWORD: 92400bda284afba53b21162911f98d00Z
       MYSQL_ROOT_HOST: '%'
       TZ: Asia/Shanghai
     restart: always
     container_name: kefu-mysql
-    image: kefu-mysql
     # 🔒 数据持久化配置 - 防止容器重建时数据丢失
     volumes:
       - ./docker-data/mysql:/var/lib/mysql
@@ -35,7 +33,7 @@ services:
     restart: always
     hostname: kefu-redis
     container_name: kefu-redis
-    command: redis-server --appendonly yes --appendfsync everysec
+    command: redis-server --appendonly yes --appendfsync everysec --requirepass 92400bda284afba53b21162911f98d00Z
     networks:
       - kefu
 
@@ -69,24 +67,23 @@ services:
       - kefu
       
   kefu-system:
-    build:
-      context: ./jeecg-boot/jeecg-module-system/jeecg-system-start
+    image: cangku.chatgpt168.net/kefu-system:1.0.0
     restart: on-failure
+    environment:
+      SPRING_APPLICATION_JSON: '{"jeecg":{"uploadType":"local"}}'
     depends_on:
       - kefu-mysql
       - kefu-redis
     container_name: kefu-system
-    image: kefu-system
     hostname: kefu-system
     ports:
       - 8080:8080
     networks:
       - kefu
+
   kefu-vue:
-    build:
-      context: ./jeecgboot-vue3
+    image: cangku.chatgpt168.net/kefu-vue:1.0.0
     container_name: kefu-vue-nginx
-    image: kefu-vue
     depends_on:
       - kefu-system
     networks:

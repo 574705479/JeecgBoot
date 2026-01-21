@@ -84,6 +84,17 @@ export function createIndexWindow() {
     title: $env.VITE_GLOB_APP_TITLE!,
   });
 
+  // 允许在生产环境通过快捷键打开DevTools
+  win.webContents.on('before-input-event', (event, input) => {
+    const isToggleDevTools =
+      input.key === 'F12' ||
+      (input.control && input.shift && input.key.toLowerCase() === 'i');
+    if (isToggleDevTools) {
+      win.webContents.toggleDevTools();
+      event.preventDefault();
+    }
+  });
+
   // 开发环境加载Vite服务，生产加载打包文件
   if (isDev) {
     let serverUrl = $env.VITE_DEV_SERVER_URL! as string;

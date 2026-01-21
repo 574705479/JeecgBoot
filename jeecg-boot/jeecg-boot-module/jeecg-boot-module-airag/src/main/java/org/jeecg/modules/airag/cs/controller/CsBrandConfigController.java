@@ -33,6 +33,7 @@ public class CsBrandConfigController {
      * 获取当前品牌配置
      */
     @Operation(summary = "获取当前品牌配置")
+    @org.jeecg.config.shiro.IgnoreAuth
     @GetMapping("/get")
     public Result<CsBrandConfig> getBrandConfig() {
         QueryWrapper<CsBrandConfig> wrapper = new QueryWrapper<>();
