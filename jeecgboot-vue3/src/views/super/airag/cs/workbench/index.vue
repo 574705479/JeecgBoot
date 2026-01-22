@@ -836,6 +836,10 @@ let messagesEl: HTMLElement | null = null;
 const conversationsCache = new Map<string, any[]>();
 const conversationsCacheTime = new Map<string, number>();
 let conversationsRequestSeq = 0;
+const extraCache = new WeakMap<any, { key: any; value: any }>();
+const mediaGridCache = new WeakMap<any, { key: any; value: { items: any[]; extraCount: number; total: number } }>();
+const renderCache = new Map<string, string>();
+const maxRenderCacheSize = 300;
 
 // WebSocket
 let ws: WebSocket | null = null;
@@ -845,9 +849,32 @@ let wsManuallyClosed = false;
 const hasMounted = ref(false);
 const isActivating = ref(false);
 const loadingConversations = ref(false);
+let wsHeartbeatTimer: number | null = null;
+let wsHealthTimer: number | null = null;
+let wsFallbackPollTimer: number | null = null;
+let wsReconnectAttempts = 0;
+let lastWsMessageAt = 0;
+let lastMessageLoadAt = 0;
+const wsHeartbeatIntervalMs = 15000;
+const wsFallbackPollIntervalMs = 20000;
+
+const handleVisibilityChange = () => {
+  if (!hasMounted.value) return;
+  if (document.hidden) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    connectWebSocket();
+  }
+};
+
+const handleNetworkOnline = () => {
+  if (!hasMounted.value) return;
+  connectWebSocket();
+};
 
 function closeWebSocket() {
   wsManuallyClosed = true;
+  stopWsHeartbeat();
+  stopWsHealthCheck();
   if (wsReconnectTimer) {
     clearTimeout(wsReconnectTimer);
     wsReconnectTimer = null;
@@ -860,6 +887,95 @@ function closeWebSocket() {
     }
   }
   ws = null;
+}
+
+function stopWsHeartbeat() {
+  if (wsHeartbeatTimer) {
+    clearInterval(wsHeartbeatTimer);
+    wsHeartbeatTimer = null;
+  }
+}
+
+function stopWsHealthCheck() {
+  if (wsHealthTimer) {
+    clearInterval(wsHealthTimer);
+    wsHealthTimer = null;
+  }
+}
+
+function stopFallbackPoll() {
+  if (wsFallbackPollTimer) {
+    clearInterval(wsFallbackPollTimer);
+    wsFallbackPollTimer = null;
+  }
+}
+
+function startFallbackPoll() {
+  stopFallbackPoll();
+  wsFallbackPollTimer = window.setInterval(async () => {
+    if (document.hidden) return;
+    if (!agentId.value) return;
+    if (loadingConversations.value) return;
+    if (ws && ws.readyState === WebSocket.OPEN && lastWsMessageAt) {
+      const now = Date.now();
+      if (now - lastWsMessageAt < wsFallbackPollIntervalMs) {
+        return;
+      }
+    }
+    try {
+      await loadConversations();
+      const currentId = currentConversation.value?.id;
+      if (!currentId) return;
+      const conv = conversations.value.find(c => c.id === currentId);
+      if (!conv?.lastMessageTime) return;
+      const lastMsgTime = new Date(conv.lastMessageTime).getTime();
+      if (lastMsgTime > lastMessageLoadAt) {
+        await loadMessages(currentId);
+      }
+    } catch {
+      // 忽略轮询失败
+    }
+  }, wsFallbackPollIntervalMs);
+}
+
+function scheduleWsReconnect() {
+  if (wsManuallyClosed) return;
+  if (wsReconnectTimer) return;
+  const jitter = Math.floor(Math.random() * 1000);
+  const delay = Math.min(30000, 1000 * Math.pow(2, wsReconnectAttempts)) + jitter;
+  wsReconnectAttempts += 1;
+  wsReconnectTimer = window.setTimeout(() => {
+    wsReconnectTimer = null;
+    connectWebSocket();
+  }, delay);
+}
+
+function startWsHeartbeat() {
+  stopWsHeartbeat();
+  wsHeartbeatTimer = window.setInterval(() => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    try {
+      ws.send(JSON.stringify({ type: 'ping', ts: Date.now() }));
+    } catch {
+      // 发送失败，触发重连
+      try {
+        ws?.close();
+      } catch {
+        // ignore
+      }
+    }
+  }, wsHeartbeatIntervalMs);
+}
+
+function startWsHealthCheck() {
+  stopWsHealthCheck();
+  wsHealthTimer = window.setInterval(() => {
+    if (!ws) return;
+    if (ws.readyState !== WebSocket.OPEN) {
+      scheduleWsReconnect();
+      return;
+    }
+  }, wsHeartbeatIntervalMs);
 }
 
 // 计算属性
@@ -889,17 +1005,25 @@ onMounted(async () => {
   await loadGlobalVisitorApp();  // 加载全局访客AI应用配置
   await loadConversations();
   connectWebSocket();
+  startFallbackPoll();
   hasMounted.value = true;
   
   // ★ 移除定时轮询，完全依赖 WebSocket 实时推送
   // refreshTimer = window.setInterval(() => {
   //   loadConversations();
   // }, 10000);
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+  window.addEventListener('online', handleNetworkOnline);
 });
 
 onUnmounted(() => {
   closeWebSocket();
   refreshTimer && clearInterval(refreshTimer);
+  stopFallbackPoll();
+  stopWsHeartbeat();
+  stopWsHealthCheck();
+  window.removeEventListener('online', handleNetworkOnline);
+  document.removeEventListener('visibilitychange', handleVisibilityChange);
   if (messagesEl) {
     messagesEl.removeEventListener('scroll', handleMessageScroll);
   }
@@ -918,6 +1042,7 @@ onActivated(async () => {
     await loadConversations();
     closeWebSocket();
     connectWebSocket();
+    startFallbackPoll();
   } finally {
     isActivating.value = false;
   }
@@ -926,6 +1051,7 @@ onActivated(async () => {
 onDeactivated(() => {
   // 离开菜单时断开连接，避免后台连接失效导致不再接收消息
   closeWebSocket();
+  stopFallbackPoll();
 });
 
 watch(filter, () => {
@@ -1113,8 +1239,20 @@ function parseExtra(extra: any) {
   return extra;
 }
 
+function getParsedExtra(msg: any) {
+  if (!msg) return null;
+  const raw = msg.extra;
+  const cached = extraCache.get(msg);
+  if (cached && cached.key === raw) {
+    return cached.value;
+  }
+  const parsed = parseExtra(raw);
+  extraCache.set(msg, { key: raw, value: parsed });
+  return parsed;
+}
+
 function getMessageAttachments(msg: any): any[] {
-  const extra = parseExtra(msg?.extra);
+  const extra = getParsedExtra(msg);
   return extra?.attachments || [];
 }
 
@@ -1127,11 +1265,18 @@ function getFileAttachments(msg: any): any[] {
 }
 
 function getMediaGridData(msg: any) {
+  const cacheKey = msg?.extra;
+  const cached = mediaGridCache.get(msg);
+  if (cached && cached.key === cacheKey) {
+    return cached.value;
+  }
   const media = getMediaAttachments(msg);
   const maxItems = 4;
   const items = media.slice(0, maxItems);
   const extraCount = Math.max(0, media.length - maxItems);
-  return { items, extraCount, total: media.length };
+  const value = { items, extraCount, total: media.length };
+  mediaGridCache.set(msg, { key: cacheKey, value });
+  return value;
 }
 
 function openImagePreview(msg: any, item: any) {
@@ -1363,7 +1508,7 @@ async function loadConversations() {
   loadingConversations.value = true;
   try {
     // 同时加载统计数据（不等待，异步执行）
-    loadStats().catch(() => {});
+    loadStatsDebounced();
     
     // 监控模式：管理者查看所有进行中的会话
     const params: any = { 
@@ -1606,6 +1751,7 @@ async function loadMessages(conversationId: string) {
       params: { limit: 100 }
     });
     messages.value = res || [];
+    lastMessageLoadAt = Date.now();
     scrollToBottom();
   } catch (e) {
     console.error('加载消息失败', e);
@@ -1711,14 +1857,52 @@ async function sendMessage() {
   if (!content && attachments.length === 0) return;
   
   const wasUnassigned = currentConversation.value.status === 0; // 记录是否是待接入状态
+  let localMsgId = '';
   
   try {
     if (currentReplyMode.value === 0) {
-      await changeMode(1);
+      currentReplyMode.value = 1;
+      currentConversation.value.replyMode = 1;
+      void changeMode(1);
     }
     
     const msgType = attachments.length > 0 ? 5 : 0;
     const extra = attachments.length > 0 ? JSON.stringify({ attachments }) : undefined;
+    const nowIso = new Date().toISOString();
+    const previewText = buildMessagePreview(content, attachments);
+    localMsgId = `local_${Date.now()}`;
+    const localMsg = {
+      id: localMsgId,
+      conversationId: currentConversation.value.id,
+      content,
+      msgType,
+      extra: attachments.length > 0 ? { attachments } : undefined,
+      senderType: 2,
+      senderId: agentId.value,
+      senderName: agentName.value,
+      actualSenderName: agentName.value,
+      createTime: nowIso,
+    };
+
+    // 本地立即渲染，减少发送等待感
+    messages.value.push(localMsg);
+    scrollToBottom();
+
+    // 先更新会话列表预览，避免等待接口返回
+    currentConversation.value.lastMessage = previewText;
+    currentConversation.value.lastMessageTime = nowIso;
+    if (currentConversation.value.status === 1) {
+      currentConversation.value.lastTalkingAgent = agentName.value;
+    }
+    const listItem = conversations.value.find(c => c.id === currentConversation.value?.id);
+    if (listItem) {
+      listItem.lastMessage = previewText;
+      listItem.lastMessageTime = nowIso;
+      if (listItem.status === 1) {
+        listItem.lastTalkingAgent = agentName.value;
+      }
+    }
+
     const res = await httpPost({
       url: '/cs/message/agent/send',
       data: {
@@ -1731,44 +1915,20 @@ async function sendMessage() {
       }
     });
     
-    // 发送成功后，立即更新会话列表的最后消息和“对话中”客服
-    const nowIso = new Date().toISOString();
-    currentConversation.value.lastMessage = buildMessagePreview(content, attachments);
-    currentConversation.value.lastMessageTime = nowIso;
-    if (currentConversation.value.status === 1) {
-      currentConversation.value.lastTalkingAgent = agentName.value;
-    }
-    const listItem = conversations.value.find(c => c.id === currentConversation.value?.id);
-    if (listItem) {
-      listItem.lastMessage = buildMessagePreview(content, attachments);
-      listItem.lastMessageTime = nowIso;
-      if (listItem.status === 1) {
-        listItem.lastTalkingAgent = agentName.value;
+    const resMessage = res?.result || res;
+    if (resMessage?.id) {
+      const idx = messages.value.findIndex(m => m.id === localMsgId);
+      if (idx > -1) {
+        messages.value[idx].id = resMessage.id;
+        messages.value[idx].createTime = resMessage.createTime || nowIso;
       }
     }
-    
-    const resMessage = res?.result || res;
-    const localMsg = {
-      id: resMessage?.id || `local_${Date.now()}`,
-      conversationId: currentConversation.value.id,
-      content,
-      msgType,
-      extra: attachments.length > 0 ? { attachments } : undefined,
-      senderType: 2,
-      senderId: agentId.value,
-      senderName: agentName.value,
-      actualSenderName: agentName.value,
-      createTime: resMessage?.createTime || new Date().toISOString(),
-    };
-    messages.value.push(localMsg);
-    scrollToBottom();
 
     inputMessage.value = '';
     attachmentList.value = [];
     uploadFileList.value = [];
     
     // ★ 发送消息后清除未读数（无论当前计数是否为0）
-    httpPost({ url: `/cs/conversation/${currentConversation.value.id}/clear-unread` });
     currentConversation.value.unreadCount = 0;
     
     // 同步更新会话列表中的未读数
@@ -1794,6 +1954,12 @@ async function sendMessage() {
       loadStatsDebounced();
     }
   } catch (e) {
+    if (localMsgId) {
+      const idx = messages.value.findIndex(m => m.id === localMsgId);
+      if (idx > -1) {
+        messages.value.splice(idx, 1);
+      }
+    }
     message.error('发送失败');
   }
 }
@@ -2152,6 +2318,8 @@ function connectWebSocket() {
     }
   }
   wsManuallyClosed = false;
+  stopWsHeartbeat();
+  stopWsHealthCheck();
   if (wsReconnectTimer) {
     clearTimeout(wsReconnectTimer);
     wsReconnectTimer = null;
@@ -2162,7 +2330,13 @@ function connectWebSocket() {
   console.log('[CS-WS] 连接WebSocket:', wsUrl);
   ws = new WebSocket(wsUrl);
   
-  ws.onopen = () => console.log('[CS-WS] 连接成功');
+  ws.onopen = () => {
+    console.log('[CS-WS] 连接成功');
+    wsReconnectAttempts = 0;
+    lastWsMessageAt = Date.now();
+    startWsHeartbeat();
+    startWsHealthCheck();
+  };
   ws.onmessage = (event) => {
     try {
       handleWsMessage(JSON.parse(event.data));
@@ -2182,12 +2356,13 @@ function connectWebSocket() {
   ws.onclose = () => {
     ws = null;
     if (!wsManuallyClosed) {
-      wsReconnectTimer = window.setTimeout(connectWebSocket, 5000);
+      scheduleWsReconnect();
     }
   };
 }
 
 function handleWsMessage(data: any) {
+  lastWsMessageAt = Date.now();
   switch (data.type) {
     case 'message':
       // 更新会话列表中的最后消息（不管是否是当前会话）
@@ -2698,24 +2873,44 @@ const md = new MarkdownIt({
 // 渲染消息内容（普通消息 - 简单换行转换）
 function renderMessage(content: string) {
   if (!content) return '';
+  const cached = renderCache.get(content);
+  if (cached) {
+    return cached;
+  }
   const hasHtml = /<([a-z][\s\S]*?)>/i.test(content);
   const hasMarkdown = /!\[[^\]]*]\([^)]*\)|\*\*[^*]+\*\*|```|^\s*#/m.test(content);
+  let rendered = '';
   if (hasHtml || hasMarkdown) {
-    return md.render(content);
+    rendered = md.render(content);
+  } else {
+    // 简单的换行转换，与访客端相同
+    rendered = content
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\n/g, '<br>');
   }
-  // 简单的换行转换，与访客端相同
-  return content
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\n/g, '<br>');
+  if (renderCache.size >= maxRenderCacheSize) {
+    renderCache.clear();
+  }
+  renderCache.set(content, rendered);
+  return rendered;
 }
 
 // ★ 渲染AI建议内容（保留Markdown渲染）
 function renderMarkdown(content: string) {
   if (!content) return '';
+  const cached = renderCache.get(content);
+  if (cached) {
+    return cached;
+  }
   try {
-    return md.render(content);
+    const rendered = md.render(content);
+    if (renderCache.size >= maxRenderCacheSize) {
+      renderCache.clear();
+    }
+    renderCache.set(content, rendered);
+    return rendered;
   } catch (e) {
     console.error('Markdown渲染失败', e);
     return renderMessage(content); // 降级到普通文本

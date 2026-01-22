@@ -278,6 +278,10 @@ const wsConnected = ref(false);
 const agentTyping = ref(false);
 let wsReconnectTimer: number | null = null;
 let wsManuallyClosed = false;
+let wsReconnectAttempts = 0;
+let wsFallbackPollTimer: number | null = null;
+let lastWsMessageAt = 0;
+const wsFallbackPollIntervalMs = 20000;
 
 // AI回复中状态（用于限制用户快速发送）
 const aiResponding = ref(false);
@@ -313,6 +317,17 @@ const conversationClosed = ref(false);  // 会话是否已结束
 const replyMode = ref(0);  // 回复模式: 0=AI自动, 1=手动
 const hasAgent = ref(false);  // 是否有客服接入
 
+const handleVisibilityChange = () => {
+  if (document.hidden) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    connectWebSocket();
+  }
+};
+
+const handleNetworkOnline = () => {
+  connectWebSocket();
+};
+
 // 连接状态
 const connectionStatus = computed(() => {
   if (!wsConnected.value) return 'offline';
@@ -340,6 +355,9 @@ onMounted(async () => {
 
   // 连接WebSocket
   connectWebSocket();
+  startFallbackPoll();
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+  window.addEventListener('online', handleNetworkOnline);
 
   // 滚动到底部
   scrollToBottom();
@@ -347,6 +365,9 @@ onMounted(async () => {
 
 onUnmounted(() => {
   disconnectWebSocket();
+  stopFallbackPoll();
+  window.removeEventListener('online', handleNetworkOnline);
+  document.removeEventListener('visibilitychange', handleVisibilityChange);
 });
 
 // 初始化用户ID
@@ -516,12 +537,15 @@ function connectWebSocket() {
   ws.onopen = () => {
     console.log('[UserChat] WebSocket已连接');
     wsConnected.value = true;
+    wsReconnectAttempts = 0;
+    lastWsMessageAt = Date.now();
     startHeartbeat();
   };
 
   ws.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data);
+      lastWsMessageAt = Date.now();
       handleWsMessage(data);
     } catch (e) {
       console.error('[UserChat] 解析WebSocket消息失败', e);
@@ -538,11 +562,7 @@ function connectWebSocket() {
     ws = null;
     // 自动重连
     if (!wsManuallyClosed) {
-      wsReconnectTimer = window.setTimeout(() => {
-        if (!wsConnected.value) {
-          connectWebSocket();
-        }
-      }, 3000);
+      scheduleWsReconnect();
     }
   };
 
@@ -551,6 +571,11 @@ function connectWebSocket() {
     if (aiResponding.value && replyMode.value === 0) {
       stopAiResponding('网络异常，AI回复可能未完成，请稍后重试');
     }
+    try {
+      ws?.close();
+    } catch {
+      // ignore
+    }
   };
 }
 
@@ -558,6 +583,7 @@ function connectWebSocket() {
 function disconnectWebSocket() {
   stopHeartbeat();
   wsManuallyClosed = true;
+  stopFallbackPoll();
   if (wsReconnectTimer) {
     clearTimeout(wsReconnectTimer);
     wsReconnectTimer = null;
@@ -568,6 +594,45 @@ function disconnectWebSocket() {
   }
   wsConnected.value = false;
   stopAiResponding();
+}
+
+function scheduleWsReconnect() {
+  if (wsManuallyClosed) return;
+  if (wsReconnectTimer) return;
+  const jitter = Math.floor(Math.random() * 1000);
+  const delay = Math.min(30000, 1000 * Math.pow(2, wsReconnectAttempts)) + jitter;
+  wsReconnectAttempts += 1;
+  wsReconnectTimer = window.setTimeout(() => {
+    wsReconnectTimer = null;
+    connectWebSocket();
+  }, delay);
+}
+
+function stopFallbackPoll() {
+  if (wsFallbackPollTimer) {
+    clearInterval(wsFallbackPollTimer);
+    wsFallbackPollTimer = null;
+  }
+}
+
+function startFallbackPoll() {
+  stopFallbackPoll();
+  wsFallbackPollTimer = window.setInterval(async () => {
+    if (document.hidden) return;
+    if (!conversationId.value) return;
+    if (loading.value) return;
+    if (ws && ws.readyState === WebSocket.OPEN && lastWsMessageAt) {
+      const now = Date.now();
+      if (now - lastWsMessageAt < wsFallbackPollIntervalMs) {
+        return;
+      }
+    }
+    try {
+      await loadMessages();
+    } catch {
+      // ignore
+    }
+  }, wsFallbackPollIntervalMs);
 }
 
 // 心跳
