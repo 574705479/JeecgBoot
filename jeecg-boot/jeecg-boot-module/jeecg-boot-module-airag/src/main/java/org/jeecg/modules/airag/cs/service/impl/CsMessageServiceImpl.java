@@ -12,6 +12,7 @@ import org.jeecg.modules.airag.app.mapper.AiragAppMapper;
 import org.jeecg.modules.airag.chat.entity.ChatMessage;
 import org.jeecg.modules.airag.chat.service.IChatMessageService;
 import org.jeecg.modules.airag.common.handler.AIChatParams;
+import org.jeecg.modules.airag.cs.async.CsAsyncTaskExecutor;
 import org.jeecg.modules.airag.cs.entity.CsAgent;
 import org.jeecg.modules.airag.cs.entity.CsCollaborator;
 import org.jeecg.modules.airag.cs.entity.CsConversation;
@@ -83,8 +84,14 @@ public class CsMessageServiceImpl implements ICsMessageService {
     @Autowired
     private ICsCollaboratorService collaboratorService;
 
+    @Autowired
+    private CsAsyncTaskExecutor asyncTaskExecutor;
+
     // AI建议缓存 (conversationId -> suggestion)
     private final Map<String, String> aiSuggestionCache = new ConcurrentHashMap<>();
+
+    private static final long COLLABORATOR_CACHE_TTL_MS = 30000L;
+    private final Map<String, CollaboratorCacheEntry> collaboratorCache = new ConcurrentHashMap<>();
 
     // ==================== 消息发送 ====================
 
@@ -178,36 +185,37 @@ public class CsMessageServiceImpl implements ICsMessageService {
         }
         agentMessage.setSenderName(agentName); // 显示实际客服名称
         
-        // 保存到MongoDB
-        saveToMongo(agentMessage);
-        
-        // 更新会话最后消息
-        String lastMessage = buildMessagePreview(content, msgType, extra);
-        conversationService.updateLastMessage(conversationId, lastMessage);
+        // 保存到MongoDB（异步）
+        asyncTaskExecutor.submitMongo(() -> saveToMongo(agentMessage));
 
-        // ★ 客服发送消息后，清除该会话未读数
-        conversationService.clearUnread(conversationId);
-        
-        // 推送给用户
-        boolean delivered = pushToUser(conversationId, agentMessage);
-        if (!delivered) {
-            String userId = conversation != null ? conversation.getUserId() : null;
-            Map<String, Object> notifyExtra = new HashMap<>();
-            notifyExtra.put("reason", "USER_OFFLINE");
-            notifyExtra.put("userId", userId);
-            notifyExtra.put("messageId", agentMessage.getId());
-            CsWebSocketMessage deliveryFailed = CsWebSocketMessage.builder()
-                    .type("delivery_failed")
-                    .conversationId(conversationId)
-                    .content("用户不在线，消息未送达")
-                    .extra(notifyExtra)
-                    .timestamp(agentMessage.getCreateTime())
-                    .build();
-            sessionManager.sendToAgent(agentId, deliveryFailed);
-        }
-        
-        // 推送给其他协作客服（同步）
-        pushToOtherAgents(conversationId, agentId, agentMessage);
+        // 更新会话最后消息 + 清除未读（异步）
+        String lastMessage = buildMessagePreview(content, msgType, extra);
+        asyncTaskExecutor.submitConversation(() -> {
+            conversationService.updateLastMessage(conversationId, lastMessage);
+            conversationService.clearUnread(conversationId);
+        });
+
+        // 推送给用户 + 其他客服（异步）
+        CsConversation conversationSnapshot = conversation;
+        asyncTaskExecutor.submitWs(() -> {
+            boolean delivered = pushToUser(conversationId, agentMessage);
+            if (!delivered) {
+                String userId = conversationSnapshot != null ? conversationSnapshot.getUserId() : null;
+                Map<String, Object> notifyExtra = new HashMap<>();
+                notifyExtra.put("reason", "USER_OFFLINE");
+                notifyExtra.put("userId", userId);
+                notifyExtra.put("messageId", agentMessage.getId());
+                CsWebSocketMessage deliveryFailed = CsWebSocketMessage.builder()
+                        .type("delivery_failed")
+                        .conversationId(conversationId)
+                        .content("用户不在线，消息未送达")
+                        .extra(notifyExtra)
+                        .timestamp(agentMessage.getCreateTime())
+                        .build();
+                sessionManager.sendToAgent(agentId, deliveryFailed);
+            }
+            pushToOtherAgents(conversationId, agentId, agentMessage);
+        });
         
         // 清除AI建议缓存
         aiSuggestionCache.remove(conversationId);
@@ -526,6 +534,31 @@ public class CsMessageServiceImpl implements ICsMessageService {
         }
     }
 
+    private List<CsCollaborator> getActiveCollaboratorsCached(String conversationId) {
+        if (oConvertUtils.isEmpty(conversationId)) {
+            return Collections.emptyList();
+        }
+        long now = System.currentTimeMillis();
+        CollaboratorCacheEntry cached = collaboratorCache.get(conversationId);
+        if (cached != null && cached.expiresAt > now) {
+            return cached.data;
+        }
+        List<CsCollaborator> list = collaboratorService.getCollaborators(conversationId);
+        List<CsCollaborator> safeList = list != null ? list : Collections.emptyList();
+        collaboratorCache.put(conversationId, new CollaboratorCacheEntry(safeList, now + COLLABORATOR_CACHE_TTL_MS));
+        return safeList;
+    }
+
+    private static class CollaboratorCacheEntry {
+        private final List<CsCollaborator> data;
+        private final long expiresAt;
+
+        private CollaboratorCacheEntry(List<CsCollaborator> data, long expiresAt) {
+            this.data = data;
+            this.expiresAt = expiresAt;
+        }
+    }
+
     private String buildMessagePreview(String content, Integer msgType, String extra) {
         if (oConvertUtils.isNotEmpty(content)) {
             return content;
@@ -664,8 +697,8 @@ public class CsMessageServiceImpl implements ICsMessageService {
         // 添加主负责人
         agentIds.add(conversation.getOwnerAgentId());
         
-        // 从数据库查询活跃的协作者（leaveTime为空表示仍在协作中）
-        List<CsCollaborator> activeCollaborators = collaboratorService.getCollaborators(conversation.getId());
+        // 从缓存查询活跃的协作者（leaveTime为空表示仍在协作中）
+        List<CsCollaborator> activeCollaborators = getActiveCollaboratorsCached(conversation.getId());
         if (activeCollaborators != null) {
             for (CsCollaborator collab : activeCollaborators) {
                 agentIds.add(collab.getAgentId());
@@ -683,9 +716,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
         // 推送给所有相关客服
         log.info("[CS-Message] 推送消息给相关客服: conversationId={}, agentIds={}", 
                 conversation.getId(), agentIds);
-        for (String agentId : agentIds) {
-            sessionManager.sendToAgent(agentId, wsMessage);
-        }
+        agentIds.parallelStream().forEach(targetAgentId -> sessionManager.sendToAgent(targetAgentId, wsMessage));
     }
 
     /**
@@ -719,8 +750,8 @@ public class CsMessageServiceImpl implements ICsMessageService {
             agentIds.add(conversation.getOwnerAgentId());
         }
         
-        // 从数据库查询活跃的协作者
-        List<CsCollaborator> activeCollaborators = collaboratorService.getCollaborators(conversationId);
+        // 从缓存查询活跃的协作者
+        List<CsCollaborator> activeCollaborators = getActiveCollaboratorsCached(conversationId);
         if (activeCollaborators != null) {
             for (CsCollaborator collab : activeCollaborators) {
                 agentIds.add(collab.getAgentId());
@@ -737,9 +768,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
         
         // 排除发送者并推送
         agentIds.remove(excludeAgentId);
-        for (String agentId : agentIds) {
-            sessionManager.sendToAgent(agentId, wsMessage);
-        }
+        agentIds.parallelStream().forEach(targetAgentId -> sessionManager.sendToAgent(targetAgentId, wsMessage));
     }
 
     /**
