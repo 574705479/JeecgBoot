@@ -1719,7 +1719,7 @@ async function sendMessage() {
     
     const msgType = attachments.length > 0 ? 5 : 0;
     const extra = attachments.length > 0 ? JSON.stringify({ attachments }) : undefined;
-    await httpPost({
+    const res = await httpPost({
       url: '/cs/message/agent/send',
       data: {
         conversationId: currentConversation.value.id,
@@ -1747,13 +1747,28 @@ async function sendMessage() {
       }
     }
     
+    const resMessage = res?.result || res;
+    const localMsg = {
+      id: resMessage?.id || `local_${Date.now()}`,
+      conversationId: currentConversation.value.id,
+      content,
+      msgType,
+      extra: attachments.length > 0 ? { attachments } : undefined,
+      senderType: 2,
+      senderId: agentId.value,
+      senderName: agentName.value,
+      actualSenderName: agentName.value,
+      createTime: resMessage?.createTime || new Date().toISOString(),
+    };
+    messages.value.push(localMsg);
+    scrollToBottom();
+
     inputMessage.value = '';
     attachmentList.value = [];
     uploadFileList.value = [];
-    await loadMessages(currentConversation.value.id);
     
     // ★ 发送消息后清除未读数（无论当前计数是否为0）
-    await httpPost({ url: `/cs/conversation/${currentConversation.value.id}/clear-unread` });
+    httpPost({ url: `/cs/conversation/${currentConversation.value.id}/clear-unread` });
     currentConversation.value.unreadCount = 0;
     
     // 同步更新会话列表中的未读数
@@ -1763,11 +1778,20 @@ async function sendMessage() {
     
     // 如果之前是待接入状态，刷新会话列表（因为后端会自动接入）
     if (wasUnassigned) {
-      await loadConversations();
-      // 更新当前会话状态
       currentConversation.value.status = 1;
       currentConversation.value.ownerAgentId = agentId.value;
       currentReplyMode.value = 1; // 手动模式
+      if (listItem) {
+        listItem.status = 1;
+        listItem.ownerAgentId = agentId.value;
+      }
+      if (filter.value === 'unassigned' && listItem) {
+        const idx = conversations.value.findIndex(c => c.id === listItem.id);
+        if (idx > -1) {
+          conversations.value.splice(idx, 1);
+        }
+      }
+      loadStatsDebounced();
     }
   } catch (e) {
     message.error('发送失败');

@@ -68,31 +68,31 @@ services:
     networks:
       - kefu
       
-  kefu-system:
-    build:
-      context: ./jeecg-boot/jeecg-module-system/jeecg-system-start
-    restart: on-failure
-    depends_on:
-      - kefu-mysql
-      - kefu-redis
-    container_name: kefu-system
-    image: kefu-system
-    hostname: kefu-system
-    ports:
-      - 8080:8080
-    networks:
-      - kefu
-  kefu-vue:
-    build:
-      context: ./jeecgboot-vue3
-    container_name: kefu-vue-nginx
-    image: kefu-vue
-    depends_on:
-      - kefu-system
-    networks:
-      - kefu
-    ports:
-      - 3111:80
+#  kefu-system:
+#    build:
+#      context: ./jeecg-boot/jeecg-module-system/jeecg-system-start
+#    restart: on-failure
+#    depends_on:
+#      - kefu-mysql
+#      - kefu-redis
+#    container_name: kefu-system
+#    image: kefu-system
+#    hostname: kefu-system
+#    ports:
+#      - 8080:8080
+#    networks:
+#      - kefu
+#  kefu-vue:
+#    build:
+#      context: ./jeecgboot-vue3
+#    container_name: kefu-vue-nginx
+#    image: kefu-vue
+#    depends_on:
+#      - kefu-system
+#    networks:
+#      - kefu
+#    ports:
+#      - 3111:80
 
 networks:
   kefu:

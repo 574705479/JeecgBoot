@@ -1,7 +1,8 @@
 version: '2'
 services:
+  #这是服务器端部署用的yml配置，domain要改成对应的仓库域名地址，mysql后续没有改动就只需要制作一次镜像，后续有变更的正常只有system和vue.
   kefu-mysql:
-    image: cangku.chatgpt168.net/kefu-mysql:1.0.0
+    image: domain/kefu-mysql:1.0.0
     environment:
       MYSQL_ROOT_PASSWORD: 92400bda284afba53b21162911f98d00Z
       MYSQL_ROOT_HOST: '%'
@@ -67,10 +68,10 @@ services:
       - kefu
       
   kefu-system:
-    image: cangku.chatgpt168.net/kefu-system:1.0.0
+    image: domain/kefu-system:1.0.0
     restart: on-failure
     environment:
-      SPRING_APPLICATION_JSON: '{"jeecg":{"uploadType":"local"}}'
+      SPRING_APPLICATION_JSON: '{"spring":{"data":{"mongodb":{"authentication-database":"admin"}}}}'
     depends_on:
       - kefu-mysql
       - kefu-redis
@@ -78,11 +79,14 @@ services:
     hostname: kefu-system
     ports:
       - 8080:8080
+    volumes:
+      - ./docker-data/upload:/opt/jeecg-boot/upload
+      - ./docker-data/webapp:/opt/jeecg-boot/webapp
     networks:
       - kefu
 
   kefu-vue:
-    image: cangku.chatgpt168.net/kefu-vue:1.0.0
+    image: domain/kefu-vue:1.0.0
     container_name: kefu-vue-nginx
     depends_on:
       - kefu-system

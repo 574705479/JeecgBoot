@@ -161,6 +161,13 @@ spring:
       host: kefu-redis
       port: 6379
       password: 92400bda284afba53b21162911f98d00Z
+    mongodb:
+      host: kefu-mongodb
+      port: 27017
+      username: root
+      password: 92400bda284afba53b21162911f98d00Z
+      database: jeecg
+      authentication-database: admin
 #mybatis plus 设置
 mybatis-plus:
   mapper-locations: classpath*:org/jeecg/**/xml/*Mapper.xml

@@ -42,8 +42,11 @@ export function setupElectron(_: App) {
   hookNavigate();
 }
 function hookNavigate() {
-  // @ts-ignore
-  window[ElectronEnum.ELECTRON_API].onNavigate((path) => {
+  const nav = window[ElectronEnum.ELECTRON_API]?.onNavigate;
+  if (typeof nav !== 'function') {
+    return;
+  }
+  nav((path) => {
     router.push({ path });
   });
 }
