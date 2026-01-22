@@ -70,4 +70,9 @@ public interface ICsVisitorService extends IService<CsVisitor> {
      * 优先级: 备注昵称 > 真实姓名 > 原始用户名
      */
     String getDisplayName(String appId, String userId, String defaultName);
+
+    /**
+     * 推送访客信息更新给相关客服
+     */
+    void notifyVisitorUpdated(CsVisitor visitor);
 }

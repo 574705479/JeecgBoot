@@ -100,7 +100,9 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
             visitor.setUpdateTime(new Date());
             boolean success = visitorService.updateById(visitor);
             if (success) {
-                return Result.OK(visitorService.getById(visitor.getId()));
+                CsVisitor updated = visitorService.getById(visitor.getId());
+                visitorService.notifyVisitorUpdated(updated);
+                return Result.OK(updated);
             }
             return Result.error("更新失败");
         }
@@ -125,7 +127,9 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
             visitor.setId(existing.getId());
             visitor.setUpdateTime(new Date());
             visitorService.updateById(visitor);
-            return Result.OK(visitorService.getById(existing.getId()));
+            CsVisitor updated = visitorService.getById(existing.getId());
+            visitorService.notifyVisitorUpdated(updated);
+            return Result.OK(updated);
         } else {
             // 不存在则创建
             visitor.setCreateTime(new Date());
@@ -135,6 +139,7 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
             visitor.setFirstVisitTime(new Date());
             visitor.setLastVisitTime(new Date());
             visitorService.save(visitor);
+            visitorService.notifyVisitorUpdated(visitor);
             return Result.OK(visitor);
         }
     }
@@ -151,6 +156,10 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
             return Result.error("id不能为空");
         }
         boolean success = visitorService.toggleStar(visitorId);
+        if (success) {
+            CsVisitor updated = visitorService.getById(visitorId);
+            visitorService.notifyVisitorUpdated(updated);
+        }
         return success ? Result.OK("操作成功") : Result.error("操作失败");
     }
 
@@ -170,6 +179,10 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
             return Result.error("等级值无效");
         }
         boolean success = visitorService.updateLevel(id, level);
+        if (success) {
+            CsVisitor updated = visitorService.getById(id);
+            visitorService.notifyVisitorUpdated(updated);
+        }
         return success ? Result.OK("更新成功") : Result.error("更新失败");
     }
 
@@ -186,6 +199,10 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
             return Result.error("id不能为空");
         }
         boolean success = visitorService.updateTags(id, tags);
+        if (success) {
+            CsVisitor updated = visitorService.getById(id);
+            visitorService.notifyVisitorUpdated(updated);
+        }
         return success ? Result.OK("更新成功") : Result.error("更新失败");
     }
 
@@ -206,6 +223,10 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
         visitor.setNickname(nickname);
         visitor.setUpdateTime(new Date());
         boolean success = visitorService.updateById(visitor);
+        if (success) {
+            CsVisitor updated = visitorService.getById(id);
+            visitorService.notifyVisitorUpdated(updated);
+        }
         return success ? Result.OK("备注成功") : Result.error("备注失败");
     }
 

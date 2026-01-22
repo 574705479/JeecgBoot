@@ -38,6 +38,12 @@ public interface CsConversationMapper extends BaseMapper<CsConversation> {
                                                   @Param("filterAgentId") String filterAgentId);
 
     /**
+     * 获取用户进行中的会话ID列表
+     */
+    List<String> selectActiveConversationIdsByUser(@Param("appId") String appId,
+                                                   @Param("userId") String userId);
+
+    /**
      * 获取客服负责的会话列表
      */
     @Select("SELECT c.*, a.nickname as owner_agent_name, a.avatar as owner_agent_avatar " +

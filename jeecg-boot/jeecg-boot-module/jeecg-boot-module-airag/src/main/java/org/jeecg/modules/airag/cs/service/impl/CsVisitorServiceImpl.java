@@ -7,11 +7,17 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.extern.slf4j.Slf4j;
 import org.jeecg.modules.airag.cs.entity.CsVisitor;
 import org.jeecg.modules.airag.cs.mapper.CsVisitorMapper;
+import org.jeecg.modules.airag.cs.service.ICsConversationService;
 import org.jeecg.modules.airag.cs.service.ICsVisitorService;
+import org.jeecg.modules.airag.cs.websocket.CsWebSocketMessage;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * 访客信息Service实现
@@ -22,6 +28,9 @@ import java.util.Date;
 @Slf4j
 @Service
 public class CsVisitorServiceImpl extends ServiceImpl<CsVisitorMapper, CsVisitor> implements ICsVisitorService {
+
+    @Autowired
+    private ICsConversationService conversationService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -117,5 +126,31 @@ public class CsVisitorServiceImpl extends ServiceImpl<CsVisitorMapper, CsVisitor
             }
         }
         return defaultName;
+    }
+
+    @Override
+    public void notifyVisitorUpdated(CsVisitor visitor) {
+        if (visitor == null || visitor.getUserId() == null || visitor.getUserId().isEmpty()) {
+            return;
+        }
+        List<String> conversationIds = conversationService.getActiveConversationIdsByUser(
+                visitor.getAppId(), visitor.getUserId());
+        if (conversationIds.isEmpty()) {
+            return;
+        }
+        Map<String, Object> extra = new HashMap<>();
+        extra.put("userId", visitor.getUserId());
+        extra.put("appId", visitor.getAppId());
+        extra.put("visitor", visitor);
+        for (String conversationId : conversationIds) {
+            CsWebSocketMessage message = CsWebSocketMessage.builder()
+                    .type("visitor_updated")
+                    .conversationId(conversationId)
+                    .content("访客信息更新")
+                    .extra(extra)
+                    .timestamp(new Date())
+                    .build();
+            conversationService.sendToRelatedAgents(conversationId, message);
+        }
     }
 }

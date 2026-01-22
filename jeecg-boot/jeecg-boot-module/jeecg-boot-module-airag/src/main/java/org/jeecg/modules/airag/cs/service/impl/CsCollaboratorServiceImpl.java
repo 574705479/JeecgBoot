@@ -85,8 +85,8 @@ public class CsCollaboratorServiceImpl extends ServiceImpl<CsCollaboratorMapper,
         sessionManager.sendToAgent(agentId, notification);
         
         // 通知会话中的其他客服
-        conversationService.notifyAgents(conversationId, "collab_joined", 
-                agent.getNickname() + " 加入协作");
+        conversationService.notifyRelatedAgents(conversationId, "collab_joined",
+                agent.getNickname() + " 加入协作", null);
         
         return true;
     }
@@ -131,8 +131,8 @@ public class CsCollaboratorServiceImpl extends ServiceImpl<CsCollaboratorMapper,
         save(collaborator);
         
         // 通知会话中的其他客服
-        conversationService.notifyAgents(conversationId, "collab_joined", 
-                agent.getNickname() + " 加入协作");
+        conversationService.notifyRelatedAgents(conversationId, "collab_joined",
+                agent.getNickname() + " 加入协作", null);
         
         return true;
     }
@@ -167,7 +167,8 @@ public class CsCollaboratorServiceImpl extends ServiceImpl<CsCollaboratorMapper,
         // 通知其他客服
         CsAgent agent = agentService.getById(agentId);
         String agentName = agent != null ? agent.getNickname() : "客服";
-        conversationService.notifyAgents(conversationId, "collab_left", agentName + " 退出协作");
+        conversationService.notifyRelatedAgents(conversationId, "collab_left",
+                agentName + " 退出协作", null);
         
         return true;
     }

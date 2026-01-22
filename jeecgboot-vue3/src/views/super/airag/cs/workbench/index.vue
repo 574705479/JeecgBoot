@@ -2769,6 +2769,44 @@ function handleWsMessage(data: any) {
       }
       loadConversations();
       break;
+    case 'visitor_updated': {
+      const extraData = data.extra || data;
+      const visitor = extraData.visitor || extraData;
+      if (!visitor?.userId) {
+        break;
+      }
+      const cacheKey = getVisitorCacheKey(visitor.appId, visitor.userId);
+      if (cacheKey) {
+        visitorCache.set(cacheKey, visitor);
+      }
+      // 更新会话列表中的昵称缓存
+      conversations.value.forEach(conv => {
+        if (conv.userId !== visitor.userId) {
+          return;
+        }
+        if (visitor.appId && conv.appId && conv.appId !== visitor.appId) {
+          return;
+        }
+        if (visitor.nickname) {
+          conv.visitorNickname = visitor.nickname;
+        }
+      });
+      // 更新当前会话的访客信息
+      if (currentConversation.value?.userId === visitor.userId) {
+        if (!visitor.appId || currentConversation.value?.appId === visitor.appId) {
+          visitorInfo.value = { ...visitorInfo.value, ...visitor };
+          try {
+            visitorTags.value = visitor.tags ? JSON.parse(visitor.tags) : [];
+          } catch {
+            visitorTags.value = [];
+          }
+          if (visitor.nickname) {
+            currentConversation.value.visitorNickname = visitor.nickname;
+          }
+        }
+      }
+      break;
+    }
   }
 }
 

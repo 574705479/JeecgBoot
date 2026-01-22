@@ -72,4 +72,19 @@
             c.last_message_time DESC
     </select>
 
+    <!-- 获取用户进行中的会话ID列表 -->
+    <select id="selectActiveConversationIdsByUser" resultType="java.lang.String">
+        SELECT c.id
+        FROM cs_conversation c
+        <where>
+            AND c.user_id = #{userId}
+            AND c.status != 2
+            AND (c.deleted = 0 OR c.deleted IS NULL)
+            <if test="appId != null and appId != ''">
+                AND c.app_id = #{appId}
+            </if>
+        </where>
+        ORDER BY c.last_message_time DESC
+    </select>
+
 </mapper>

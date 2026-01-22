@@ -243,6 +243,21 @@ public interface ICsConversationService extends IService<CsConversation> {
     void notifyAgents(String conversationId, String type, String content);
 
     /**
+     * 通知相关客服（主负责人 + 协作者 + 在线管理者；未分配可广播）
+     */
+    void notifyRelatedAgents(String conversationId, String type, String content, Map<String, Object> extra);
+
+    /**
+     * 发送消息给相关客服（主负责人 + 协作者 + 在线管理者；未分配可广播）
+     */
+    void sendToRelatedAgents(String conversationId, org.jeecg.modules.airag.cs.websocket.CsWebSocketMessage message);
+
+    /**
+     * 获取用户的进行中会话ID列表
+     */
+    List<String> getActiveConversationIdsByUser(String appId, String userId);
+
+    /**
      * 获取所有进行中的会话（管理者监控模式）
      * 包括：待接入 + 服务中
      * 

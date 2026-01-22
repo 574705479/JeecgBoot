@@ -91,14 +91,15 @@ public class CsWebSocketHandler implements WebSocketHandler {
         }
         
         try {
-            // 通知所有在线客服用户已上线
-            sessionManager.sendToAllAgents(CsWebSocketMessage.builder()
+            // 通知相关客服用户已上线
+            CsWebSocketMessage message = CsWebSocketMessage.builder()
                     .type("user_online")
                     .conversationId(conversationId)
                     .senderId(userId)
                     .content("用户已上线")
                     .timestamp(new java.util.Date())
-                    .build());
+                    .build();
+            conversationService.sendToRelatedAgents(conversationId, message);
             
             log.info("[CS-WebSocket] 通知客服用户上线: conversationId={}, userId={}", conversationId, userId);
         } catch (Exception e) {
@@ -358,14 +359,15 @@ public class CsWebSocketHandler implements WebSocketHandler {
         try {
             CsConversation conversation = conversationService.getById(conversationId);
             if (conversation != null) {
-                // 通知所有在线客服用户已离线（不仅限于已分配的会话）
-                sessionManager.sendToAllAgents(CsWebSocketMessage.builder()
+                // 通知相关客服用户已离线
+                CsWebSocketMessage message = CsWebSocketMessage.builder()
                         .type("user_offline")
                         .conversationId(conversationId)
                         .senderId(userId)
                         .content("用户已离线")
                         .timestamp(new java.util.Date())
-                        .build());
+                        .build();
+                conversationService.sendToRelatedAgents(conversationId, message);
                 
                 log.info("[CS-WebSocket] 通知客服用户离线: conversationId={}, userId={}", conversationId, userId);
                 

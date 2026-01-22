@@ -506,8 +506,8 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         CsAgent fromAgent = fromAgentId != null ? agentService.getById(fromAgentId) : null;
         String fromName = fromAgent != null ? fromAgent.getNickname() : "系统";
         
-        notifyAgents(conversationId, "transfer", 
-                "会话已从 " + fromName + " 移交给 " + toAgent.getNickname());
+        notifyRelatedAgents(conversationId, "transfer",
+                "会话已从 " + fromName + " 移交给 " + toAgent.getNickname(), null);
         notifyUser(conversationId, "agent_changed", 
                 "客服 " + toAgent.getNickname() + " 继续为您服务");
         
@@ -728,19 +728,64 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
                 .conversationId(conversationId)
                 .content(content)
                 .build();
-        
-        // 获取所有相关客服ID
         CsConversation conversation = getById(conversationId);
-        if (conversation != null && oConvertUtils.isNotEmpty(conversation.getOwnerAgentId())) {
-            sessionManager.sendToAgent(conversation.getOwnerAgentId(), message);
+        sendToRelatedAgentsInternal(conversation, message, false);
+    }
+
+    @Override
+    public void notifyRelatedAgents(String conversationId, String type, String content, Map<String, Object> extra) {
+        CsWebSocketMessage.CsWebSocketMessageBuilder builder = CsWebSocketMessage.builder()
+                .type(type)
+                .conversationId(conversationId)
+                .content(content);
+        if (extra != null) {
+            builder.extra(extra);
         }
-        
-        // 通知所有协作者
-        List<CsCollaborator> collaborators = collaboratorMapper.selectActiveCollaborators(conversationId);
-        for (CsCollaborator collab : collaborators) {
-            if (!collab.getAgentId().equals(conversation != null ? conversation.getOwnerAgentId() : null)) {
-                sessionManager.sendToAgent(collab.getAgentId(), message);
+        CsConversation conversation = getById(conversationId);
+        sendToRelatedAgentsInternal(conversation, builder.build(), true);
+    }
+
+    @Override
+    public void sendToRelatedAgents(String conversationId, CsWebSocketMessage message) {
+        CsConversation conversation = getById(conversationId);
+        sendToRelatedAgentsInternal(conversation, message, true);
+    }
+
+    @Override
+    public List<String> getActiveConversationIdsByUser(String appId, String userId) {
+        if (oConvertUtils.isEmpty(userId)) {
+            return java.util.Collections.emptyList();
+        }
+        List<String> ids = baseMapper.selectActiveConversationIdsByUser(appId, userId);
+        return ids != null ? ids : java.util.Collections.emptyList();
+    }
+
+    private void sendToRelatedAgentsInternal(CsConversation conversation, CsWebSocketMessage message, boolean includeAllIfUnassigned) {
+        if (conversation == null || message == null) {
+            return;
+        }
+        if (includeAllIfUnassigned && oConvertUtils.isEmpty(conversation.getOwnerAgentId())) {
+            sessionManager.sendToAllAgents(message);
+            return;
+        }
+        java.util.Set<String> agentIds = new java.util.HashSet<>();
+        if (oConvertUtils.isNotEmpty(conversation.getOwnerAgentId())) {
+            agentIds.add(conversation.getOwnerAgentId());
+        }
+        List<CsCollaborator> collaborators = collaboratorMapper.selectActiveCollaborators(conversation.getId());
+        if (collaborators != null) {
+            for (CsCollaborator collab : collaborators) {
+                agentIds.add(collab.getAgentId());
             }
+        }
+        List<CsAgent> supervisors = agentService.getOnlineSupervisors();
+        if (supervisors != null) {
+            for (CsAgent supervisor : supervisors) {
+                agentIds.add(supervisor.getId());
+            }
+        }
+        for (String agentId : agentIds) {
+            sessionManager.sendToAgent(agentId, message);
         }
     }
     
