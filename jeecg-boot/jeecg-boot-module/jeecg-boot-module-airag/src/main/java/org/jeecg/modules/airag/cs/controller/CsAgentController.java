@@ -91,7 +91,15 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     @AutoLog(value = "客服管理-删除")
     @Operation(summary = "删除")
     @DeleteMapping("/delete")
-    public Result<String> delete(@RequestParam(name = "id") String id) {
+    public Result<String> delete(@RequestParam(name = "id", required = false) String id,
+                                 @RequestBody(required = false) java.util.Map<String, Object> body) {
+        if (id == null || id.isEmpty()) {
+            Object idObj = body != null ? body.get("id") : null;
+            id = idObj != null ? String.valueOf(idObj) : null;
+        }
+        if (id == null || id.isEmpty()) {
+            return Result.error("id不能为空");
+        }
         csAgentService.removeById(id);
         return Result.OK("删除成功!");
     }

@@ -26,7 +26,20 @@ const recordId = ref('');
 const [registerForm, { setFieldsValue, resetFields, validate }] = useForm({
   labelWidth: 100,
   schemas: [
-    { field: 'userId', label: '关联用户', component: 'JSelectUser', required: true },
+    { field: 'userId', label: '关联用户', component: 'JSelectUser', required: true,
+      componentProps: {
+        customListApi: async (params) => {
+          const res = await defHttp.get({ url: '/sys/user/list', params });
+          if (res && Array.isArray(res.records)) {
+            res.records = res.records.filter((item) => {
+              const username = String(item?.username || '').toLowerCase();
+              return username !== 'admin';
+            });
+          }
+          return res;
+        },
+      }
+    },
     { field: 'nickname', label: '客服昵称', component: 'Input', required: true },
     { field: 'avatar', label: '头像', component: 'JImageUpload' },
     { field: 'maxSessions', label: '最大接待数', component: 'InputNumber', defaultValue: 5,
