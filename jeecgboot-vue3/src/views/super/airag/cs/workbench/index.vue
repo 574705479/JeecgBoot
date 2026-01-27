@@ -235,8 +235,8 @@
 
       <!-- 消息容器 -->
       <div class="chat-body">
-        <div class="messages-container" ref="messagesRef">
-          <div v-for="msg in messages" :key="msg.id" class="message-wrapper" :class="getMessageClass(msg)">
+        <div class="messages-container" ref="messagesRef" @scroll.passive="handleMessageScroll">
+          <div v-for="msg in displayMessages" :key="msg.id" class="message-wrapper" :class="getMessageClass(msg)">
             <!-- 系统消息 -->
             <div v-if="msg.senderType === 3" class="system-msg">
               <span>{{ msg.content }}</span>
@@ -761,6 +761,28 @@ const closedCount = computed(() => statsData.value.closedCount);
 
 // 消息
 const messages = ref<any[]>([]);
+const historyPageSize = 100;
+const loadingHistory = ref(false);
+const hasMoreHistory = ref(true);
+const historyBeforeId = ref<string | null>(null);
+const displayMessages = computed(() => {
+  const list: any[] = [];
+  let lastDateKey = '';
+  for (const msg of messages.value) {
+    const dateKey = getDateKey(msg?.createTime);
+    if (dateKey && dateKey !== lastDateKey) {
+      list.push({
+        id: `date-${dateKey}`,
+        senderType: 3,
+        content: formatDateSeparator(msg.createTime),
+        isDateSeparator: true,
+      });
+      lastDateKey = dateKey;
+    }
+    list.push(msg);
+  }
+  return list;
+});
 const inputMessage = ref('');
 const attachmentList = ref<any[]>([]);
 const uploadFileList = ref<any[]>([]);
@@ -1343,8 +1365,15 @@ function isMessagesAtBottom() {
   return el.scrollHeight - (el.scrollTop + el.clientHeight) <= threshold;
 }
 
-function handleMessageScroll() {
+function handleMessageScroll(event?: Event) {
   scheduleClearUnread();
+  const target = event?.target as HTMLElement | undefined;
+  const el = target || messagesEl || messagesRef.value;
+  if (!el) return;
+  if (loadingHistory.value || !hasMoreHistory.value) return;
+  if (el.scrollTop <= 20) {
+    loadMoreMessages();
+  }
 }
 
 function scheduleClearUnread() {
@@ -1748,13 +1777,65 @@ async function loadMessages(conversationId: string) {
   try {
     const res = await httpGet({
       url: `/cs/message/${conversationId}`,
-      params: { limit: 100 }
+      params: { limit: historyPageSize }
     });
-    messages.value = res || [];
+    const list = Array.isArray(res) ? res : (res?.records || res?.result || []);
+    messages.value = list;
+    historyBeforeId.value = list[0]?.id || null;
+    hasMoreHistory.value = list.length >= historyPageSize;
     lastMessageLoadAt = Date.now();
     scrollToBottom();
   } catch (e) {
     console.error('加载消息失败', e);
+  }
+}
+
+async function loadMoreMessages() {
+  if (loadingHistory.value) return;
+  if (!hasMoreHistory.value) return;
+  if (!currentConversation.value?.id) return;
+  const beforeId = historyBeforeId.value;
+  if (!beforeId) {
+    hasMoreHistory.value = false;
+    return;
+  }
+
+  const el = messagesEl || messagesRef.value;
+  const prevScrollHeight = el?.scrollHeight || 0;
+  const prevScrollTop = el?.scrollTop || 0;
+
+  loadingHistory.value = true;
+  try {
+    const res = await httpGet({
+      url: `/cs/message/${currentConversation.value.id}/page`,
+      params: { beforeId, limit: historyPageSize }
+    });
+    const olderMessages = Array.isArray(res) ? res : (res?.records || res?.result || []);
+    if (!olderMessages.length) {
+      hasMoreHistory.value = false;
+      return;
+    }
+    const existingIds = new Set(messages.value.map(m => m.id));
+    const filtered = olderMessages.filter((m: any) => !existingIds.has(m.id));
+    if (filtered.length === 0) {
+      hasMoreHistory.value = false;
+      return;
+    }
+    messages.value = [...filtered, ...messages.value];
+    historyBeforeId.value = filtered[0]?.id || historyBeforeId.value;
+    if (olderMessages.length < historyPageSize) {
+      hasMoreHistory.value = false;
+    }
+    nextTick(() => {
+      const nextEl = messagesEl || messagesRef.value;
+      if (!nextEl) return;
+      const nextScrollHeight = nextEl.scrollHeight;
+      nextEl.scrollTop = nextScrollHeight - prevScrollHeight + prevScrollTop;
+    });
+  } catch (e) {
+    console.error('加载历史消息失败', e);
+  } finally {
+    loadingHistory.value = false;
   }
 }
 
@@ -2851,6 +2932,30 @@ function notifyNewMessage(conv: any, data: any) {
 }
 
 // 工具函数
+function getDateKey(time: string | Date) {
+  if (!time) return '';
+  const date = new Date(time);
+  if (Number.isNaN(date.getTime())) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function formatDateSeparator(time: string | Date) {
+  if (!time) return '';
+  const date = new Date(time);
+  if (Number.isNaN(date.getTime())) return '';
+  const today = new Date();
+  const dateKey = getDateKey(date);
+  const todayKey = getDateKey(today);
+  if (dateKey === todayKey) return '今天';
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (dateKey === getDateKey(yesterday)) return '昨天';
+  return date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+}
+
 function formatTime(time: string) {
   if (!time) return '';
   const date = new Date(time);

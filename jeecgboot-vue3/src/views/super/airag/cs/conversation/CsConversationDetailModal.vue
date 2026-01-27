@@ -50,9 +50,9 @@
         </div>
         
         <a-spin :spinning="loading">
-          <div class="message-list" ref="messageListRef">
+          <div class="message-list" ref="messageListRef" @scroll.passive="handleMessageScroll">
             <template v-if="messages.length > 0">
-              <div v-for="msg in messages" :key="msg.id" :class="['message-item', getMsgClass(msg)]">
+              <div v-for="msg in displayMessages" :key="msg.id" :class="['message-item', getMsgClass(msg)]">
                 <!-- 系统消息 -->
                 <template v-if="msg.senderType === 3">
                   <div class="system-message">
@@ -109,7 +109,7 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, nextTick } from 'vue';
+import { ref, nextTick, computed } from 'vue';
 import { BasicModal, useModalInner } from '/@/components/Modal';
 import { defHttp } from '/@/utils/http/axios';
 import { MessageOutlined } from '@ant-design/icons-vue';
@@ -121,10 +121,34 @@ const record = ref<any>(null);
 const messages = ref<any[]>([]);
 const loading = ref(false);
 const messageListRef = ref<HTMLElement | null>(null);
+const historyPageSize = 100;
+const loadingHistory = ref(false);
+const hasMoreHistory = ref(true);
+const historyBeforeId = ref<string | null>(null);
+const displayMessages = computed(() => {
+  const list: any[] = [];
+  let lastDateKey = '';
+  for (const msg of messages.value) {
+    const dateKey = getDateKey(msg?.createTime);
+    if (dateKey && dateKey !== lastDateKey) {
+      list.push({
+        id: `date-${dateKey}`,
+        senderType: 3,
+        content: formatDateSeparator(msg.createTime),
+        isDateSeparator: true,
+      });
+      lastDateKey = dateKey;
+    }
+    list.push(msg);
+  }
+  return list;
+});
 
 const [registerModal] = useModalInner(async (data) => {
   record.value = data?.record;
   messages.value = [];
+  historyBeforeId.value = null;
+  hasMoreHistory.value = true;
   
   if (record.value?.id) {
     await loadMessages(record.value.id);
@@ -136,9 +160,12 @@ async function loadMessages(conversationId: string) {
   try {
     const res = await defHttp.get({ 
       url: `/cs/message/${conversationId}`, 
-      params: { limit: 500 } 
+      params: { limit: historyPageSize } 
     });
-    messages.value = res || [];
+    const list = Array.isArray(res) ? res : (res?.result || res?.records || []);
+    messages.value = list || [];
+    historyBeforeId.value = messages.value[0]?.id || null;
+    hasMoreHistory.value = messages.value.length >= historyPageSize;
     
     // 滚动到底部
     nextTick(() => {
@@ -151,6 +178,63 @@ async function loadMessages(conversationId: string) {
     messages.value = [];
   } finally {
     loading.value = false;
+  }
+}
+
+async function loadMoreMessages() {
+  if (!record.value?.id) return;
+  if (loadingHistory.value || !hasMoreHistory.value) return;
+  const beforeId = historyBeforeId.value;
+  if (!beforeId) {
+    hasMoreHistory.value = false;
+    return;
+  }
+
+  const el = messageListRef.value;
+  const prevScrollHeight = el?.scrollHeight || 0;
+  const prevScrollTop = el?.scrollTop || 0;
+
+  loadingHistory.value = true;
+  try {
+    const res = await defHttp.get({
+      url: `/cs/message/${record.value.id}/page`,
+      params: { beforeId, limit: historyPageSize },
+    });
+    const olderMessages = Array.isArray(res) ? res : (res?.result || res?.records || []);
+    if (!olderMessages.length) {
+      hasMoreHistory.value = false;
+      return;
+    }
+    const existingIds = new Set(messages.value.map(m => m.id));
+    const filtered = olderMessages.filter((m: any) => !existingIds.has(m.id));
+    if (!filtered.length) {
+      hasMoreHistory.value = false;
+      return;
+    }
+    messages.value = [...filtered, ...messages.value];
+    historyBeforeId.value = filtered[0]?.id || historyBeforeId.value;
+    if (olderMessages.length < historyPageSize) {
+      hasMoreHistory.value = false;
+    }
+    nextTick(() => {
+      const nextEl = messageListRef.value;
+      if (!nextEl) return;
+      const nextScrollHeight = nextEl.scrollHeight;
+      nextEl.scrollTop = nextScrollHeight - prevScrollHeight + prevScrollTop;
+    });
+  } catch (e) {
+    console.error('加载历史消息失败', e);
+  } finally {
+    loadingHistory.value = false;
+  }
+}
+
+function handleMessageScroll(event?: Event) {
+  const el = (event?.target as HTMLElement) || messageListRef.value;
+  if (!el) return;
+  if (loadingHistory.value || !hasMoreHistory.value) return;
+  if (el.scrollTop <= 20) {
+    loadMoreMessages();
   }
 }
 
@@ -210,6 +294,30 @@ function formatTime(time: string) {
     minute: '2-digit',
     second: '2-digit'
   });
+}
+
+function getDateKey(time: string | Date) {
+  if (!time) return '';
+  const date = new Date(time);
+  if (Number.isNaN(date.getTime())) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function formatDateSeparator(time: string | Date) {
+  if (!time) return '';
+  const date = new Date(time);
+  if (Number.isNaN(date.getTime())) return '';
+  const today = new Date();
+  const dateKey = getDateKey(date);
+  const todayKey = getDateKey(today);
+  if (dateKey === todayKey) return '今天';
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (dateKey === getDateKey(yesterday)) return '昨天';
+  return date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
 }
 </script>
 

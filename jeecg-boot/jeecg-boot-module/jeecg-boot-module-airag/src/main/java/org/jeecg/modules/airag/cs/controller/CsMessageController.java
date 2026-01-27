@@ -129,6 +129,7 @@ public class CsMessageController {
      * 获取会话消息（分页）
      */
     @Operation(summary = "获取会话消息(分页)")
+    @org.jeecg.config.shiro.IgnoreAuth
     @GetMapping("/{conversationId}/page")
     public Result<List<CsMessage>> getMessagesPage(
             @PathVariable String conversationId,

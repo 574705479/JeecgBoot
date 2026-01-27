@@ -35,6 +35,12 @@ public interface ChatMessageRepository extends MongoRepository<ChatMessage, Stri
     List<ChatMessage> findTop100ByConversationIdAndDeletedIsFalseOrderByCreateTimeDesc(String conversationId);
 
     /**
+     * 查询指定时间之前的消息（按时间降序）
+     */
+    Page<ChatMessage> findByConversationIdAndDeletedIsFalseAndCreateTimeLessThanOrderByCreateTimeDesc(
+            String conversationId, Date createTime, Pageable pageable);
+
+    /**
      * 按用户ID和应用ID查询会话列表（去重）
      */
     @Query(value = "{ 'userId': ?0, 'appId': ?1, 'deleted': { $ne: true } }", 

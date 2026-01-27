@@ -210,6 +210,42 @@ public class ChatMessageServiceImpl implements IChatMessageService {
     }
 
     @Override
+    public List<ChatMessage> getMessagesBefore(String conversationId, String beforeId, int limit) {
+        if (oConvertUtils.isEmpty(conversationId) || limit <= 0) {
+            return new ArrayList<>();
+        }
+        if (oConvertUtils.isEmpty(beforeId)) {
+            return getRecentMessages(conversationId, limit);
+        }
+
+        Optional<ChatMessage> beforeOpt = messageRepository.findById(beforeId);
+        if (beforeOpt.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        ChatMessage before = beforeOpt.get();
+        if (!conversationId.equals(before.getConversationId())) {
+            return new ArrayList<>();
+        }
+
+        Date beforeTime = before.getCreateTime();
+        if (beforeTime == null) {
+            return new ArrayList<>();
+        }
+
+        Query query = new Query();
+        query.addCriteria(Criteria.where("conversationId").is(conversationId));
+        query.addCriteria(Criteria.where("deleted").ne(true));
+        query.addCriteria(Criteria.where("createTime").lte(beforeTime));
+        query.addCriteria(Criteria.where("_id").ne(beforeId));
+        query.with(Sort.by(Sort.Direction.DESC, "createTime"));
+        query.limit(limit);
+        List<ChatMessage> messages = mongoTemplate.find(query, ChatMessage.class);
+        Collections.reverse(messages);
+        return messages;
+    }
+
+    @Override
     public ChatMessage getLastMessage(String conversationId) {
         return messageRepository.findTopByConversationIdAndDeletedIsFalseOrderByCreateTimeDesc(conversationId);
     }

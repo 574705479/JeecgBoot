@@ -452,26 +452,8 @@ public class CsMessageServiceImpl implements ICsMessageService {
             if (chatMessages == null) {
                 return new ArrayList<>();
             }
-            
-            List<CsMessage> messages = new ArrayList<>();
-            for (ChatMessage msg : chatMessages) {
-                CsMessage csMsg = new CsMessage();
-                csMsg.setId(msg.getId());
-                csMsg.setConversationId(conversationId);
-                csMsg.setContent(msg.getContent());
-                csMsg.setMsgType(msg.getMsgType());
-                if (msg.getExtra() != null && !msg.getExtra().isEmpty()) {
-                    csMsg.setExtra(JSONObject.toJSONString(msg.getExtra()));
-                }
-                csMsg.setSenderType(msg.getSenderType() != null ? msg.getSenderType() : CsMessage.SENDER_USER);
-                csMsg.setSenderId(msg.getSenderId());
-                csMsg.setSenderName(msg.getSenderName());
-                csMsg.setCreateTime(msg.getCreateTime());
-                csMsg.setSenderAvatar(msg.getSenderAvatar());
-                messages.add(csMsg);
-            }
-            
-            return messages;
+
+            return toCsMessages(chatMessages, conversationId);
         } catch (Exception e) {
             log.error("[CS-Message] 获取消息失败: conversationId={}", conversationId, e);
             return new ArrayList<>();
@@ -480,8 +462,16 @@ public class CsMessageServiceImpl implements ICsMessageService {
 
     @Override
     public List<CsMessage> getMessages(String conversationId, String beforeId, int limit) {
-        // 简化实现，暂时不支持分页
-        return getMessages(conversationId, limit);
+        try {
+            List<ChatMessage> chatMessages = chatMessageService.getMessagesBefore(conversationId, beforeId, limit);
+            if (chatMessages == null) {
+                return new ArrayList<>();
+            }
+            return toCsMessages(chatMessages, conversationId);
+        } catch (Exception e) {
+            log.error("[CS-Message] 分页获取消息失败: conversationId={}, beforeId={}", conversationId, beforeId, e);
+            return new ArrayList<>();
+        }
     }
 
     @Override
@@ -609,6 +599,27 @@ public class CsMessageServiceImpl implements ICsMessageService {
             }
         }
         return "[消息]";
+    }
+
+    private List<CsMessage> toCsMessages(List<ChatMessage> chatMessages, String conversationId) {
+        List<CsMessage> messages = new ArrayList<>();
+        for (ChatMessage msg : chatMessages) {
+            CsMessage csMsg = new CsMessage();
+            csMsg.setId(msg.getId());
+            csMsg.setConversationId(conversationId);
+            csMsg.setContent(msg.getContent());
+            csMsg.setMsgType(msg.getMsgType());
+            if (msg.getExtra() != null && !msg.getExtra().isEmpty()) {
+                csMsg.setExtra(JSONObject.toJSONString(msg.getExtra()));
+            }
+            csMsg.setSenderType(msg.getSenderType() != null ? msg.getSenderType() : CsMessage.SENDER_USER);
+            csMsg.setSenderId(msg.getSenderId());
+            csMsg.setSenderName(msg.getSenderName());
+            csMsg.setCreateTime(msg.getCreateTime());
+            csMsg.setSenderAvatar(msg.getSenderAvatar());
+            messages.add(csMsg);
+        }
+        return messages;
     }
 
     private Map<String, Object> parseExtraMap(String extra) {

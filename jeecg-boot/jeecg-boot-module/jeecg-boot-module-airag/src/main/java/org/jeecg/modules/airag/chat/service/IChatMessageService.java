@@ -64,6 +64,11 @@ public interface IChatMessageService {
     List<ChatMessage> getRecentMessages(String conversationId, int limit);
 
     /**
+     * 获取某条消息之前的N条消息
+     */
+    List<ChatMessage> getMessagesBefore(String conversationId, String beforeId, int limit);
+
+    /**
      * 获取会话的最后一条消息
      */
     ChatMessage getLastMessage(String conversationId);

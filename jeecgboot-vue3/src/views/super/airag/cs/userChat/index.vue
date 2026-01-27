@@ -22,7 +22,7 @@
     </div>
 
     <!-- 消息区域 -->
-    <div class="chat-messages" ref="messagesRef">
+    <div class="chat-messages" ref="messagesRef" @scroll.passive="handleMessageScroll">
       <div v-if="loading" class="loading-wrapper">
         <a-spin />
       </div>
@@ -31,7 +31,7 @@
           <MessageOutlined style="font-size: 48px; color: #bfbfbf" />
           <p>开始您的咨询吧~</p>
         </div>
-        <div v-for="msg in messages" :key="msg.id" 
+        <div v-for="msg in displayMessages" :key="msg.id" 
              :class="['message-item', getMessageClass(msg)]">
           <!-- 系统消息 -->
           <div v-if="msg.senderType === 3" class="system-message">
@@ -271,6 +271,28 @@ const loading = ref(false);
 const sending = ref(false);
 const inputMessage = ref('');
 const messagesRef = ref<HTMLElement | null>(null);
+const historyPageSize = 100;
+const loadingHistory = ref(false);
+const hasMoreHistory = ref(true);
+const historyBeforeId = ref<string | null>(null);
+const displayMessages = computed(() => {
+  const list: any[] = [];
+  let lastDateKey = '';
+  for (const msg of messages.value) {
+    const dateKey = getDateKey(msg?.createTime);
+    if (dateKey && dateKey !== lastDateKey) {
+      list.push({
+        id: `date-${dateKey}`,
+        senderType: 3,
+        content: formatDateSeparator(msg.createTime),
+        isDateSeparator: true,
+      });
+      lastDateKey = dateKey;
+    }
+    list.push(msg);
+  }
+  return list;
+});
 
 // WebSocket
 let ws: WebSocket | null = null;
@@ -475,16 +497,76 @@ async function loadMessages() {
       url: '/cs/message/list',
       params: {
         conversationId: conversationId.value,
-        limit: 100,
+        limit: historyPageSize,
       },
     });
-    if (res) {
-      messages.value = Array.isArray(res) ? res : (res.result || []);
+    const list = Array.isArray(res) ? res : (res?.result || res?.records || []);
+    if (list) {
+      messages.value = list;
+      historyBeforeId.value = list[0]?.id || null;
+      hasMoreHistory.value = list.length >= historyPageSize;
     }
   } catch {
     // 忽略错误
   } finally {
     loading.value = false;
+  }
+}
+
+async function loadMoreMessages() {
+  if (!conversationId.value || conversationId.value.startsWith('temp_')) return;
+  if (loadingHistory.value || !hasMoreHistory.value) return;
+  const beforeId = historyBeforeId.value;
+  if (!beforeId) {
+    hasMoreHistory.value = false;
+    return;
+  }
+
+  const el = messagesRef.value;
+  const prevScrollHeight = el?.scrollHeight || 0;
+  const prevScrollTop = el?.scrollTop || 0;
+
+  loadingHistory.value = true;
+  try {
+    const res = await httpGet({
+      url: `/cs/message/${conversationId.value}/page`,
+      params: { beforeId, limit: historyPageSize },
+    });
+    const olderMessages = Array.isArray(res) ? res : (res?.result || res?.records || []);
+    if (!olderMessages.length) {
+      hasMoreHistory.value = false;
+      return;
+    }
+    const existingIds = new Set(messages.value.map(m => m.id));
+    const filtered = olderMessages.filter((m: any) => !existingIds.has(m.id));
+    if (!filtered.length) {
+      hasMoreHistory.value = false;
+      return;
+    }
+    messages.value = [...filtered, ...messages.value];
+    historyBeforeId.value = filtered[0]?.id || historyBeforeId.value;
+    if (olderMessages.length < historyPageSize) {
+      hasMoreHistory.value = false;
+    }
+    nextTick(() => {
+      const nextEl = messagesRef.value;
+      if (!nextEl) return;
+      const nextScrollHeight = nextEl.scrollHeight;
+      nextEl.scrollTop = nextScrollHeight - prevScrollHeight + prevScrollTop;
+    });
+  } catch {
+    // 忽略错误
+  } finally {
+    loadingHistory.value = false;
+  }
+}
+
+function handleMessageScroll(event?: Event) {
+  const el = (event?.target as HTMLElement) || messagesRef.value;
+  if (!el) return;
+  if (loadingHistory.value || !hasMoreHistory.value) return;
+  if (el.scrollTop <= 20) {
+    loadMoreMessages();
   }
 }
 
@@ -979,6 +1061,37 @@ function scrollToBottom() {
   });
 }
 
+function isMessagesAtBottom() {
+  const el = messagesRef.value;
+  if (!el) return true;
+  const threshold = 40;
+  return el.scrollHeight - (el.scrollTop + el.clientHeight) <= threshold;
+}
+
+function getDateKey(time: string | Date) {
+  if (!time) return '';
+  const date = new Date(time);
+  if (Number.isNaN(date.getTime())) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function formatDateSeparator(time: string | Date) {
+  if (!time) return '';
+  const date = new Date(time);
+  if (Number.isNaN(date.getTime())) return '';
+  const today = new Date();
+  const dateKey = getDateKey(date);
+  const todayKey = getDateKey(today);
+  if (dateKey === todayKey) return '今天';
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (dateKey === getDateKey(yesterday)) return '昨天';
+  return date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+}
+
 // 格式化时间
 function formatTime(time: string | Date) {
   if (!time) return '';
@@ -1092,6 +1205,8 @@ function renderMessage(content: string) {
 
 // 监听消息变化，自动滚动
 watch(messages, () => {
+  if (loadingHistory.value) return;
+  if (!isMessagesAtBottom()) return;
   scrollToBottom();
 }, { deep: true });
 </script>
