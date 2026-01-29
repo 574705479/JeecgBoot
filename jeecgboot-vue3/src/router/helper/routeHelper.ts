@@ -53,6 +53,12 @@ function asyncImportRoute(routes: AppRouteRecordRaw[] | undefined) {
     if (item?.route == 0) {
       item.meta.ignoreRoute = true;
     }
+    // 强制客服工作台常驻
+    if (typeof item.component === 'string' && item.component.includes('super/airag/cs/workbench/index')) {
+      item.name = 'CsWorkbench';
+      item.meta.keepAlive = true;
+      item.meta.ignoreKeepAlive = false;
+    }
     // @ts-ignore 添加是否缓存路由配置
     item.meta.ignoreKeepAlive = !item?.meta.keepAlive;
     let token = getToken();

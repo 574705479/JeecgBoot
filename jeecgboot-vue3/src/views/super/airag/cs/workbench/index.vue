@@ -780,6 +780,7 @@
 </template>
 
 <script setup lang="ts">
+defineOptions({ name: 'CsWorkbench' });
 import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, watch, nextTick } from 'vue';
 import { message } from 'ant-design-vue';
 import { 
@@ -820,6 +821,7 @@ const agentStatus = ref(0);
 const isOnline = ref(false);
 const agentRole = ref(0); // 0-普通客服, 1-管理者
 const isSupervisor = computed(() => agentRole.value === 1);
+const keepConnectionOnDeactivate = true;
 
 // AI应用选择
 const selectedAppId = ref<string | undefined>(undefined);  // 客服AI建议应用
@@ -1128,11 +1130,13 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
-  closeWebSocket();
+  if (!keepConnectionOnDeactivate) {
+    closeWebSocket();
+    stopFallbackPoll();
+    stopWsHeartbeat();
+    stopWsHealthCheck();
+  }
   refreshTimer && clearInterval(refreshTimer);
-  stopFallbackPoll();
-  stopWsHeartbeat();
-  stopWsHealthCheck();
   window.removeEventListener('online', handleNetworkOnline);
   document.removeEventListener('visibilitychange', handleVisibilityChange);
   if (messagesEl) {
@@ -1145,6 +1149,9 @@ onUnmounted(() => {
 });
 
 onActivated(async () => {
+  if (keepConnectionOnDeactivate) {
+    return;
+  }
   // 菜单切换返回时，确保客服在线、会话和WebSocket正常
   if (!hasMounted.value || isActivating.value) return;
   isActivating.value = true;
@@ -1160,7 +1167,10 @@ onActivated(async () => {
 });
 
 onDeactivated(() => {
-  // 离开菜单时断开连接，避免后台连接失效导致不再接收消息
+  if (keepConnectionOnDeactivate) {
+    return;
+  }
+  // 离开菜单时断开连接
   closeWebSocket();
   stopFallbackPoll();
 });
