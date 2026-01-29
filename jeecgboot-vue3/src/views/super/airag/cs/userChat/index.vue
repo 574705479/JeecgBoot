@@ -218,7 +218,18 @@ const fatalError = ref(false);
 const fatalErrorMessage = ref('token无效或已过期，请回到第三方应用重新打开');
 function getQueryParam(name: string) {
   try {
-    return new URLSearchParams(window.location.search).get(name) || '';
+    const search = window.location.search || '';
+    const hash = window.location.hash || '';
+    if (search) {
+      const val = new URLSearchParams(search).get(name);
+      if (val) return val;
+    }
+    const hashQueryIndex = hash.indexOf('?');
+    if (hashQueryIndex > -1) {
+      const hashQuery = hash.substring(hashQueryIndex + 1);
+      return new URLSearchParams(hashQuery).get(name) || '';
+    }
+    return '';
   } catch {
     return '';
   }
@@ -487,13 +498,19 @@ async function checkIpBlocked() {
 }
 
 async function checkUserBlocked() {
-  if (!userId.value) {
+  if (!visitorToken.value && !sessionToken.value) {
     return;
   }
   try {
+    const headers: Record<string, string> = {};
+    if (sessionToken.value) {
+      headers['X-Visitor-Session'] = sessionToken.value;
+    } else if (visitorToken.value) {
+      headers['X-Visitor-Token'] = visitorToken.value;
+    }
     const res = await defHttp.get({
-      url: '/airag/cs/visitor/blacklist/check',
-      params: { userId: userId.value },
+      url: '/airag/cs/visitor/blacklist/check-self',
+      headers,
     }, silentRequestOptions);
     if (res?.result?.blacklisted || res?.blacklisted) {
       fatalError.value = true;

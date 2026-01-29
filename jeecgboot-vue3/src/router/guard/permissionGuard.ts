@@ -32,11 +32,27 @@ const whitePathList: PageEnum[] = [LOGIN_PATH, OAUTH2_LOGIN_PAGE_PATH,SYS_FILES_
 export function createPermissionGuard(router: Router) {
   const userStore = useUserStoreWithOut();
   const permissionStore = usePermissionStoreWithOut();
+  const publicRouteNames = new Set(['CsUserChat', 'CsWidgetPreview', 'CsAccessExample']);
+  const publicPathPrefixes = ['/cs/userChat', '/cs/chat', '/cs/widget-preview', '/cs/access-example'];
+  const isPublicPath = (to: any) => {
+    const path = String(to.path || '');
+    const fullPath = String(to.fullPath || '');
+    const href = window.location.pathname + window.location.hash;
+    return (
+      publicPathPrefixes.some((prefix) => path.startsWith(prefix)) ||
+      publicPathPrefixes.some((prefix) => fullPath.startsWith(prefix)) ||
+      publicPathPrefixes.some((prefix) => href.includes(prefix))
+    );
+  };
 
   // 自定义首页跳转次数
   let homePathJumpCount = 0;
 
   router.beforeEach(async (to, from, next) => {
+    if (isPublicPath(to) || (to.name && publicRouteNames.has(String(to.name))) || to.meta.ignoreAuth) {
+      next();
+      return;
+    }
     if (
       // 【#6861】跳转到自定义首页的逻辑，只跳转一次即可
       homePathJumpCount < 1 &&
@@ -83,6 +99,10 @@ export function createPermissionGuard(router: Router) {
 
     // token does not exist
     if (!token) {
+      if (to.name && publicRouteNames.has(String(to.name))) {
+        next();
+        return;
+      }
       // You can access without permission. You need to set the routing meta.ignoreAuth to true
       if (to.meta.ignoreAuth) {
         next();

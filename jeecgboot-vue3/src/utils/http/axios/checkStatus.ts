@@ -15,6 +15,11 @@ export function checkStatus(status: number, msg: string, errorMessageMode: Error
   const { t } = useI18n();
   const userStore = useUserStoreWithOut();
   let errMessage = '';
+  const isVisitorPath = () => {
+    if (typeof window === 'undefined') return false;
+    const href = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    return href.includes('/cs/userChat') || href.includes('/cs/chat') || href.includes('/cs/widget-preview') || href.includes('/cs/access-example');
+  };
 
   switch (status) {
     case 400:
@@ -24,12 +29,14 @@ export function checkStatus(status: number, msg: string, errorMessageMode: Error
     // Jump to the login page if not logged in, and carry the path of the current page
     // Return to the current page after successful login. This step needs to be operated on the login page.
     case 401:
-      userStore.setToken(undefined);
       errMessage = msg || t('sys.api.errMsg401');
-      if (stp === SessionTimeoutProcessingEnum.PAGE_COVERAGE) {
-        userStore.setSessionTimeout(true);
-      } else {
-        userStore.logout(true);
+      if (!isVisitorPath()) {
+        userStore.setToken(undefined);
+        if (stp === SessionTimeoutProcessingEnum.PAGE_COVERAGE) {
+          userStore.setSessionTimeout(true);
+        } else {
+          userStore.logout(true);
+        }
       }
       break;
     case 403:

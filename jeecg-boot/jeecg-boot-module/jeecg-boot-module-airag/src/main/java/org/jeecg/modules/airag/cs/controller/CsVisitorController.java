@@ -264,6 +264,31 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
     }
 
     /**
+     * 访客端自检拉黑（通过访客token解析用户）
+     */
+    @Operation(summary = "访客端自检拉黑")
+    @org.jeecg.config.shiro.IgnoreAuth
+    @GetMapping("/blacklist/check-self")
+    public Result<Map<String, Object>> checkSelfBlacklist(HttpServletRequest request) {
+        String shortToken = visitorTokenService.extractToken(request);
+        String sessionToken = visitorTokenService.extractSessionToken(request);
+        CsVisitorTokenPayload payload = null;
+        if (oConvertUtils.isNotEmpty(sessionToken)) {
+            payload = visitorTokenService.parseSessionToken(sessionToken);
+        }
+        if (payload == null && oConvertUtils.isNotEmpty(shortToken)) {
+            payload = visitorTokenService.parseToken(shortToken);
+        }
+        if (payload == null) {
+            return Result.error("访客凭证无效或已过期");
+        }
+        boolean blocked = visitorTokenService.isBlacklisted(payload.getExternalUserId());
+        java.util.Map<String, Object> result = new java.util.HashMap<>();
+        result.put("blacklisted", blocked);
+        return Result.OK(result);
+    }
+
+    /**
      * 拉黑IP
      */
     @Operation(summary = "拉黑IP")
@@ -309,6 +334,7 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
      * 检查当前访问IP是否拉黑
      */
     @Operation(summary = "检查当前访问IP是否拉黑")
+    @org.jeecg.config.shiro.IgnoreAuth
     @GetMapping("/blacklist/ip/check-current")
     public Result<Map<String, Object>> checkCurrentIpBlacklist(HttpServletRequest request) {
         String clientIp = getClientIp(request);
