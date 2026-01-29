@@ -75,6 +75,58 @@
               </a-select-option>
             </a-select>
           </div>
+
+          <!-- 访客接入密钥与白名单（全局配置） -->
+          <div class="setting-item">
+            <div class="setting-label">
+              <KeyOutlined />
+              <span>访客接入设置</span>
+              <a-tag color="orange" size="small">全局</a-tag>
+            </div>
+            <div class="setting-desc">用于第三方获取短时token校验；留空则不校验密钥</div>
+            <a-space direction="vertical" style="width: 100%">
+              <a-input
+                v-model:value="visitorSecretKey"
+                placeholder="密钥（留空则不校验）"
+                allowClear
+              />
+              <a-space>
+                <a-button size="small" @click="generateVisitorSecretKey" :loading="visitorSecretGenerating">
+                  {{ visitorSecretKey ? '重新生成' : '生成密钥' }}
+                </a-button>
+                <a-button type="primary" size="small" @click="saveVisitorSecretConfig" :loading="visitorSecretSaving">
+                  保存
+                </a-button>
+              </a-space>
+              <a-textarea
+                v-model:value="visitorDomainWhitelist"
+                placeholder="访问白名单（域名/IP，逗号分隔，支持*.example.com；!开头表示黑名单）"
+                :rows="3"
+              />
+              <a-alert
+                message="示例：partner.com,*.example.com,192.168.1.10,!test.example.com"
+                type="info"
+                show-icon
+              />
+              <a-alert
+                message="接入示例：/cs/userChat?token=xxx&externalUserId=U1001&userName=Tom&source=partnerA"
+                type="info"
+                show-icon
+              />
+            </a-space>
+          </div>
+
+          <a-divider />
+
+          <!-- 接入示例 -->
+          <div class="setting-item">
+            <div class="setting-label">
+              <MessageOutlined />
+              <span>第三方接入示例</span>
+            </div>
+            <div class="setting-desc">调试时按此流程获取token并访问访客页</div>
+            <a-button size="small" @click="openAccessExamplePage">打开示例页</a-button>
+          </div>
         </div>
       </a-drawer>
 
@@ -592,6 +644,35 @@
           </div>
         </div>
 
+        <!-- 拉黑控制 -->
+        <div class="info-section">
+          <div class="section-title">拉黑控制</div>
+          <div class="info-item">
+            <label>用户ID</label>
+            <span class="info-value">
+              <a-switch
+                :checked="userIdBlacklisted"
+                :loading="blacklistLoading"
+                :disabled="!currentConversation.userId"
+                checked-children="已拉黑"
+                @change="(checked) => checked ? applyBlacklist('user') : removeBlacklist('user')"
+              />
+            </span>
+          </div>
+          <div class="info-item">
+            <label>IP</label>
+            <span class="info-value">
+              <a-switch
+                :checked="ipBlacklisted"
+                :loading="blacklistLoading"
+                :disabled="!currentConversation.userIp"
+                checked-children="已拉黑"
+                @change="(checked) => checked ? applyBlacklist('ip') : removeBlacklist('ip')"
+              />
+            </span>
+          </div>
+        </div>
+
         <!-- 备注 -->
         <div class="info-section">
           <div class="section-title">
@@ -705,7 +786,7 @@ import {
   StarFilled, StarOutlined, SwapOutlined, MenuUnfoldOutlined, MenuFoldOutlined,
   CloseOutlined, EditOutlined, PlusOutlined, InboxOutlined, MessageOutlined,
   SmileOutlined, ThunderboltOutlined, RobotOutlined, EyeOutlined, SettingOutlined,
-  MoreOutlined, DeleteOutlined, PaperClipOutlined
+  MoreOutlined, DeleteOutlined, PaperClipOutlined, KeyOutlined
 } from '@ant-design/icons-vue';
 import { defHttp } from '/@/utils/http/axios';
 import { useGlobSetting } from '/@/hooks/setting';
@@ -745,6 +826,10 @@ const selectedAppId = ref<string | undefined>(undefined);  // 客服AI建议应�
 const visitorAppId = ref<string | undefined>(undefined);   // 访客AI应用
 const aiAppList = ref<any[]>([]);
 const showSettingsDrawer = ref(false);
+const visitorSecretKey = ref('');
+const visitorDomainWhitelist = ref('');
+const visitorSecretSaving = ref(false);
+const visitorSecretGenerating = ref(false);
 
 // 会话列表
 const filter = ref('mine');
@@ -809,6 +894,9 @@ const visitorInfo = ref<any>({});
 const visitorTags = ref<string[]>([]);
 const showDetailPanel = ref(true);
 const userOnline = ref(false);
+const userIdBlacklisted = ref(false);
+const ipBlacklisted = ref(false);
+const blacklistLoading = ref(false);
 
 // 访客信息缓存 (key -> visitorInfo)
 const visitorCache = new Map<string, any>();
@@ -1025,6 +1113,7 @@ onMounted(async () => {
   await loadAgentInfo();
   await loadAiAppList();
   await loadGlobalVisitorApp();  // 加载全局访客AI应用配置
+  await loadVisitorAccessConfig(); // 加载全局访客接入配置
   await loadConversations();
   connectWebSocket();
   startFallbackPoll();
@@ -1486,6 +1575,66 @@ async function loadGlobalVisitorApp() {
   }
 }
 
+function resetVisitorAccessConfig() {
+  visitorSecretKey.value = '';
+  visitorDomainWhitelist.value = '';
+}
+
+async function loadVisitorAccessConfig() {
+  try {
+    const res = await httpGet({
+      url: '/cs/agent/global/visitor-access'
+    }, { isTransformResponse: false });
+    if (res?.success) {
+      const config = res.result || {};
+      visitorSecretKey.value = config.secretKey || '';
+      visitorDomainWhitelist.value = config.whitelist || '';
+    } else {
+      resetVisitorAccessConfig();
+    }
+  } catch (e) {
+    console.error('加载访客接入配置失败', e);
+  }
+}
+
+async function generateVisitorSecretKey() {
+  visitorSecretGenerating.value = true;
+  try {
+    const res = await httpGet({ url: '/cs/agent/global/visitor-access/generate-key' }, { isTransformResponse: false });
+    if (res?.success && res.result) {
+      visitorSecretKey.value = res.result;
+      message.success('密钥已生成');
+    }
+  } catch (e) {
+    message.error('生成密钥失败');
+  } finally {
+    visitorSecretGenerating.value = false;
+  }
+}
+
+async function saveVisitorSecretConfig() {
+  visitorSecretSaving.value = true;
+  try {
+    const payload = {
+      secretKey: visitorSecretKey.value || '',
+      whitelist: visitorDomainWhitelist.value || '',
+    };
+    await httpPut({ url: '/cs/agent/global/visitor-access', data: payload });
+    message.success('保存成功');
+    await loadVisitorAccessConfig();
+  } catch (e) {
+    console.error('保存访客接入配置失败', e);
+    message.error('保存失败');
+  } finally {
+    visitorSecretSaving.value = false;
+  }
+}
+
+function openAccessExamplePage() {
+  const url = `${window.location.origin}/cs/access-example`;
+  window.open(url, '_blank');
+}
+
 // 切换在线状态
 async function toggleOnline(checked: boolean) {
   try {
@@ -1666,6 +1815,7 @@ async function selectConversation(conv: any) {
   // 清理上一个会话残留，避免昵称/头像短暂闪回
   visitorInfo.value = { level: 1, star: 0 };
   visitorTags.value = [];
+  resetBlacklistStatus();
 
   // 优先使用缓存昵称/信息，避免首次渲染显示为“访客”
   const cacheKey = getVisitorCacheKey(conv.appId, conv.userId);
@@ -1693,6 +1843,7 @@ async function selectConversation(conv: any) {
   
   await loadMessages(conv.id);
   await loadVisitorInfo(conv.appId, conv.userId);
+  await loadBlacklistStatus();
   
   // 加载消息后，计算"对话中"的客服并缓存
   const listItem = conversations.value.find(c => c.id === conv.id);
@@ -1913,6 +2064,96 @@ async function loadVisitorInfo(appId: string, userId: string) {
         visitorTags.value = [];
       }
     }
+  }
+}
+
+function resetBlacklistStatus() {
+  userIdBlacklisted.value = false;
+  ipBlacklisted.value = false;
+}
+
+async function loadBlacklistStatus() {
+  resetBlacklistStatus();
+  if (!currentConversation.value) {
+    return;
+  }
+  const userId = currentConversation.value.userId;
+  const userIp = currentConversation.value.userIp;
+  try {
+    if (userId) {
+      const res = await httpGet({
+        url: '/airag/cs/visitor/blacklist/check',
+        params: { userId },
+      });
+      userIdBlacklisted.value = !!res?.blacklisted;
+    }
+    if (userIp) {
+      const res = await httpGet({
+        url: '/airag/cs/visitor/blacklist/ip/check',
+        params: { ip: userIp },
+      });
+      ipBlacklisted.value = !!res?.blacklisted;
+    }
+  } catch (e) {
+    console.error('加载黑名单状态失败', e);
+  }
+}
+
+async function applyBlacklist(type: 'user' | 'ip' | 'both') {
+  if (blacklistLoading.value || !currentConversation.value) {
+    return;
+  }
+  const userId = currentConversation.value.userId;
+  const userIp = currentConversation.value.userIp;
+  if ((type === 'user' || type === 'both') && !userId) {
+    message.warning('缺少用户ID');
+    return;
+  }
+  if ((type === 'ip' || type === 'both') && !userIp) {
+    message.warning('缺少IP');
+    return;
+  }
+  blacklistLoading.value = true;
+  try {
+    if (type === 'user' || type === 'both') {
+      await httpPost({ url: '/airag/cs/visitor/blacklist/add', data: { userId } });
+      userIdBlacklisted.value = true;
+    }
+    if (type === 'ip' || type === 'both') {
+      await httpPost({ url: '/airag/cs/visitor/blacklist/ip/add', data: { ip: userIp } });
+      ipBlacklisted.value = true;
+    }
+    message.success('已拉黑');
+  } catch (e) {
+    console.error('拉黑失败', e);
+    message.error('拉黑失败');
+  } finally {
+    blacklistLoading.value = false;
+  }
+}
+
+async function removeBlacklist(type: 'user' | 'ip' | 'both') {
+  if (blacklistLoading.value || !currentConversation.value) {
+    return;
+  }
+  const userId = currentConversation.value.userId;
+  const userIp = currentConversation.value.userIp;
+  blacklistLoading.value = true;
+  try {
+    if ((type === 'user' || type === 'both') && userId) {
+      await httpPost({ url: '/airag/cs/visitor/blacklist/remove', data: { userId } });
+      userIdBlacklisted.value = false;
+    }
+    if ((type === 'ip' || type === 'both') && userIp) {
+      await httpPost({ url: '/airag/cs/visitor/blacklist/ip/remove', data: { ip: userIp } });
+      ipBlacklisted.value = false;
+    }
+    message.success('已取消拉黑');
+  } catch (e) {
+    console.error('取消拉黑失败', e);
+    message.error('取消拉黑失败');
+  } finally {
+    blacklistLoading.value = false;
   }
 }
 

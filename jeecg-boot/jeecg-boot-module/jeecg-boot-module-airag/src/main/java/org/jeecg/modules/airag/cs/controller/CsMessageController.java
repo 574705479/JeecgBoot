@@ -4,11 +4,17 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
 import org.jeecg.common.api.vo.Result;
+import org.jeecg.common.util.oConvertUtils;
+import org.jeecg.modules.airag.cs.entity.CsConversation;
 import org.jeecg.modules.airag.cs.entity.CsMessage;
+import org.jeecg.modules.airag.cs.service.ICsConversationService;
 import org.jeecg.modules.airag.cs.service.ICsMessageService;
+import org.jeecg.modules.airag.cs.service.ICsVisitorTokenService;
+import org.jeecg.modules.airag.cs.vo.CsVisitorTokenPayload;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,13 +34,19 @@ public class CsMessageController {
     @Autowired
     private ICsMessageService messageService;
 
+    @Autowired
+    private ICsConversationService conversationService;
+
+    @Autowired
+    private ICsVisitorTokenService visitorTokenService;
+
     /**
      * 发送消息 (通用)
      */
     @Operation(summary = "发送消息")
     @org.jeecg.config.shiro.IgnoreAuth
     @PostMapping("/send")
-    public Result<CsMessage> send(@RequestBody Map<String, Object> params) {
+    public Result<CsMessage> send(@RequestBody Map<String, Object> params, HttpServletRequest request) {
         String conversationId = (String) params.get("conversationId");
         String content = (String) params.get("content");
         String senderId = (String) params.get("senderId");
@@ -56,6 +68,28 @@ public class CsMessageController {
             senderType = "user"; // 默认用户
         }
         
+        boolean isAdmin = visitorTokenService.isAdminRequest(request);
+        CsVisitorTokenPayload tokenPayload = null;
+        if (!isAdmin) {
+            tokenPayload = resolveVisitorPayload(request);
+            if (tokenPayload == null) {
+                return Result.error("访客凭证无效或已过期");
+            }
+            if (visitorTokenService.isBlacklisted(tokenPayload.getExternalUserId())) {
+                return Result.error("访客已被拉黑");
+            }
+            if ("agent".equals(senderType)) {
+                return Result.error("访客无权限发送客服消息");
+            }
+            senderId = tokenPayload.getExternalUserId();
+            if (oConvertUtils.isEmpty(senderName)) {
+                senderName = tokenPayload.getUserName();
+            }
+            if (oConvertUtils.isNotEmpty(conversationId) && !isConversationOwner(conversationId, senderId)) {
+                return Result.error("无权访问该会话");
+            }
+        }
+
         CsMessage message;
         if ("user".equals(senderType)) {
             message = messageService.sendUserMessage(conversationId, senderId, senderName, content);
@@ -72,12 +106,30 @@ public class CsMessageController {
     @Operation(summary = "用户发送消息")
     @org.jeecg.config.shiro.IgnoreAuth
     @PostMapping("/user/send")
-    public Result<CsMessage> sendUserMessage(@RequestBody Map<String, String> params) {
+    public Result<CsMessage> sendUserMessage(@RequestBody Map<String, String> params, HttpServletRequest request) {
         String conversationId = params.get("conversationId");
         String userId = params.get("userId");
         String userName = params.get("userName");
         String content = params.get("content");
         
+        boolean isAdmin = visitorTokenService.isAdminRequest(request);
+        if (!isAdmin) {
+            CsVisitorTokenPayload tokenPayload = resolveVisitorPayload(request);
+            if (tokenPayload == null) {
+                return Result.error("访客凭证无效或已过期");
+            }
+            if (visitorTokenService.isBlacklisted(tokenPayload.getExternalUserId())) {
+                return Result.error("访客已被拉黑");
+            }
+            userId = tokenPayload.getExternalUserId();
+            if (oConvertUtils.isEmpty(userName)) {
+                userName = tokenPayload.getUserName();
+            }
+            if (oConvertUtils.isNotEmpty(conversationId) && !isConversationOwner(conversationId, userId)) {
+                return Result.error("无权访问该会话");
+            }
+        }
+
         CsMessage message = messageService.sendUserMessage(conversationId, userId, userName, content);
         return Result.OK(message);
     }
@@ -107,7 +159,11 @@ public class CsMessageController {
     @GetMapping("/{conversationId}")
     public Result<List<CsMessage>> getMessages(
             @PathVariable String conversationId,
-            @RequestParam(defaultValue = "50") Integer limit) {
+            @RequestParam(defaultValue = "50") Integer limit,
+            HttpServletRequest request) {
+        if (!validateVisitorAccess(conversationId, request)) {
+            return Result.error("访客凭证无效或已过期");
+        }
         List<CsMessage> messages = messageService.getMessages(conversationId, limit);
         return Result.OK(messages);
     }
@@ -120,7 +176,11 @@ public class CsMessageController {
     @GetMapping("/list")
     public Result<List<CsMessage>> getMessageList(
             @RequestParam String conversationId,
-            @RequestParam(defaultValue = "100") Integer limit) {
+            @RequestParam(defaultValue = "100") Integer limit,
+            HttpServletRequest request) {
+        if (!validateVisitorAccess(conversationId, request)) {
+            return Result.error("访客凭证无效或已过期");
+        }
         List<CsMessage> messages = messageService.getMessages(conversationId, limit);
         return Result.OK(messages);
     }
@@ -134,7 +194,11 @@ public class CsMessageController {
     public Result<List<CsMessage>> getMessagesPage(
             @PathVariable String conversationId,
             @RequestParam(required = false) String beforeId,
-            @RequestParam(defaultValue = "20") Integer limit) {
+            @RequestParam(defaultValue = "20") Integer limit,
+            HttpServletRequest request) {
+        if (!validateVisitorAccess(conversationId, request)) {
+            return Result.error("访客凭证无效或已过期");
+        }
         List<CsMessage> messages = messageService.getMessages(conversationId, beforeId, limit);
         return Result.OK(messages);
     }
@@ -237,5 +301,42 @@ public class CsMessageController {
         result.put("unreadCount", count);
         
         return Result.OK(result);
+    }
+
+    private boolean validateVisitorAccess(String conversationId, HttpServletRequest request) {
+        if (visitorTokenService.isAdminRequest(request)) {
+            return true;
+        }
+        CsVisitorTokenPayload payload = resolveVisitorPayload(request);
+        if (payload == null) {
+            return false;
+        }
+        if (visitorTokenService.isBlacklisted(payload.getExternalUserId())) {
+            return false;
+        }
+        return isConversationOwner(conversationId, payload.getExternalUserId());
+    }
+
+    private boolean isConversationOwner(String conversationId, String userId) {
+        if (oConvertUtils.isEmpty(conversationId) || oConvertUtils.isEmpty(userId)) {
+            return false;
+        }
+        CsConversation conversation = conversationService.getById(conversationId);
+        return conversation != null && userId.equals(conversation.getUserId());
+    }
+
+    private CsVisitorTokenPayload resolveVisitorPayload(HttpServletRequest request) {
+        String sessionToken = visitorTokenService.extractSessionToken(request);
+        if (oConvertUtils.isNotEmpty(sessionToken)) {
+            CsVisitorTokenPayload payload = visitorTokenService.parseSessionToken(sessionToken);
+            if (payload != null) {
+                return payload;
+            }
+        }
+        String shortToken = visitorTokenService.extractToken(request);
+        if (oConvertUtils.isNotEmpty(shortToken)) {
+            return visitorTokenService.parseToken(shortToken);
+        }
+        return null;
     }
 }

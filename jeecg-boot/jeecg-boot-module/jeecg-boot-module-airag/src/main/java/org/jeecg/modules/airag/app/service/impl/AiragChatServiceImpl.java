@@ -17,7 +17,6 @@ import org.jeecg.common.system.util.JwtUtil;
 import org.jeecg.common.util.*;
 import org.jeecg.modules.airag.app.consts.AiAppConsts;
 import org.jeecg.modules.airag.app.entity.AiragApp;
-import org.jeecg.modules.airag.app.entity.AiragAppSecret;
 import org.jeecg.modules.airag.app.mapper.AiragAppMapper;
 import org.jeecg.modules.airag.app.service.IAiragChatService;
 import org.jeecg.modules.airag.app.vo.AppDebugParams;
@@ -87,9 +86,6 @@ public class AiragChatServiceImpl implements IAiragChatService {
     @Autowired
     AiragModelMapper airagModelMapper;
 
-    @Autowired
-    org.jeecg.modules.airag.app.service.IAiragAppSecretService airagAppSecretService;
-
     @Autowired(required = false)
     org.jeecg.modules.airag.chat.service.IChatMessageService chatMessageService;
 
@@ -109,38 +105,6 @@ public class AiragChatServiceImpl implements IAiragChatService {
         AssertUtils.assertNotEmpty("参数异常", chatSendParams);
         String userMessage = chatSendParams.getContent();
         AssertUtils.assertNotEmpty("至少发送一条消息", userMessage);
-
-        // 第三方接入签名验证（仅对外部用户生效，登录用户无需验证）
-        // 判断是否是外部用户访问（有externalUserId参数）
-        boolean isExternalUser = oConvertUtils.isNotEmpty(chatSendParams.getExternalUserId());
-        if (isExternalUser) {
-            // 检查应用是否配置了密钥
-            AiragAppSecret appSecret = null;
-            if (oConvertUtils.isNotEmpty(chatSendParams.getAppId())) {
-                appSecret = airagAppSecretService.getEnabledByAppId(chatSendParams.getAppId());
-            }
-            // 如果应用配置了密钥（secretKey不为空），则必须验证签名
-            if (appSecret != null && oConvertUtils.isNotEmpty(appSecret.getSecretKey())) {
-                // 必须提供 token 和 timestamp
-                if (oConvertUtils.isEmpty(chatSendParams.getToken()) || chatSendParams.getTimestamp() == null) {
-                    throw new JeecgBootBizTipException("该应用已启用签名验证，请提供有效的签名参数");
-                }
-                String referer = null;
-                try {
-                    HttpServletRequest request = SpringContextUtils.getHttpServletRequest();
-                    referer = request.getHeader("Referer");
-                } catch (Exception ignore) {}
-                boolean valid = airagAppSecretService.validateToken(
-                        chatSendParams.getAppId(),
-                        chatSendParams.getToken(),
-                        chatSendParams.getTimestamp(),
-                        referer
-                );
-                if (!valid) {
-                    throw new JeecgBootBizTipException("接入签名验证失败");
-                }
-            }
-        }
 
         // 获取会话信息
         String conversationId = chatSendParams.getConversationId();

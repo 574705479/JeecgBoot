@@ -12,9 +12,12 @@ import org.jeecg.modules.airag.cs.entity.CsAgent;
 import org.jeecg.modules.airag.cs.entity.CsConversation;
 import org.jeecg.modules.airag.cs.service.ICsAgentService;
 import org.jeecg.modules.airag.cs.service.ICsConversationService;
+import org.jeecg.modules.airag.cs.service.ICsVisitorTokenService;
+import org.jeecg.modules.airag.cs.vo.CsVisitorTokenPayload;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -37,6 +40,9 @@ public class CsConversationController extends JeecgController<CsConversation, IC
     @Autowired
     private ICsAgentService csAgentService;
 
+    @Autowired
+    private ICsVisitorTokenService visitorTokenService;
+
     // ==================== 会话生命周期 ====================
 
     /**
@@ -45,11 +51,27 @@ public class CsConversationController extends JeecgController<CsConversation, IC
     @Operation(summary = "创建会话")
     @org.jeecg.config.shiro.IgnoreAuth
     @PostMapping("/create")
-    public Result<CsConversation> create(@RequestBody Map<String, String> params) {
+    public Result<CsConversation> create(@RequestBody Map<String, String> params, HttpServletRequest request) {
         String appId = params.get("appId");
         String userId = params.get("userId");
         String userName = params.get("userName");
         String source = params.get("source");
+
+        boolean isAdmin = visitorTokenService.isAdminRequest(request);
+        if (!isAdmin) {
+            CsVisitorTokenPayload payload = resolveVisitorPayload(request);
+            if (payload == null) {
+                return Result.error("访客凭证无效或已过期");
+            }
+            if (visitorTokenService.isBlacklisted(payload.getExternalUserId())) {
+                return Result.error("访客已被拉黑");
+            }
+            appId = payload.getAppId();
+            userId = payload.getExternalUserId();
+            if (oConvertUtils.isEmpty(userName)) {
+                userName = payload.getUserName();
+            }
+        }
         
         CsConversation conversation = conversationService.createConversation(appId, userId, userName, source);
         return Result.OK(conversation);
@@ -61,11 +83,27 @@ public class CsConversationController extends JeecgController<CsConversation, IC
     @Operation(summary = "获取或创建会话")
     @org.jeecg.config.shiro.IgnoreAuth
     @PostMapping("/get-or-create")
-    public Result<CsConversation> getOrCreate(@RequestBody Map<String, String> params) {
+    public Result<CsConversation> getOrCreate(@RequestBody Map<String, String> params, HttpServletRequest request) {
         String conversationId = params.get("conversationId");
         String appId = params.get("appId");
         String userId = params.get("userId");
         String userName = params.get("userName");
+
+        boolean isAdmin = visitorTokenService.isAdminRequest(request);
+        if (!isAdmin) {
+            CsVisitorTokenPayload payload = resolveVisitorPayload(request);
+            if (payload == null) {
+                return Result.error("访客凭证无效或已过期");
+            }
+            if (visitorTokenService.isBlacklisted(payload.getExternalUserId())) {
+                return Result.error("访客已被拉黑");
+            }
+            appId = payload.getAppId();
+            userId = payload.getExternalUserId();
+            if (oConvertUtils.isEmpty(userName)) {
+                userName = payload.getUserName();
+            }
+        }
         
         CsConversation conversation = conversationService.getOrCreateConversation(
                 conversationId, appId, userId, userName);
@@ -78,12 +116,39 @@ public class CsConversationController extends JeecgController<CsConversation, IC
     @Operation(summary = "获取会话详情")
     @org.jeecg.config.shiro.IgnoreAuth
     @GetMapping("/{id}")
-    public Result<CsConversation> get(@PathVariable String id) {
+    public Result<CsConversation> get(@PathVariable String id, HttpServletRequest request) {
         CsConversation conversation = conversationService.getConversation(id);
         if (conversation == null) {
             return Result.error("会话不存在");
         }
+        if (!visitorTokenService.isAdminRequest(request)) {
+            CsVisitorTokenPayload payload = resolveVisitorPayload(request);
+            if (payload == null) {
+                return Result.error("访客凭证无效或已过期");
+            }
+            if (visitorTokenService.isBlacklisted(payload.getExternalUserId())) {
+                return Result.error("访客已被拉黑");
+            }
+            if (!payload.getExternalUserId().equals(conversation.getUserId())) {
+                return Result.error("无权访问该会话");
+            }
+        }
         return Result.OK(conversation);
+    }
+
+    private CsVisitorTokenPayload resolveVisitorPayload(HttpServletRequest request) {
+        String sessionToken = visitorTokenService.extractSessionToken(request);
+        if (oConvertUtils.isNotEmpty(sessionToken)) {
+            CsVisitorTokenPayload payload = visitorTokenService.parseSessionToken(sessionToken);
+            if (payload != null) {
+                return payload;
+            }
+        }
+        String shortToken = visitorTokenService.extractToken(request);
+        if (oConvertUtils.isNotEmpty(shortToken)) {
+            return visitorTokenService.parseToken(shortToken);
+        }
+        return null;
     }
 
     /**

@@ -90,6 +90,12 @@
           {{ record.lastVisitTime || '-' }}
         </template>
 
+        <!-- 黑名单 -->
+        <template v-else-if="column.key === 'blacklisted'">
+          <a-tag v-if="record.blacklisted" color="red">已拉黑</a-tag>
+          <span v-else>-</span>
+        </template>
+
         <!-- 操作 -->
         <template v-else-if="column.key === 'action'">
           <a-space>
@@ -98,6 +104,9 @@
             </a-button>
             <a-button type="link" size="small" @click="handleToggleStar(record)">
               {{ record.star === 1 ? '取消星标' : '星标' }}
+            </a-button>
+            <a-button type="link" size="small" @click="handleToggleBlacklist(record)">
+              {{ record.blacklisted ? '取消拉黑' : '拉黑' }}
             </a-button>
             <a-popconfirm
               title="确定删除此访客吗?"
@@ -192,6 +201,11 @@ const columns = [
     width: 160
   },
   {
+    title: '黑名单',
+    key: 'blacklisted',
+    width: 90
+  },
+  {
     title: '操作',
     key: 'action',
     width: 180,
@@ -255,6 +269,18 @@ function handleEdit(record: any) {
   currentAppId.value = record.appId;
   currentUserId.value = record.userId;
   modalVisible.value = true;
+}
+
+// 拉黑/取消拉黑
+async function handleToggleBlacklist(record: any) {
+  try {
+    const url = record.blacklisted ? '/airag/cs/visitor/blacklist/remove' : '/airag/cs/visitor/blacklist/add';
+    await defHttp.post({ url, data: { userId: record.userId } });
+    message.success(record.blacklisted ? '已取消拉黑' : '已拉黑');
+    loadVisitors();
+  } catch {
+    message.error('操作失败');
+  }
 }
 
 // 切换星标

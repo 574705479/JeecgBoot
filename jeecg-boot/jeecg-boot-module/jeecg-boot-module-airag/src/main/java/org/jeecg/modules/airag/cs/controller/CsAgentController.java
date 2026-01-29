@@ -1,5 +1,6 @@
 package org.jeecg.modules.airag.cs.controller;
 
+import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -22,6 +23,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * 客服管理Controller
@@ -38,6 +40,8 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     /** 访客AI应用全局配置的Redis Key */
     private static final String VISITOR_APP_REDIS_KEY = "cs:global:visitor_app_id";
     private static final String VISITOR_APP_CONFIG_KEY = "visitor_app_id";
+    private static final String VISITOR_ACCESS_REDIS_KEY = "cs:global:visitor_access";
+    private static final String VISITOR_ACCESS_CONFIG_KEY = "visitor_access";
 
     @Autowired
     private ICsAgentService csAgentService;
@@ -230,6 +234,61 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
         java.util.Map<String, String> result = new java.util.HashMap<>();
         result.put("appId", appId);
         return Result.OK(result);
+    }
+
+    /**
+     * 获取访客接入配置（全局）
+     */
+    @Operation(summary = "获取访客接入配置（全局）")
+    @org.jeecg.config.shiro.IgnoreAuth
+    @GetMapping("/global/visitor-access")
+    public Result<java.util.Map<String, String>> getGlobalVisitorAccess() {
+        String json = redisTemplate.opsForValue().get(VISITOR_ACCESS_REDIS_KEY);
+        if (json == null || json.isEmpty()) {
+            json = getGlobalConfigValue(VISITOR_ACCESS_CONFIG_KEY);
+            if (json != null && !json.isEmpty()) {
+                redisTemplate.opsForValue().set(VISITOR_ACCESS_REDIS_KEY, json);
+            }
+        }
+        java.util.Map<String, String> result = new java.util.HashMap<>();
+        if (json != null && !json.isEmpty()) {
+            try {
+                JSONObject obj = JSONObject.parseObject(json);
+                result.put("secretKey", obj.getString("secretKey"));
+                result.put("whitelist", obj.getString("whitelist"));
+            } catch (Exception e) {
+                log.warn("[CS-Agent] 解析访客接入配置失败", e);
+            }
+        }
+        return Result.OK(result);
+    }
+
+    /**
+     * 设置访客接入配置（全局）
+     */
+    @Operation(summary = "设置访客接入配置（全局）")
+    @PutMapping("/global/visitor-access")
+    public Result<String> setGlobalVisitorAccess(@RequestBody java.util.Map<String, String> params) {
+        String secretKey = params.getOrDefault("secretKey", "");
+        String whitelist = params.getOrDefault("whitelist", "");
+        JSONObject obj = new JSONObject();
+        obj.put("secretKey", secretKey);
+        obj.put("whitelist", whitelist);
+        String json = obj.toJSONString();
+        saveGlobalConfigValue(VISITOR_ACCESS_CONFIG_KEY, json);
+        redisTemplate.opsForValue().set(VISITOR_ACCESS_REDIS_KEY, json);
+        log.info("[CS-Agent] 全局访客接入配置已更新");
+        return Result.OK("设置成功");
+    }
+
+    /**
+     * 生成访客接入密钥（全局）
+     */
+    @Operation(summary = "生成访客接入密钥（全局）")
+    @GetMapping("/global/visitor-access/generate-key")
+    public Result<String> generateVisitorAccessKey() {
+        String key = UUID.randomUUID().toString().replace("-", "");
+        return Result.OK(key);
     }
 
     private String getGlobalConfigValue(String configKey) {

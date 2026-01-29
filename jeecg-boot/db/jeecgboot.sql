@@ -57,33 +57,6 @@ INSERT INTO `airag_app` VALUES ('1986326978217746433', 'admin', '2025-11-06 14:5
 INSERT INTO `airag_app` VALUES ('1993971377039761410', 'admin', '2025-11-27 17:13:17', 'admin', '2025-11-27 17:21:27', NULL, NULL, 'uniapp3文档', NULL, NULL, 'chatSimple', '我是uniapp的开发文档小助手，你有产品相关的问题都可以问我。', '# 角色：<知识库小助手>\n知识库小助手是一款专注于提取知识库信息的智能助手。\n\n## 目标：\n- 根据知识库中的内容，回答用户所需的信息\n- 快速、准确地回答用户提出的问题\n\n## 技能：\n1. 准理解用户问题\n2. 从知识库中提取相关信息\n3. 图文并茂输出知识库内容\n\n## 工作流：\n1. 接收用户提出的问题\n2. 分析问题，定位关键信息\n3. 在知识库中搜索相关信息\n4. 提取并呈现给用户相关信息\n\n## 输出格式：\n- 文字图片回答\n- 可能包含链接引用\n\n## 限制：\n- 保护用户隐私，不收集个人信息\n- 不提供涉及偏见或违法内容的信息\n- 不提供未经核实的数据信息\n- 不要修改知识库图片链接地址\n- 不要将知识库的文档路径返回给用户', '1890232564262739969', '1993971013594931202', NULL, 'enable', 10, '{\"modelInfo\":{\"provider\":\"OPENAI\",\"modelType\":\"LLM\",\"modelName\":\"gpt-4o-mini\"},\"topNumber\":4,\"similarity\":0.3}', '[{\"key\":1,\"descr\":\"有啥好看的动作片推荐不？\"},{\"key\":2,\"descr\":\"介绍下《流浪地球 3》呗。\"}]', NULL, NULL);
 
 -- ----------------------------
--- Table structure for airag_app_secret
--- ----------------------------
-DROP TABLE IF EXISTS `airag_app_secret`;
-CREATE TABLE `airag_app_secret`  (
-  `id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '主键',
-  `app_id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '应用ID',
-  `secret_key` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '密钥',
-  `domain_whitelist` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '域名白名单(多个用逗号分隔,支持*.example.com通配)',
-  `enabled` tinyint(1) NULL DEFAULT 1 COMMENT '是否启用(1=启用,0=禁用)',
-  `token_expire_minutes` int NULL DEFAULT 5 COMMENT '签名有效期(分钟)',
-  `remark` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '备注',
-  `create_by` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '创建人',
-  `create_time` datetime NULL DEFAULT NULL COMMENT '创建日期',
-  `update_by` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '更新人',
-  `update_time` datetime NULL DEFAULT NULL COMMENT '更新日期',
-  `tenant_id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '租户id',
-  PRIMARY KEY (`id`) USING BTREE,
-  INDEX `idx_app_id`(`app_id` ASC) USING BTREE,
-  INDEX `idx_tenant_id`(`tenant_id` ASC) USING BTREE
-) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = 'AI应用接入密钥' ROW_FORMAT = DYNAMIC;
-
--- ----------------------------
--- Records of airag_app_secret
--- ----------------------------
-INSERT INTO `airag_app_secret` VALUES ('2008811766022893569', '2008701556868489218', '795e155fc660413e8108541b12b021c6', '', 1, 5, '', 'admin', '2026-01-07 16:03:42', NULL, NULL, NULL);
-
--- ----------------------------
 -- Table structure for airag_flow
 -- ----------------------------
 DROP TABLE IF EXISTS `airag_flow`;

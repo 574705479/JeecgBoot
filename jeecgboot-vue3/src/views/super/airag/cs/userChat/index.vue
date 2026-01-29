@@ -1,25 +1,30 @@
 <template>
   <div class="user-chat-container">
-    <!-- 头部 -->
-    <div class="chat-header">
-      <div class="header-info">
-        <img class="app-avatar" :src="appInfo.avatar || defaultAvatar" />
-        <div class="app-info">
-          <span class="app-name">{{ appInfo.name || '在线客服' }}</span>
-          <span class="status-text">
-            <span :class="['status-dot', connectionStatus]"></span>
-            {{ connectionStatusText }}
-            <a-tag v-if="hasAgent && replyMode === 1" color="green" size="small" style="margin-left: 6px;">人工服务</a-tag>
-            <a-tag v-else-if="replyMode === 0" color="blue" size="small" style="margin-left: 6px;">AI客服</a-tag>
-          </span>
+    <div v-if="fatalError" class="chat-fatal-error">
+      <div class="fatal-title">无法进入在线客服</div>
+      <div class="fatal-desc">{{ fatalErrorMessage }}</div>
+    </div>
+    <template v-else>
+      <!-- 头部 -->
+      <div class="chat-header">
+        <div class="header-info">
+          <img class="app-avatar" :src="appInfo.avatar || defaultAvatar" />
+          <div class="app-info">
+            <span class="app-name">{{ appInfo.name || '在线客服' }}</span>
+            <span class="status-text">
+              <span :class="['status-dot', connectionStatus]"></span>
+              {{ connectionStatusText }}
+              <a-tag v-if="hasAgent && replyMode === 1" color="green" size="small" style="margin-left: 6px;">人工服务</a-tag>
+              <a-tag v-else-if="replyMode === 0" color="blue" size="small" style="margin-left: 6px;">AI客服</a-tag>
+            </span>
+          </div>
+        </div>
+        <div class="header-actions">
+          <a-tooltip title="清空聊天记录">
+            <DeleteOutlined @click="clearMessages" />
+          </a-tooltip>
         </div>
       </div>
-      <div class="header-actions">
-        <a-tooltip title="清空聊天记录">
-          <DeleteOutlined @click="clearMessages" />
-        </a-tooltip>
-      </div>
-    </div>
 
     <!-- 消息区域 -->
     <div class="chat-messages" ref="messagesRef" @scroll.passive="handleMessageScroll">
@@ -174,22 +179,23 @@
         重新开始对话
       </a-button>
     </div>
-    <a-modal v-model:open="mediaViewerVisible" :footer="null" width="820px" class="media-viewer-modal" title="媒体预览">
-      <div class="media-viewer-header">
-        <span>共 {{ mediaViewerList.length }} 项</span>
-        <span class="media-viewer-tip">点击图片可放大，视频可播放</span>
-      </div>
-      <div class="media-viewer-grid">
-        <div
-          class="media-viewer-item"
-          v-for="(item, index) in mediaViewerList"
-          :key="`${item.url}_${index}`"
-        >
-          <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview({ extra: { attachments: mediaViewerList } }, item)" />
-          <video v-else :src="getAttachmentUrl(item)" controls @click="openFilePreview(item)" />
+      <a-modal v-model:open="mediaViewerVisible" :footer="null" width="820px" class="media-viewer-modal" title="媒体预览">
+        <div class="media-viewer-header">
+          <span>共 {{ mediaViewerList.length }} 项</span>
+          <span class="media-viewer-tip">点击图片可放大，视频可播放</span>
         </div>
-      </div>
-    </a-modal>
+        <div class="media-viewer-grid">
+          <div
+            class="media-viewer-item"
+            v-for="(item, index) in mediaViewerList"
+            :key="`${item.url}_${index}`"
+          >
+            <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview({ extra: { attachments: mediaViewerList } }, item)" />
+            <video v-else :src="getAttachmentUrl(item)" controls @click="openFilePreview(item)" />
+          </div>
+        </div>
+      </a-modal>
+    </template>
   </div>
 </template>
 
@@ -205,11 +211,38 @@ import { createImgPreview } from '/@/components/Preview';
 
 const globSetting = useGlobSetting();
 const silentRequestOptions = { successMessageMode: 'none' as const };
+const visitorToken = ref('');
+const sessionToken = ref('');
+const sessionTokenExpiresAt = ref(0);
+const fatalError = ref(false);
+const fatalErrorMessage = ref('token无效或已过期，请回到第三方应用重新打开');
+function getQueryParam(name: string) {
+  try {
+    return new URLSearchParams(window.location.search).get(name) || '';
+  } catch {
+    return '';
+  }
+}
+function buildAuthHeaders(config: any) {
+  if (sessionToken.value) {
+    return { ...config?.headers, 'X-Visitor-Session': sessionToken.value };
+  }
+  if (visitorToken.value) {
+    return { ...config?.headers, 'X-Visitor-Token': visitorToken.value };
+  }
+  return config?.headers || {};
+}
 function httpGet<T = any>(config: any, options: any = {}) {
-  return defHttp.get<T>(config, { ...silentRequestOptions, ...options });
+  if (fatalError.value) {
+    return Promise.reject(new Error('token invalid'));
+  }
+  return defHttp.get<T>({ ...config, headers: buildAuthHeaders(config) }, { ...silentRequestOptions, ...options });
 }
 function httpPost<T = any>(config: any, options: any = {}) {
-  return defHttp.post<T>(config, { ...silentRequestOptions, ...options });
+  if (fatalError.value) {
+    return Promise.reject(new Error('token invalid'));
+  }
+  return defHttp.post<T>({ ...config, headers: buildAuthHeaders(config) }, { ...silentRequestOptions, ...options });
 }
 
 // 应用信息
@@ -363,8 +396,29 @@ const connectionStatusText = computed(() => {
 
 // 初始化
 onMounted(async () => {
+  await checkIpBlocked();
+  if (fatalError.value) {
+    return;
+  }
+  const tokenFromUrl = getQueryParam('token') || getQueryParam('visitorToken');
+  if (tokenFromUrl) {
+    visitorToken.value = tokenFromUrl;
+  }
   // 生成或获取用户ID
   initUserId();
+  await checkUserBlocked();
+  if (fatalError.value) {
+    return;
+  }
+  loadSessionToken();
+  if (!canProceedWithToken()) {
+    blockForInvalidToken();
+    return;
+  }
+  await ensureSessionToken();
+  if (fatalError.value) {
+    return;
+  }
 
   // 加载访客AI应用信息（头像/开场白/预设问题）
   await loadVisitorAppInfo();
@@ -394,6 +448,17 @@ onUnmounted(() => {
 
 // 初始化用户ID
 function initUserId() {
+  const queryUserId = getQueryParam('externalUserId') || getQueryParam('uid') || getQueryParam('userId');
+  const queryUserName = getQueryParam('userName');
+  const querySource = getQueryParam('source') || getQueryParam('appKey');
+  if (queryUserId) {
+    userId.value = querySource ? `${querySource}:${queryUserId}` : queryUserId;
+    if (queryUserName) {
+      userName.value = queryUserName;
+    }
+    return;
+  }
+
   // 从localStorage获取或生成新的用户ID
   let storedUserId = localStorage.getItem('cs_user_id');
   if (!storedUserId) {
@@ -406,6 +471,114 @@ function initUserId() {
   const storedUserName = localStorage.getItem('cs_user_name');
   if (storedUserName) {
     userName.value = storedUserName;
+  }
+}
+
+async function checkIpBlocked() {
+  try {
+    const res = await defHttp.get({ url: '/airag/cs/visitor/blacklist/ip/check-current' }, silentRequestOptions);
+    if (res?.result?.blacklisted || res?.blacklisted) {
+      fatalError.value = true;
+      fatalErrorMessage.value = '访问已被禁止，请联系管理员';
+    }
+  } catch {
+    // 忽略检测失败，继续后续流程
+  }
+}
+
+async function checkUserBlocked() {
+  if (!userId.value) {
+    return;
+  }
+  try {
+    const res = await defHttp.get({
+      url: '/airag/cs/visitor/blacklist/check',
+      params: { userId: userId.value },
+    }, silentRequestOptions);
+    if (res?.result?.blacklisted || res?.blacklisted) {
+      fatalError.value = true;
+      fatalErrorMessage.value = '访问已被禁止，请联系管理员';
+    }
+  } catch {
+    // 忽略检测失败，继续后续流程
+  }
+}
+
+function getSessionTokenKey() {
+  if (userId.value) {
+    return `cs_session_token_${userId.value}`;
+  }
+  return 'cs_session_token';
+}
+
+function loadSessionToken() {
+  try {
+    const raw = localStorage.getItem(getSessionTokenKey());
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    if (data?.token) {
+      sessionToken.value = data.token;
+      sessionTokenExpiresAt.value = data.expireAt || 0;
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function canProceedWithToken() {
+  const now = Date.now();
+  const hasSession = sessionToken.value && (!sessionTokenExpiresAt.value || sessionTokenExpiresAt.value >= now);
+  const hasShort = !!visitorToken.value;
+  if (!hasSession && !hasShort) {
+    return false;
+  }
+  if (sessionToken.value && sessionTokenExpiresAt.value && sessionTokenExpiresAt.value < now) {
+    sessionToken.value = '';
+    sessionTokenExpiresAt.value = 0;
+    return !!visitorToken.value;
+  }
+  return true;
+}
+
+function blockForInvalidToken(messageText?: string) {
+  fatalError.value = true;
+  fatalErrorMessage.value = messageText || 'token无效或已过期，请回到第三方应用重新打开';
+  disconnectWebSocket();
+  stopFallbackPoll();
+}
+
+function saveSessionToken(token: string, expireAt: number) {
+  sessionToken.value = token;
+  sessionTokenExpiresAt.value = expireAt || 0;
+  try {
+    localStorage.setItem(getSessionTokenKey(), JSON.stringify({ token, expireAt }));
+  } catch {
+    // ignore
+  }
+}
+
+async function ensureSessionToken() {
+  if (sessionToken.value) {
+    if (sessionTokenExpiresAt.value && sessionTokenExpiresAt.value < Date.now()) {
+      sessionToken.value = '';
+      sessionTokenExpiresAt.value = 0;
+    } else {
+      return;
+    }
+  }
+  if (!visitorToken.value) return;
+  try {
+    const res = await defHttp.post({
+      url: '/airag/cs/visitor/session/exchange',
+      data: { token: visitorToken.value },
+      headers: { 'X-Visitor-Token': visitorToken.value }
+    }, { ...silentRequestOptions });
+    const payload = res?.result || res;
+    if (payload?.token) {
+      saveSessionToken(payload.token, payload.expireAt || 0);
+    }
+  } catch {
+    blockForInvalidToken();
   }
 }
 
@@ -610,7 +783,9 @@ function connectWebSocket() {
   wsManuallyClosed = false;
 
   const wsBase = getWsBaseUrl();
-  const wsUrl = `${wsBase}/ws/cs/user?userId=${userId.value}&conversationId=${conversationId.value}`;
+  const sessionParam = sessionToken.value ? `&sessionToken=${encodeURIComponent(sessionToken.value)}` : '';
+  const tokenParam = !sessionToken.value && visitorToken.value ? `&visitorToken=${encodeURIComponent(visitorToken.value)}` : '';
+  const wsUrl = `${wsBase}/ws/cs/user?userId=${userId.value}&conversationId=${conversationId.value}${sessionParam}${tokenParam}`;
 
   console.log('[UserChat] 连接WebSocket:', wsUrl);
 
@@ -1677,6 +1852,29 @@ watch(messages, () => {
       background: #d9d9d9;
     }
   }
+}
+
+.chat-fatal-error {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #f7f8fa;
+  color: #1f1f1f;
+  text-align: center;
+  padding: 24px;
+}
+
+.chat-fatal-error .fatal-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.chat-fatal-error .fatal-desc {
+  font-size: 14px;
+  color: #8c8c8c;
 }
 
 .chat-closed {

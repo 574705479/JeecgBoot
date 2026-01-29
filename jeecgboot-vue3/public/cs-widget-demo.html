@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>客服挂件示例</title>
+  </head>
+  <body>
+    <h2>客服挂件示例</h2>
+    <p>请将本文件部署到你的站点并按需修改。</p>
+
+    <script src="/cs-widget.js"></script>
+    <script>
+      var qs = new URLSearchParams(window.location.search);
+      var externalUserId = qs.get('externalUserId') || 'U1001';
+      var userName = qs.get('userName') || 'Tom';
+      var source = qs.get('source') || 'partnerA';
+      var token = qs.get('token') || '';
+      var baseUrl = qs.get('baseUrl') || window.location.origin;
+
+      // 注意：不要在浏览器直接调用 /airag/cs/visitor/token 传 secretKey
+      // 正确方式：由你自己的服务端提供一个“获取访客token”的安全接口
+      function fetchVisitorToken() {
+        if (token) {
+          return Promise.resolve(token);
+        }
+        var url = '/your-backend/visitor-token?externalUserId=' + encodeURIComponent(externalUserId)
+          + '&userName=' + encodeURIComponent(userName)
+          + '&source=' + encodeURIComponent(source);
+        return fetch(url)
+          .then(function (res) { return res.json() })
+          .then(function (data) { return data.token || data.result?.token || '' })
+      }
+
+      JeecgCsWidget.init({
+        baseUrl: baseUrl,
+        externalUserId: externalUserId,
+        userName: userName,
+        source: source,
+        getToken: fetchVisitorToken,
+        width: 420,
+        height: 640
+      })
+    </script>
+  </body>
+</html>

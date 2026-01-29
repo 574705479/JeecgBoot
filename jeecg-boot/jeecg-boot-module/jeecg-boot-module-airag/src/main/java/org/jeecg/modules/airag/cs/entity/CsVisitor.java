@@ -131,6 +131,10 @@ public class CsVisitor implements Serializable {
     @Schema(description = "显示名称(优先显示备注昵称)")
     private String displayName;
 
+    @TableField(exist = false)
+    @Schema(description = "是否拉黑")
+    private Boolean blacklisted;
+
     // ==================== 常量 ====================
 
     /** 性别-未知 */
