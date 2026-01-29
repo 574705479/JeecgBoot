@@ -28,19 +28,19 @@
           <div class="step-body">
             <div class="form">
               <div class="field">
-                <span class="label">externalUserId</span>
+                <span class="label">externalUserId（第三方用户唯一标识）</span>
                 <a-input v-model:value="externalUserId" placeholder="第三方用户唯一标识" />
               </div>
               <div class="field">
-                <span class="label">userName</span>
+                <span class="label">userName（用于显示的用户昵称）</span>
                 <a-input v-model:value="userName" placeholder="展示昵称" />
               </div>
               <div class="field">
-                <span class="label">source</span>
+                <span class="label">source（第三方系统标识，用于避免ID冲突）</span>
                 <a-input v-model:value="source" placeholder="第三方系统标识" />
               </div>
               <div class="field">
-                <span class="label">X-App-Secret（可选）</span>
+                <span class="label">X-App-Secret（全局接入密钥，后端保存）</span>
                 <a-input v-model:value="secretKey" placeholder="全局接入密钥（仅本地调试）" />
                 <span class="label">生产环境请放在你自己的后端，不要写进前端页面</span>
               </div>
@@ -110,20 +110,35 @@ expireAt: {{ expireAt || '' }}</pre>
 
       <section id="access" class="doc-section">
         <div class="section-title">接入方式</div>
-        <div class="section-desc">URL / iframe / 挂件三种方式任选其一</div>
-        <div class="doc-viewer markdown-body" v-html="accessDocHtml"></div>
+        <div class="section-desc">按类型查看示例</div>
+        <a-tabs v-model:activeKey="accessType">
+          <a-tab-pane key="url" tab="URL / WebView">
+            <div class="doc-viewer markdown-body" v-html="accessDocUrlHtml"></div>
+          </a-tab-pane>
+          <a-tab-pane key="iframe" tab="iframe">
+            <div class="doc-viewer markdown-body" v-html="accessDocIframeHtml"></div>
+          </a-tab-pane>
+          <a-tab-pane key="widget" tab="右下角挂件">
+            <div class="doc-viewer markdown-body" v-html="accessDocWidgetHtml"></div>
+          </a-tab-pane>
+        </a-tabs>
       </section>
 
       <section id="preview" class="doc-section">
         <div class="section-title">预览效果</div>
-        <div class="section-desc">需要先获取 token</div>
+        <div class="section-desc">根据当前接入类型展示（需要先获取 token）</div>
         <div class="step-body preview-grid">
-          <div class="card">
+          <div class="card" v-if="accessType === 'url'">
             <div class="card-desc">访客页预览</div>
             <a-alert v-if="!token" message="请先测试获取token后再预览效果" type="warning" show-icon />
             <iframe v-else class="preview" :src="accessUrl" />
           </div>
-          <div class="card">
+          <div class="card" v-if="accessType === 'iframe'">
+            <div class="card-desc">iframe 预览</div>
+            <a-alert v-if="!token" message="请先测试获取token后再预览效果" type="warning" show-icon />
+            <iframe v-else class="preview" :src="accessUrl" />
+          </div>
+          <div class="card" v-if="accessType === 'widget'">
             <div class="card-desc">挂件预览（右下角）</div>
             <div class="row">
               <a-button type="primary" :disabled="!token || widgetLoaded" @click="loadWidget">加载挂件预览</a-button>
@@ -169,6 +184,7 @@ const loading = ref(false);
 const backendTokenUrl = ref('/your-backend/visitor-token');
 const backendTokenLoading = ref(false);
 const tokenDocTab = ref('curl');
+const accessType = ref('url');
 
 const md = new MarkdownIt({
   html: false,
@@ -299,14 +315,10 @@ const tokenDocPhpHtml = computed(() => md.render(tokenDocPhpMarkdown.value));
 const tokenDocNodeHtml = computed(() => md.render(tokenDocNodeMarkdown.value));
 const tokenDocFrontendHtml = computed(() => md.render(tokenDocFrontendMarkdown.value));
 
-const accessDocMarkdown = computed(() => {
-  const scriptCloseTag = '</scr' + 'ipt>';
+const accessDocUrlMarkdown = computed(() => {
   const previewToken = token.value || '短时token';
   const accessPreviewUrl = `${baseUrl}/cs/userChat?token=${encodeURIComponent(previewToken)}&externalUserId=${encodeURIComponent(externalUserId.value)}&userName=${encodeURIComponent(userName.value)}&source=${encodeURIComponent(source.value)}`;
   return `
-## 访问方式
-
-### URL / WebView
 \`\`\`text
 ${accessPreviewUrl}
 \`\`\`
@@ -329,8 +341,13 @@ fetch("${backendTokenUrl.value}", {
     window.location.href = url;
   });
 \`\`\`
+`;
+});
 
-### iframe
+const accessDocIframeMarkdown = computed(() => {
+  const previewToken = token.value || '短时token';
+  const accessPreviewUrl = `${baseUrl}/cs/userChat?token=${encodeURIComponent(previewToken)}&externalUserId=${encodeURIComponent(externalUserId.value)}&userName=${encodeURIComponent(userName.value)}&source=${encodeURIComponent(source.value)}`;
+  return `
 \`\`\`html
 <iframe src="${accessPreviewUrl}" style="width:420px;height:640px;border:0;"></iframe>
 \`\`\`
@@ -353,8 +370,12 @@ fetch("${backendTokenUrl.value}", {
     document.getElementById("cs-iframe").src = url;
   });
 \`\`\`
+`;
+});
 
-### 右下角挂件
+const accessDocWidgetMarkdown = computed(() => {
+  const scriptCloseTag = '</scr' + 'ipt>';
+  return `
 \`\`\`html
 <script src="${baseUrl}/cs-widget.js">${scriptCloseTag}
 JeecgCsWidget.init({
@@ -378,7 +399,9 @@ JeecgCsWidget.init({
 `;
 });
 
-const accessDocHtml = computed(() => md.render(accessDocMarkdown.value));
+const accessDocUrlHtml = computed(() => md.render(accessDocUrlMarkdown.value));
+const accessDocIframeHtml = computed(() => md.render(accessDocIframeMarkdown.value));
+const accessDocWidgetHtml = computed(() => md.render(accessDocWidgetMarkdown.value));
 
 const faqDocMarkdown = computed(() => {
   return `
