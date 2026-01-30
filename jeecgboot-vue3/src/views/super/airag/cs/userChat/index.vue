@@ -214,6 +214,9 @@ const silentRequestOptions = { successMessageMode: 'none' as const };
 const visitorToken = ref('');
 const sessionToken = ref('');
 const sessionTokenExpiresAt = ref(0);
+const lastSessionTokenKey = 'cs_session_token_last';
+const rawVisitorToken = ref('');
+let tokenValidateTimer: number | null = null;
 const fatalError = ref(false);
 const fatalErrorMessage = ref('token无效或已过期，请回到第三方应用重新打开');
 function getQueryParam(name: string) {
@@ -407,20 +410,22 @@ const connectionStatusText = computed(() => {
 
 // 初始化
 onMounted(async () => {
-  await checkIpBlocked();
-  if (fatalError.value) {
-    return;
+  const sessionFromUrl = getQueryParam('sessionToken');
+  if (sessionFromUrl) {
+    sessionToken.value = sessionFromUrl;
+    sessionTokenExpiresAt.value = 0;
   }
   const tokenFromUrl = getQueryParam('token') || getQueryParam('visitorToken');
   if (tokenFromUrl) {
     visitorToken.value = tokenFromUrl;
+    rawVisitorToken.value = tokenFromUrl;
   }
-  // 生成或获取用户ID
-  initUserId();
-  await checkUserBlocked();
+  await checkIpBlocked();
   if (fatalError.value) {
     return;
   }
+  // 生成或获取用户ID
+  initUserId();
   loadSessionToken();
   if (!canProceedWithToken()) {
     blockForInvalidToken();
@@ -428,6 +433,33 @@ onMounted(async () => {
   }
   await ensureSessionToken();
   if (fatalError.value) {
+    return;
+  }
+  const sessionValid = await validateSessionToken();
+  if (sessionValid) {
+    // sessionToken 有效时，忽略短时 token 校验
+    rawVisitorToken.value = '';
+    startTokenValidateTimer();
+    await checkUserBlocked();
+    if (fatalError.value) {
+      return;
+    }
+  } else if (visitorToken.value) {
+    await checkUserBlocked();
+    if (fatalError.value) {
+      return;
+    }
+    await validateShortTokenIfProvided();
+    if (fatalError.value) {
+      return;
+    }
+    startTokenValidateTimer();
+  } else {
+    blockForInvalidToken();
+    return;
+  }
+  if (!canProceedWithToken()) {
+    blockForInvalidToken();
     return;
   }
 
@@ -453,6 +485,7 @@ onMounted(async () => {
 onUnmounted(() => {
   disconnectWebSocket();
   stopFallbackPoll();
+  stopTokenValidateTimer();
   window.removeEventListener('online', handleNetworkOnline);
   document.removeEventListener('visibilitychange', handleVisibilityChange);
 });
@@ -511,13 +544,13 @@ async function checkUserBlocked() {
     const res = await defHttp.get({
       url: '/airag/cs/visitor/blacklist/check-self',
       headers,
-    }, silentRequestOptions);
+    }, { ...silentRequestOptions, errorMessageMode: 'none' });
     if (res?.result?.blacklisted || res?.blacklisted) {
       fatalError.value = true;
       fatalErrorMessage.value = '访问已被禁止，请联系管理员';
     }
   } catch {
-    // 忽略检测失败，继续后续流程
+    console.warn('[UserChat] 拉黑自检失败');
   }
 }
 
@@ -531,11 +564,22 @@ function getSessionTokenKey() {
 function loadSessionToken() {
   try {
     const raw = localStorage.getItem(getSessionTokenKey());
-    if (!raw) return;
-    const data = JSON.parse(raw);
-    if (data?.token) {
-      sessionToken.value = data.token;
-      sessionTokenExpiresAt.value = data.expireAt || 0;
+    if (raw) {
+      const data = JSON.parse(raw);
+      if (data?.token) {
+        sessionToken.value = data.token;
+        sessionTokenExpiresAt.value = data.expireAt || 0;
+        return;
+      }
+    }
+    const lastRaw = localStorage.getItem(lastSessionTokenKey);
+    if (lastRaw) {
+      const last = JSON.parse(lastRaw);
+      const lastUserId = last?.userId || '';
+      if (!lastUserId || lastUserId === userId.value) {
+        sessionToken.value = last?.token || '';
+        sessionTokenExpiresAt.value = last?.expireAt || 0;
+      }
     }
   } catch {
     // ignore
@@ -569,6 +613,7 @@ function saveSessionToken(token: string, expireAt: number) {
   sessionTokenExpiresAt.value = expireAt || 0;
   try {
     localStorage.setItem(getSessionTokenKey(), JSON.stringify({ token, expireAt }));
+    localStorage.setItem(lastSessionTokenKey, JSON.stringify({ token, expireAt, userId: userId.value || '' }));
   } catch {
     // ignore
   }
@@ -591,11 +636,87 @@ async function ensureSessionToken() {
       headers: { 'X-Visitor-Token': visitorToken.value }
     }, { ...silentRequestOptions });
     const payload = res?.result || res;
-    if (payload?.token) {
+    const success = res?.success !== false && (res?.code === undefined || res?.code === 200);
+    if (success && payload?.token) {
       saveSessionToken(payload.token, payload.expireAt || 0);
+      return;
     }
+    visitorToken.value = '';
+    blockForInvalidToken(res?.message || payload?.message);
+  } catch (e: any) {
+    visitorToken.value = '';
+    blockForInvalidToken(e?.message);
+  }
+}
+
+async function validateShortTokenIfProvided() {
+  if (!rawVisitorToken.value) {
+    return;
+  }
+  try {
+    const res = await defHttp.get({
+      url: '/airag/cs/visitor/token/validate',
+      params: { token: rawVisitorToken.value },
+    }, { ...silentRequestOptions, errorMessageMode: 'none' });
+    const payload = res?.result || res;
+    const success = res?.success !== false && (res?.code === undefined || res?.code === 200);
+    if (success && payload?.token) {
+      return;
+    }
+    visitorToken.value = '';
+    rawVisitorToken.value = '';
+    console.warn('[UserChat] token校验失败', res);
+    blockForInvalidToken('当前访问已失效，请返回第三方页面重新打开');
+  } catch (e: any) {
+    visitorToken.value = '';
+    rawVisitorToken.value = '';
+    console.warn('[UserChat] token校验失败', e);
+    blockForInvalidToken('当前访问已失效，请返回第三方页面重新打开');
+  }
+}
+
+function startTokenValidateTimer() {
+  stopTokenValidateTimer();
+  if (!rawVisitorToken.value) {
+    return;
+  }
+  tokenValidateTimer = window.setInterval(async () => {
+    if (fatalError.value) {
+      stopTokenValidateTimer();
+      return;
+    }
+    await validateShortTokenIfProvided();
+  }, 60000);
+}
+
+function stopTokenValidateTimer() {
+  if (tokenValidateTimer) {
+    clearInterval(tokenValidateTimer);
+    tokenValidateTimer = null;
+  }
+}
+
+async function validateSessionToken() {
+  if (!sessionToken.value) {
+    return false;
+  }
+  try {
+    const res = await defHttp.get({
+      url: '/airag/cs/visitor/session/validate',
+      headers: { 'X-Visitor-Session': sessionToken.value },
+    }, { ...silentRequestOptions });
+    const payload = res?.result || res;
+    const success = res?.success !== false && (res?.code === undefined || res?.code === 200);
+    if (success && payload?.token) {
+      return true;
+    }
+    sessionToken.value = '';
+    sessionTokenExpiresAt.value = 0;
+    return false;
   } catch {
-    blockForInvalidToken();
+    sessionToken.value = '';
+    sessionTokenExpiresAt.value = 0;
+    return false;
   }
 }
 

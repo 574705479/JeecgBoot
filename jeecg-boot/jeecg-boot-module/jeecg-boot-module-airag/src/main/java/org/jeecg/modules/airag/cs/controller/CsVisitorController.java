@@ -177,6 +177,30 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
     }
 
     /**
+     * 校验短时token是否有效
+     */
+    @Operation(summary = "校验短时token")
+    @org.jeecg.config.shiro.IgnoreAuth
+    @GetMapping("/token/validate")
+    public Result<CsVisitorTokenPayload> validateToken(HttpServletRequest request) {
+        String shortToken = request.getHeader("X-Visitor-Token");
+        if (oConvertUtils.isEmpty(shortToken)) {
+            shortToken = request.getParameter("token");
+        }
+        if (oConvertUtils.isEmpty(shortToken)) {
+            return Result.error("短时token不能为空");
+        }
+        CsVisitorTokenPayload payload = visitorTokenService.parseToken(shortToken);
+        if (payload == null) {
+            return Result.error("短时token无效或已过期");
+        }
+        if (visitorTokenService.isBlacklisted(payload.getExternalUserId())) {
+            return Result.error("访客已被拉黑");
+        }
+        return Result.OK(payload);
+    }
+
+    /**
      * 用短时token换取会话凭证
      */
     @Operation(summary = "换取会话凭证")
@@ -219,6 +243,30 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
             return Result.error("生成会话凭证失败");
         }
         return Result.OK(session);
+    }
+
+    /**
+     * 校验会话凭证是否有效
+     */
+    @Operation(summary = "校验会话凭证")
+    @org.jeecg.config.shiro.IgnoreAuth
+    @GetMapping("/session/validate")
+    public Result<CsVisitorTokenPayload> validateSession(HttpServletRequest request) {
+        String sessionToken = request.getHeader("X-Visitor-Session");
+        if (oConvertUtils.isEmpty(sessionToken)) {
+            sessionToken = request.getParameter("sessionToken");
+        }
+        if (oConvertUtils.isEmpty(sessionToken)) {
+            return Result.error("会话凭证不能为空");
+        }
+        CsVisitorTokenPayload payload = visitorTokenService.parseSessionToken(sessionToken);
+        if (payload == null) {
+            return Result.error("会话凭证无效或已过期");
+        }
+        if (visitorTokenService.isBlacklisted(payload.getExternalUserId())) {
+            return Result.error("访客已被拉黑");
+        }
+        return Result.OK(payload);
     }
 
     /**

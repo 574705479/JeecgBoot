@@ -899,6 +899,7 @@ const userOnline = ref(false);
 const userIdBlacklisted = ref(false);
 const ipBlacklisted = ref(false);
 const blacklistLoading = ref(false);
+const savedScrollTop = ref<number | null>(null);
 
 // 访客信息缓存 (key -> visitorInfo)
 const visitorCache = new Map<string, any>();
@@ -1150,6 +1151,7 @@ onUnmounted(() => {
 
 onActivated(async () => {
   if (keepConnectionOnDeactivate) {
+    restoreMessageScroll();
     return;
   }
   // 菜单切换返回时，确保客服在线、会话和WebSocket正常
@@ -1168,6 +1170,7 @@ onActivated(async () => {
 
 onDeactivated(() => {
   if (keepConnectionOnDeactivate) {
+    saveMessageScroll();
     return;
   }
   // 离开菜单时断开连接
@@ -3369,6 +3372,25 @@ function scrollToBottom() {
     if (messagesRef.value) {
       messagesRef.value.scrollTop = messagesRef.value.scrollHeight;
       scheduleClearUnread();
+    }
+  });
+}
+
+function saveMessageScroll() {
+  const el = messagesRef.value;
+  if (el) {
+    savedScrollTop.value = el.scrollTop;
+  }
+}
+
+function restoreMessageScroll() {
+  if (savedScrollTop.value == null) {
+    return;
+  }
+  nextTick(() => {
+    const el = messagesRef.value;
+    if (el) {
+      el.scrollTop = savedScrollTop.value as number;
     }
   });
 }

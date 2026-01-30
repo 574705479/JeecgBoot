@@ -29,6 +29,7 @@ public class CsWebSocketInterceptor implements HandshakeInterceptor {
     public static final String ATTR_USER_TYPE = "userType";
     public static final String ATTR_APP_ID = "appId";
     public static final String ATTR_CONVERSATION_ID = "conversationId";
+    public static final String ATTR_TOKEN_EXPIRE_AT = "tokenExpireAt";
 
     /** 用户类型：普通用户 */
     public static final String USER_TYPE_USER = "user";
@@ -88,6 +89,9 @@ public class CsWebSocketInterceptor implements HandshakeInterceptor {
                     userName = payload.getUserName();
                 }
                 appId = payload.getAppId();
+                if (payload.getExpireAt() != null) {
+                    attributes.put(ATTR_TOKEN_EXPIRE_AT, payload.getExpireAt());
+                }
             }
 
             // 验证必要参数

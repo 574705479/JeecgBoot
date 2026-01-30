@@ -140,6 +140,10 @@ public class CsWebSocketHandler implements WebSocketHandler {
      */
     private void handleTextMessage(WebSocketSession session, String payload) {
         try {
+            if (sessionManager.isSessionExpired(session)) {
+                sendExpiredAndClose(session);
+                return;
+            }
             JSONObject json = JSON.parseObject(payload);
             String type = json.getString("type");
             
@@ -187,6 +191,10 @@ public class CsWebSocketHandler implements WebSocketHandler {
      * 处理心跳
      */
     private void handlePing(WebSocketSession session) throws Exception {
+        if (sessionManager.isSessionExpired(session)) {
+            sendExpiredAndClose(session);
+            return;
+        }
         CsWebSocketMessage pong = CsWebSocketMessage.builder()
                 .type("pong")
                 .timestamp(new java.util.Date())
@@ -217,6 +225,23 @@ public class CsWebSocketHandler implements WebSocketHandler {
             String agentName = agent != null ? agent.getNickname() : "客服";
             messageService.sendAgentMessage(conversationId, userId, agentName, content, msgType, extra);
         }
+    }
+
+    private void sendExpiredAndClose(WebSocketSession session) {
+        try {
+            CsWebSocketMessage message = CsWebSocketMessage.builder()
+                    .type("system")
+                    .content("访客凭证无效或已过期")
+                    .timestamp(new java.util.Date())
+                    .build();
+            session.sendMessage(new TextMessage(JSON.toJSONString(message)));
+        } catch (Exception ignored) {
+        }
+        try {
+            session.close(new CloseStatus(4001, "token expired"));
+        } catch (Exception ignored) {
+        }
+        sessionManager.removeSession(session);
     }
 
     /**

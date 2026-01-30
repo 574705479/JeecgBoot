@@ -6,6 +6,7 @@ import org.jeecg.common.util.oConvertUtils;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
+import org.springframework.web.socket.CloseStatus;
 
 import java.io.IOException;
 import java.util.Map;
@@ -105,6 +106,10 @@ public class CsWebSocketSessionManager {
             return;
         }
         WebSocketSession session = userSessions.get(userId);
+        if (session != null && isSessionExpired(session)) {
+            closeExpiredSession(session, "token expired");
+            return;
+        }
         sendMessage(session, message);
     }
     
@@ -140,6 +145,11 @@ public class CsWebSocketSessionManager {
             log.warn("[CS-WebSocket] ★★★ 用户会话不存在，无法发送消息: conversationId={}, userId={}, " +
                     "当前conversationSessions={}, 当前userSessions={}", 
                     conversationId, userId, conversationSessions.keySet(), userSessions.keySet());
+            return false;
+        }
+        if (isSessionExpired(session)) {
+            log.warn("[CS-WebSocket] 用户会话已过期，关闭连接: conversationId={}, userId={}", conversationId, userId);
+            closeExpiredSession(session, "token expired");
             return false;
         }
         
@@ -203,6 +213,33 @@ public class CsWebSocketSessionManager {
             session.sendMessage(new TextMessage(json));
         } catch (IOException e) {
             log.error("[CS-WebSocket] 发送消息失败: {}", e.getMessage());
+        }
+    }
+
+    public boolean isSessionExpired(WebSocketSession session) {
+        Object expireAtObj = session.getAttributes().get(CsWebSocketInterceptor.ATTR_TOKEN_EXPIRE_AT);
+        if (expireAtObj == null) {
+            return false;
+        }
+        long expireAt;
+        if (expireAtObj instanceof Number) {
+            expireAt = ((Number) expireAtObj).longValue();
+        } else {
+            try {
+                expireAt = Long.parseLong(String.valueOf(expireAtObj));
+            } catch (Exception e) {
+                return false;
+            }
+        }
+        return expireAt > 0 && expireAt < System.currentTimeMillis();
+    }
+
+    private void closeExpiredSession(WebSocketSession session, String reason) {
+        try {
+            removeSession(session);
+            session.close(new CloseStatus(4001, reason));
+        } catch (Exception e) {
+            log.warn("[CS-WebSocket] 关闭过期会话失败: {}", e.getMessage());
         }
     }
 
