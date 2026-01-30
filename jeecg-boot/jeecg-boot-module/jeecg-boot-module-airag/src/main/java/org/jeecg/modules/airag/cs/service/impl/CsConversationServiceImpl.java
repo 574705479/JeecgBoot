@@ -17,11 +17,15 @@ import org.jeecg.modules.airag.cs.service.ICsConversationService;
 import org.jeecg.modules.airag.cs.service.ICsMessageService;
 import org.jeecg.modules.airag.cs.websocket.CsWebSocketMessage;
 import org.jeecg.modules.airag.cs.websocket.CsWebSocketSessionManager;
+import org.jeecg.modules.airag.cs.vo.CsAgentWorkloadVO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
@@ -614,6 +618,19 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         stats.put("totalCount", totalCount);
         
         return stats;
+    }
+
+    @Override
+    public List<CsAgentWorkloadVO> getAgentWorkload(Integer days, Integer limit) {
+        int safeDays = days == null || days <= 0 ? 7 : days;
+        int safeLimit = limit == null || limit <= 0 ? 10 : limit;
+
+        LocalDateTime startOfDay = LocalDate.now().minusDays(safeDays - 1L).atStartOfDay();
+        LocalDateTime endOfDay = LocalDate.now().plusDays(1L).atStartOfDay();
+        Date startTime = Date.from(startOfDay.atZone(ZoneId.systemDefault()).toInstant());
+        Date endTime = Date.from(endOfDay.atZone(ZoneId.systemDefault()).toInstant());
+
+        return baseMapper.selectAgentWorkload(startTime, endTime, safeLimit);
     }
 
     @Override

@@ -13,6 +13,7 @@ import org.jeecg.modules.airag.cs.entity.CsConversation;
 import org.jeecg.modules.airag.cs.service.ICsAgentService;
 import org.jeecg.modules.airag.cs.service.ICsConversationService;
 import org.jeecg.modules.airag.cs.service.ICsVisitorTokenService;
+import org.jeecg.modules.airag.cs.vo.CsAgentWorkloadVO;
 import org.jeecg.modules.airag.cs.vo.CsVisitorTokenPayload;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -349,6 +350,17 @@ public class CsConversationController extends JeecgController<CsConversation, IC
     public Result<Map<String, Object>> getStats(@RequestParam(required = false) String agentId) {
         Map<String, Object> stats = conversationService.getConversationStats(agentId);
         return Result.OK(stats);
+    }
+
+    /**
+     * 获取客服工作量统计
+     */
+    @Operation(summary = "获取客服工作量统计")
+    @GetMapping("/workload")
+    public Result<List<CsAgentWorkloadVO>> getWorkload(@RequestParam(defaultValue = "7") Integer days,
+                                                       @RequestParam(defaultValue = "10") Integer limit) {
+        List<CsAgentWorkloadVO> workload = conversationService.getAgentWorkload(days, limit);
+        return Result.OK(workload);
     }
 
     /**

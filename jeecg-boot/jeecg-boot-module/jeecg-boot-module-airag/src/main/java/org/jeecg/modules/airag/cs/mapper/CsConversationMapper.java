@@ -7,7 +7,9 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.jeecg.modules.airag.cs.entity.CsConversation;
+import org.jeecg.modules.airag.cs.vo.CsAgentWorkloadVO;
 
+import java.util.Date;
 import java.util.List;
 
 /**
@@ -71,4 +73,27 @@ public interface CsConversationMapper extends BaseMapper<CsConversation> {
             "WHERE agent_id = #{agentId} AND status = 1 " +
             "AND (deleted = 0 OR deleted IS NULL)")
     int countByOwnerAgent(@Param("agentId") String agentId);
+
+    /**
+     * 获取客服工作量统计
+     */
+    @Select("SELECT c.agent_id AS agentId, " +
+            "IFNULL(a.nickname, '未知客服') AS agentName, " +
+            "COUNT(c.id) AS conversationCount, " +
+            "IFNULL(SUM(c.message_count), 0) AS messageCount, " +
+            "ROUND(AVG(c.satisfaction), 1) AS avgSatisfaction, " +
+            "ROUND(AVG(CASE WHEN c.assign_time IS NULL THEN NULL " +
+            "ELSE TIMESTAMPDIFF(SECOND, c.create_time, c.assign_time) END), 0) AS avgFirstResponseSeconds " +
+            "FROM cs_conversation c " +
+            "LEFT JOIN cs_agent a ON c.agent_id = a.id " +
+            "WHERE c.agent_id IS NOT NULL " +
+            "AND (c.deleted = 0 OR c.deleted IS NULL) " +
+            "AND c.create_time >= #{startTime} " +
+            "AND c.create_time < #{endTime} " +
+            "GROUP BY c.agent_id, a.nickname " +
+            "ORDER BY conversationCount DESC, messageCount DESC " +
+            "LIMIT #{limit}")
+    List<CsAgentWorkloadVO> selectAgentWorkload(@Param("startTime") Date startTime,
+                                                @Param("endTime") Date endTime,
+                                                @Param("limit") Integer limit);
 }

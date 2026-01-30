@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.IService;
 import org.jeecg.modules.airag.cs.entity.CsConversation;
+import org.jeecg.modules.airag.cs.vo.CsAgentWorkloadVO;
 
 import java.util.List;
 import java.util.Map;
@@ -144,6 +145,15 @@ public interface ICsConversationService extends IService<CsConversation> {
      * @return 统计数据 {myCount, unassignedCount, closedCount, totalCount}
      */
     Map<String, Object> getConversationStats(String agentId);
+
+    /**
+     * 获取客服工作量统计
+     *
+     * @param days 统计天数（包含今天）
+     * @param limit 返回数量上限
+     * @return 客服工作量列表
+     */
+    List<CsAgentWorkloadVO> getAgentWorkload(Integer days, Integer limit);
 
     /**
      * 获取客服负责的会话列表

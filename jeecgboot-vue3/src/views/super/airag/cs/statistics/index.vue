@@ -59,8 +59,14 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted, nextTick } from 'vue';
 import * as echarts from 'echarts';
+import { defHttp } from '/@/utils/http/axios';
+
+const silentRequestOptions = { successMessageMode: 'none' as const };
+function httpGet<T = any>(config: any, options: any = {}) {
+  return defHttp.get<T>(config, { ...silentRequestOptions, ...options });
+}
 
 const stats = ref({
   todayConversations: 0,
@@ -69,11 +75,10 @@ const stats = ref({
   avgSatisfaction: 0,
 });
 
-const agentRanking = ref([
-  { rank: 1, name: '客服小王', conversations: 58, messages: 320, satisfaction: 4.8, avgResponse: '15秒' },
-  { rank: 2, name: '客服小李', conversations: 52, messages: 280, satisfaction: 4.6, avgResponse: '18秒' },
-  { rank: 3, name: '客服小张', conversations: 45, messages: 250, satisfaction: 4.5, avgResponse: '20秒' },
-]);
+const agentRanking = ref<any[]>([]);
+const agentWorkload = ref<any[]>([]);
+const workloadDays = ref(7);
+const workloadLimit = ref(10);
 
 const rankingColumns = [
   { title: '排名', dataIndex: 'rank', width: 60 },
@@ -90,10 +95,12 @@ const sourceChartRef = ref<HTMLElement>();
 const satisfactionChartRef = ref<HTMLElement>();
 
 let charts: echarts.ECharts[] = [];
+let agentChart: echarts.ECharts | null = null;
 
 onMounted(() => {
-  loadStats();
   initCharts();
+  loadStats();
+  loadWorkload();
 });
 
 onUnmounted(() => {
@@ -108,6 +115,32 @@ function loadStats() {
     onlineAgents: 5,
     avgSatisfaction: 4.6,
   };
+}
+
+async function loadWorkload() {
+  try {
+    const res = await httpGet({
+      url: '/cs/conversation/workload',
+      params: { days: workloadDays.value, limit: workloadLimit.value }
+    });
+    const list = Array.isArray(res) ? res : [];
+    agentWorkload.value = list;
+    agentRanking.value = list.map((item: any, index: number) => {
+      const satisfaction = formatSatisfaction(item?.avgSatisfaction);
+      return {
+        rank: index + 1,
+        name: item?.agentName || '未知客服',
+        conversations: item?.conversationCount || 0,
+        messages: item?.messageCount || 0,
+        satisfaction,
+        avgResponse: formatDuration(item?.avgFirstResponseSeconds)
+      };
+    });
+    await nextTick();
+    updateAgentWorkloadChart();
+  } catch (e) {
+    console.error('加载客服工作量失败', e);
+  }
 }
 
 function initCharts() {
@@ -130,19 +163,19 @@ function initCharts() {
 
   // 客服工作量图
   if (agentChartRef.value) {
-    const chart = echarts.init(agentChartRef.value);
-    chart.setOption({
+    agentChart = echarts.init(agentChartRef.value);
+    agentChart.setOption({
       tooltip: { trigger: 'axis' },
       xAxis: {
         type: 'category',
-        data: ['客服A', '客服B', '客服C', '客服D', '客服E']
+        data: []
       },
       yAxis: { type: 'value' },
       series: [
-        { name: '会话数', type: 'bar', data: [58, 52, 45, 38, 32] }
+        { name: '会话数', type: 'bar', data: [] }
       ]
     });
-    charts.push(chart);
+    charts.push(agentChart);
   }
 
   // 来源分布图
@@ -183,6 +216,44 @@ function initCharts() {
     });
     charts.push(chart);
   }
+}
+
+function updateAgentWorkloadChart() {
+  if (!agentChart) {
+    return;
+  }
+  const names = agentWorkload.value.map(item => item?.agentName || '未知客服');
+  const counts = agentWorkload.value.map(item => item?.conversationCount || 0);
+  agentChart.setOption({
+    xAxis: { data: names },
+    series: [{ data: counts }]
+  });
+}
+
+function formatDuration(seconds?: number | null) {
+  const safeSeconds = Number(seconds);
+  if (!Number.isFinite(safeSeconds) || safeSeconds <= 0) {
+    return '-';
+  }
+  if (safeSeconds < 60) {
+    return `${Math.round(safeSeconds)}秒`;
+  }
+  const minutes = Math.floor(safeSeconds / 60);
+  const remain = Math.round(safeSeconds % 60);
+  if (minutes < 60) {
+    return `${minutes}分${remain}秒`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const remainMinutes = minutes % 60;
+  return `${hours}小时${remainMinutes}分`;
+}
+
+function formatSatisfaction(value?: number | null) {
+  const safeValue = Number(value);
+  if (!Number.isFinite(safeValue)) {
+    return 0;
+  }
+  return Number(safeValue.toFixed(1));
 }
 </script>
 
