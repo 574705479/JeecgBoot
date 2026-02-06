@@ -1,5 +1,6 @@
 package org.jeecg.modules.airag.cs.service.impl;
 
+import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -8,11 +9,14 @@ import org.apache.shiro.SecurityUtils;
 import org.jeecg.common.system.vo.LoginUser;
 import org.jeecg.common.util.oConvertUtils;
 import org.jeecg.modules.airag.cs.entity.CsAgent;
+import org.jeecg.modules.airag.cs.entity.CsGlobalConfig;
 import org.jeecg.modules.airag.cs.mapper.CsAgentMapper;
+import org.jeecg.modules.airag.cs.mapper.CsGlobalConfigMapper;
 import org.jeecg.modules.airag.cs.service.ICsAgentService;
 import org.jeecg.modules.airag.cs.websocket.CsWebSocketMessage;
 import org.jeecg.modules.airag.cs.websocket.CsWebSocketSessionManager;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,8 +33,18 @@ import java.util.List;
 @Service
 public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> implements ICsAgentService {
 
+    private static final String CONVERSATION_ASSIGN_REDIS_KEY = "cs:global:conversation_assign";
+    private static final String CONVERSATION_ASSIGN_CONFIG_KEY = "conversation_assign";
+    private static final String ROUND_ROBIN_INDEX_KEY = "cs:global:round_robin_index";
+
     @Autowired
     private CsWebSocketSessionManager sessionManager;
+
+    @Autowired
+    private RedisTemplate<String, String> redisTemplate;
+
+    @Autowired
+    private CsGlobalConfigMapper csGlobalConfigMapper;
 
     @Override
     public CsAgent getByUserId(String userId) {
@@ -153,32 +167,120 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
     @Override
     @Transactional(rollbackFor = Exception.class)
     public CsAgent assignAgent() {
+        return assignAgent(null);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public CsAgent assignAgent(String lastAgentId) {
+        // 如果指定了上次客服，优先尝试分配给上次客服
+        if (oConvertUtils.isNotEmpty(lastAgentId)) {
+            CsAgent lastAgent = getById(lastAgentId);
+            if (lastAgent != null && lastAgent.canAcceptSession()) {
+                if (incrementSessions(lastAgent.getId())) {
+                    log.info("[CS-Agent] 继承上次客服分配: agentId={}", lastAgent.getId());
+                    return lastAgent;
+                }
+            }
+            log.info("[CS-Agent] 上次客服不可用({}), 按策略分配", lastAgentId);
+        }
+
         List<CsAgent> agents = getAvailableAgents();
         if (agents == null || agents.isEmpty()) {
             log.warn("[CS-Agent] 没有可用客服");
             return null;
         }
 
-        // 选择接待数最少的客服
-        CsAgent agent = agents.get(0);
-        
-        // 尝试增加接待数
-        if (incrementSessions(agent.getId())) {
-            log.info("[CS-Agent] 分配客服: agentId={}", agent.getId());
-            return agent;
+        // 读取分配策略配置
+        String assignMode = getAssignMode();
+
+        if ("round_robin".equals(assignMode)) {
+            return assignByRoundRobin(agents);
+        } else {
+            return assignBySaturation(agents);
+        }
+    }
+
+    /**
+     * 轮流分配策略
+     * 使用按创建时间稳定排序的客服列表，通过Redis记录上次分配的客服ID来实现轮流
+     */
+    private CsAgent assignByRoundRobin(List<CsAgent> ignoredAgents) {
+        // 使用按创建时间稳定排序的查询（而不是按current_sessions排序的列表）
+        List<CsAgent> agents = baseMapper.selectAvailableAgentsForRoundRobin();
+        if (agents == null || agents.isEmpty()) {
+            log.warn("[CS-Agent] 轮流分配：没有可用客服");
+            return null;
         }
 
-        // 如果第一个客服分配失败，尝试其他客服
-        for (int i = 1; i < agents.size(); i++) {
-            agent = agents.get(i);
+        int size = agents.size();
+        
+        // 从Redis读取上次分配的客服ID，找到其在列表中的位置
+        String lastAgentId = redisTemplate.opsForValue().get(ROUND_ROBIN_INDEX_KEY);
+        int startIndex = 0;
+        if (lastAgentId != null) {
+            for (int i = 0; i < size; i++) {
+                if (agents.get(i).getId().equals(lastAgentId)) {
+                    startIndex = (i + 1) % size;  // 从上次分配的下一个开始
+                    break;
+                }
+            }
+        }
+
+        // 从startIndex开始轮流尝试
+        for (int i = 0; i < size; i++) {
+            int idx = (startIndex + i) % size;
+            CsAgent agent = agents.get(idx);
             if (incrementSessions(agent.getId())) {
-                log.info("[CS-Agent] 分配客服: agentId={}", agent.getId());
+                // 记录本次分配的客服ID（而不是索引）
+                redisTemplate.opsForValue().set(ROUND_ROBIN_INDEX_KEY, agent.getId());
+                log.info("[CS-Agent] 轮流分配客服: agentId={}, nickname={}", agent.getId(), agent.getNickname());
                 return agent;
             }
         }
 
-        log.warn("[CS-Agent] 所有客服都已满");
+        log.warn("[CS-Agent] 轮流分配失败，所有客服都已满");
         return null;
+    }
+
+    /**
+     * 饱和度分配策略（选择接待数最少的客服，相同饱和度随机分配）
+     */
+    private CsAgent assignBySaturation(List<CsAgent> agents) {
+        // agents已按 current_sessions ASC, RAND() 排序
+        // 相同饱和度的客服会被随机排列
+        for (CsAgent agent : agents) {
+            if (incrementSessions(agent.getId())) {
+                log.info("[CS-Agent] 饱和度分配客服: agentId={}, nickname={}, currentSessions={}", 
+                        agent.getId(), agent.getNickname(), agent.getCurrentSessions());
+                return agent;
+            }
+        }
+        log.warn("[CS-Agent] 饱和度分配失败，所有客服都已满");
+        return null;
+    }
+
+    /**
+     * 获取分配策略模式
+     */
+    private String getAssignMode() {
+        try {
+            String json = redisTemplate.opsForValue().get(CONVERSATION_ASSIGN_REDIS_KEY);
+            if (json == null || json.isEmpty()) {
+                CsGlobalConfig config = csGlobalConfigMapper.selectById(CONVERSATION_ASSIGN_CONFIG_KEY);
+                json = config != null ? config.getConfigValue() : null;
+                if (json != null && !json.isEmpty()) {
+                    redisTemplate.opsForValue().set(CONVERSATION_ASSIGN_REDIS_KEY, json);
+                }
+            }
+            if (json != null && !json.isEmpty()) {
+                JSONObject obj = JSONObject.parseObject(json);
+                return obj.getString("assignMode");
+            }
+        } catch (Exception e) {
+            log.warn("[CS-Agent] 读取分配策略配置失败", e);
+        }
+        return "saturation"; // 默认饱和度分配
     }
 
     @Override

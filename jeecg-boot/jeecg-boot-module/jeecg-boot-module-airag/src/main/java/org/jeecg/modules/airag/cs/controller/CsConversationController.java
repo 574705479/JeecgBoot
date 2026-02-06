@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
 import org.jeecg.common.api.vo.Result;
 import org.jeecg.common.system.base.controller.JeecgController;
+import org.jeecg.common.util.IpUtils;
 import org.jeecg.common.util.oConvertUtils;
 import org.jeecg.modules.airag.cs.entity.CsAgent;
 import org.jeecg.modules.airag.cs.entity.CsConversation;
@@ -57,6 +58,7 @@ public class CsConversationController extends JeecgController<CsConversation, IC
         String userId = params.get("userId");
         String userName = params.get("userName");
         String source = params.get("source");
+        String deviceId = params.get("deviceId");
 
         boolean isAdmin = visitorTokenService.isAdminRequest(request);
         if (!isAdmin) {
@@ -73,8 +75,13 @@ public class CsConversationController extends JeecgController<CsConversation, IC
                 userName = payload.getUserName();
             }
         }
-        
-        CsConversation conversation = conversationService.createConversation(appId, userId, userName, source);
+
+        // 获取用户IP和User-Agent
+        String userIp = IpUtils.getIpAddr(request);
+        String userAgent = request.getHeader("User-Agent");
+
+        CsConversation conversation = conversationService.createConversation(
+                appId, userId, userName, source, userIp, userAgent, deviceId);
         return Result.OK(conversation);
     }
 

@@ -10,10 +10,17 @@ import org.springframework.web.socket.CloseStatus;
 
 import java.io.IOException;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArraySet;
 
 /**
  * WebSocket会话管理器
+ * 
+ * 支持同一用户多设备/多浏览器同时在线：
+ * - 同一个userId可以有多个WebSocketSession
+ * - 发消息时向该userId的所有session广播
+ * - 只有当最后一个session断开时，才判定用户离线
  * 
  * @author jeecg
  * @date 2026-01-07
@@ -23,12 +30,12 @@ import java.util.concurrent.ConcurrentHashMap;
 public class CsWebSocketSessionManager {
 
     /**
-     * 用户会话映射 (userId -> session)
+     * 用户会话映射 (userId -> sessions)  支持多设备同时在线
      */
-    private final Map<String, WebSocketSession> userSessions = new ConcurrentHashMap<>();
+    private final Map<String, Set<WebSocketSession>> userSessions = new ConcurrentHashMap<>();
 
     /**
-     * 客服会话映射 (agentId -> session)
+     * 客服会话映射 (agentId -> session)  客服端通常只有一个浏览器
      */
     private final Map<String, WebSocketSession> agentSessions = new ConcurrentHashMap<>();
 
@@ -38,10 +45,10 @@ public class CsWebSocketSessionManager {
     private final Map<String, String> sessionUserMap = new ConcurrentHashMap<>();
     
     /**
-     * 会话ID到WebSocket会话的映射 (conversationId -> session)
-     * 用于通过conversationId直接定位用户WebSocket会话，解决无痕浏览器刷新后userId变化的问题
+     * 会话ID到WebSocket会话的映射 (conversationId -> sessions)
+     * 支持多设备同时在线
      */
-    private final Map<String, WebSocketSession> conversationSessions = new ConcurrentHashMap<>();
+    private final Map<String, Set<WebSocketSession>> conversationSessions = new ConcurrentHashMap<>();
 
     /**
      * 添加会话
@@ -61,13 +68,15 @@ public class CsWebSocketSessionManager {
             agentSessions.put(userId, session);
             log.info("[CS-WebSocket] 客服上线: agentId={}, 当前在线客服IDs={}", userId, agentSessions.keySet());
         } else {
-            userSessions.put(userId, session);
-            // 同时按conversationId存储，支持通过conversationId查找用户会话
+            // 添加到用户会话集合（支持多设备）
+            userSessions.computeIfAbsent(userId, k -> new CopyOnWriteArraySet<>()).add(session);
+            // 同时按conversationId存储
             if (oConvertUtils.isNotEmpty(conversationId)) {
-                conversationSessions.put(conversationId, session);
+                conversationSessions.computeIfAbsent(conversationId, k -> new CopyOnWriteArraySet<>()).add(session);
             }
-            log.info("[CS-WebSocket] 用户上线: userId={}, conversationId={}, 当前在线用户数={}", 
-                    userId, conversationId, userSessions.size());
+            int sessionCount = userSessions.getOrDefault(userId, Set.of()).size();
+            log.info("[CS-WebSocket] 用户上线: userId={}, conversationId={}, 该用户会话数={}, 在线用户数={}", 
+                    userId, conversationId, sessionCount, userSessions.size());
         }
     }
 
@@ -84,83 +93,111 @@ public class CsWebSocketSessionManager {
         String conversationId = getConversationId(session);
         
         if (CsWebSocketInterceptor.USER_TYPE_AGENT.equals(userType)) {
-            agentSessions.remove(userId);
+            // 客服只移除匹配的session（防止新session被错误移除）
+            agentSessions.remove(userId, session);
             log.info("[CS-WebSocket] 客服下线: agentId={}, 当前在线客服数={}", userId, agentSessions.size());
         } else {
-            userSessions.remove(userId);
-            // 同时移除conversationId映射
-            if (oConvertUtils.isNotEmpty(conversationId)) {
-                conversationSessions.remove(conversationId);
+            // 从用户会话集合中移除当前session
+            Set<WebSocketSession> sessions = userSessions.get(userId);
+            if (sessions != null) {
+                sessions.remove(session);
+                // 如果该用户没有任何活跃session了，移除整个entry
+                if (sessions.isEmpty()) {
+                    userSessions.remove(userId);
+                }
             }
-            log.info("[CS-WebSocket] 用户下线: userId={}, conversationId={}, 当前在线用户数={}", 
-                    userId, conversationId, userSessions.size());
+            // 同时从conversationId映射中移除
+            if (oConvertUtils.isNotEmpty(conversationId)) {
+                Set<WebSocketSession> convSessions = conversationSessions.get(conversationId);
+                if (convSessions != null) {
+                    convSessions.remove(session);
+                    if (convSessions.isEmpty()) {
+                        conversationSessions.remove(conversationId);
+                    }
+                }
+            }
+            int remaining = userSessions.containsKey(userId) ? userSessions.get(userId).size() : 0;
+            log.info("[CS-WebSocket] 用户会话断开: userId={}, conversationId={}, 剩余会话数={}, 在线用户数={}", 
+                    userId, conversationId, remaining, userSessions.size());
         }
     }
 
     /**
-     * 发送消息给用户
+     * 发送消息给用户（向该用户的所有session广播）
      */
     public void sendToUser(String userId, Object message) {
         if (oConvertUtils.isEmpty(userId)) {
             log.debug("[CS-WebSocket] 用户ID为空，跳过发送");
             return;
         }
-        WebSocketSession session = userSessions.get(userId);
-        if (session != null && isSessionExpired(session)) {
-            closeExpiredSession(session, "token expired");
+        Set<WebSocketSession> sessions = userSessions.get(userId);
+        if (sessions == null || sessions.isEmpty()) {
             return;
         }
-        sendMessage(session, message);
+        String json = toJson(message);
+        for (WebSocketSession session : sessions) {
+            if (session != null && session.isOpen()) {
+                if (isSessionExpired(session)) {
+                    closeExpiredSession(session, "token expired");
+                    continue;
+                }
+                sendRawMessage(session, json);
+            }
+        }
     }
     
     /**
-     * 通过conversationId发送消息给用户
-     * 优先使用conversationId查找会话，支持无痕浏览器刷新后仍能收到消息
+     * 通过conversationId发送消息给用户（向所有匹配的session广播）
      */
     public boolean sendToUserByConversation(String conversationId, String userId, Object message) {
-        WebSocketSession session = null;
+        String json = toJson(message);
+        boolean sent = false;
         
-        // ★ 增强日志：显示当前所有在线用户
-        log.info("[CS-WebSocket] 尝试发送消息给用户: conversationId={}, userId={}, " +
-                "当前conversationSessions={}, 当前userSessions={}", 
-                conversationId, userId, conversationSessions.keySet(), userSessions.keySet());
-        
-        // 优先通过conversationId查找
+        // 优先通过conversationId查找并发送
         if (oConvertUtils.isNotEmpty(conversationId)) {
-            session = conversationSessions.get(conversationId);
-            if (session != null) {
-                log.info("[CS-WebSocket] 通过conversationId找到用户会话: conversationId={}", conversationId);
+            Set<WebSocketSession> convSessions = conversationSessions.get(conversationId);
+            if (convSessions != null && !convSessions.isEmpty()) {
+                for (WebSocketSession session : convSessions) {
+                    if (session != null && session.isOpen()) {
+                        if (isSessionExpired(session)) {
+                            closeExpiredSession(session, "token expired");
+                            continue;
+                        }
+                        sendRawMessage(session, json);
+                        sent = true;
+                    }
+                }
+                if (sent) {
+                    log.info("[CS-WebSocket] 通过conversationId发送消息成功: conversationId={}, 目标会话数={}", 
+                            conversationId, convSessions.size());
+                    return true;
+                }
             }
         }
         
-        // 如果conversationId找不到，尝试通过userId查找
-        if (session == null && oConvertUtils.isNotEmpty(userId)) {
-            session = userSessions.get(userId);
-            if (session != null) {
-                log.info("[CS-WebSocket] 通过userId找到用户会话: userId={}", userId);
+        // 如果conversationId找不到，尝试通过userId发送
+        if (!sent && oConvertUtils.isNotEmpty(userId)) {
+            Set<WebSocketSession> sessions = userSessions.get(userId);
+            if (sessions != null && !sessions.isEmpty()) {
+                for (WebSocketSession session : sessions) {
+                    if (session != null && session.isOpen()) {
+                        if (isSessionExpired(session)) {
+                            closeExpiredSession(session, "token expired");
+                            continue;
+                        }
+                        sendRawMessage(session, json);
+                        sent = true;
+                    }
+                }
+                if (sent) {
+                    log.info("[CS-WebSocket] 通过userId发送消息成功: userId={}", userId);
+                    return true;
+                }
             }
         }
         
-        if (session == null) {
-            log.warn("[CS-WebSocket] ★★★ 用户会话不存在，无法发送消息: conversationId={}, userId={}, " +
-                    "当前conversationSessions={}, 当前userSessions={}", 
-                    conversationId, userId, conversationSessions.keySet(), userSessions.keySet());
-            return false;
-        }
-        if (isSessionExpired(session)) {
-            log.warn("[CS-WebSocket] 用户会话已过期，关闭连接: conversationId={}, userId={}", conversationId, userId);
-            closeExpiredSession(session, "token expired");
-            return false;
-        }
-        
-        if (!session.isOpen()) {
-            log.warn("[CS-WebSocket] 用户会话已关闭: conversationId={}, userId={}", conversationId, userId);
-            return false;
-        }
-        
-        log.info("[CS-WebSocket] 正在发送消息给用户: conversationId={}, userId={}", conversationId, userId);
-        sendMessage(session, message);
-        return true;
+        log.warn("[CS-WebSocket] 用户会话不存在，无法发送消息: conversationId={}, userId={}", conversationId, userId);
+        return false;
     }
 
     /**
@@ -202,7 +239,7 @@ public class CsWebSocketSessionManager {
     }
 
     /**
-     * 发送消息
+     * 发送消息（单个session）
      */
     private void sendMessage(WebSocketSession session, Object message) {
         if (session == null || !session.isOpen()) {
@@ -210,6 +247,20 @@ public class CsWebSocketSessionManager {
         }
         try {
             String json = toJson(message);
+            session.sendMessage(new TextMessage(json));
+        } catch (IOException e) {
+            log.error("[CS-WebSocket] 发送消息失败: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 发送已序列化的JSON消息（避免重复序列化）
+     */
+    private void sendRawMessage(WebSocketSession session, String json) {
+        if (session == null || !session.isOpen()) {
+            return;
+        }
+        try {
             session.sendMessage(new TextMessage(json));
         } catch (IOException e) {
             log.error("[CS-WebSocket] 发送消息失败: {}", e.getMessage());
@@ -288,8 +339,17 @@ public class CsWebSocketSessionManager {
         if (oConvertUtils.isEmpty(userId)) {
             return false;
         }
-        WebSocketSession session = userSessions.get(userId);
-        return session != null && session.isOpen();
+        Set<WebSocketSession> sessions = userSessions.get(userId);
+        if (sessions == null || sessions.isEmpty()) {
+            return false;
+        }
+        // 检查是否有至少一个open的session
+        for (WebSocketSession session : sessions) {
+            if (session != null && session.isOpen()) {
+                return true;
+            }
+        }
+        return false;
     }
     
     /**
@@ -298,29 +358,28 @@ public class CsWebSocketSessionManager {
     public boolean isUserOnlineByConversation(String conversationId, String userId) {
         // 优先通过conversationId查找
         if (oConvertUtils.isNotEmpty(conversationId)) {
-            WebSocketSession session = conversationSessions.get(conversationId);
-            if (session != null && session.isOpen()) {
-                log.debug("[CS-WebSocket] 用户在线(conversationId匹配): conversationId={}", conversationId);
-                return true;
+            Set<WebSocketSession> sessions = conversationSessions.get(conversationId);
+            if (sessions != null) {
+                for (WebSocketSession session : sessions) {
+                    if (session != null && session.isOpen()) {
+                        return true;
+                    }
+                }
             }
         }
         // 其次通过userId查找
-        boolean online = isUserOnline(userId);
-        log.debug("[CS-WebSocket] 用户在线状态: conversationId={}, userId={}, online={}, " +
-                "conversationSessions.keys={}, userSessions.keys={}", 
-                conversationId, userId, online, conversationSessions.keySet(), userSessions.keySet());
-        return online;
+        return isUserOnline(userId);
     }
     
     /**
-     * 获取所有在线用户的conversationId列表（用于调试）
+     * 获取所有在线用户的conversationId列表
      */
     public java.util.Set<String> getOnlineConversationIds() {
         return new java.util.HashSet<>(conversationSessions.keySet());
     }
     
     /**
-     * 获取所有在线用户ID列表（用于调试）
+     * 获取所有在线用户ID列表
      */
     public java.util.Set<String> getOnlineUserIds() {
         return new java.util.HashSet<>(userSessions.keySet());

@@ -19,12 +19,20 @@ import java.util.List;
 public interface CsAgentMapper extends BaseMapper<CsAgent> {
 
     /**
-     * 查询在线且可接待的客服列表
+     * 查询在线且可接待的客服列表（按饱和度排序，饱和度相同则随机）
      * 
      * @return 客服列表
      */
-    @Select("SELECT * FROM cs_agent WHERE status = 1 AND current_sessions < max_sessions ORDER BY current_sessions ASC")
+    @Select("SELECT * FROM cs_agent WHERE status = 1 AND current_sessions < max_sessions ORDER BY current_sessions ASC, RAND()")
     List<CsAgent> selectAvailableAgents();
+
+    /**
+     * 查询在线且可接待的客服列表（按创建时间排序，用于轮流分配）
+     * 
+     * @return 客服列表
+     */
+    @Select("SELECT * FROM cs_agent WHERE status = 1 AND current_sessions < max_sessions ORDER BY create_time ASC")
+    List<CsAgent> selectAvailableAgentsForRoundRobin();
 
     /**
      * 增加客服当前接待数

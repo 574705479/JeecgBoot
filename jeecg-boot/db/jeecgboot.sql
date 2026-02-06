@@ -353,7 +353,15 @@ CREATE TABLE `cs_conversation`  (
   `user_name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '用户名称',
   `user_avatar` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '用户头像',
   `user_ip` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '用户IP',
-  `user_device` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '用户设备信息',
+  `user_device` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '用户设备信息(User-Agent)',
+  `user_os` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '操作系统',
+  `user_os_version` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '操作系统版本',
+  `user_browser` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '浏览器',
+  `user_browser_version` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '浏览器版本',
+  `user_device_id` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '设备指纹',
+  `user_country` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '国家',
+  `user_province` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '省份',
+  `user_city` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '城市',
   `agent_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '主负责客服ID',
   `status` tinyint NULL DEFAULT 0 COMMENT '状态: 0-未分配 1-已分配 2-已结束',
   `reply_mode` tinyint NULL DEFAULT 0 COMMENT '回复模式: 0-AI自动 1-手动 2-AI辅助',
@@ -384,12 +392,28 @@ CREATE TABLE `cs_conversation`  (
 -- ----------------------------
 
 -- ----------------------------
+-- Table structure for cs_ip_geo_cache
+-- ----------------------------
+DROP TABLE IF EXISTS `cs_ip_geo_cache`;
+CREATE TABLE `cs_ip_geo_cache`  (
+  `id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '主键ID',
+  `ip` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT 'IP地址',
+  `country` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '国家',
+  `province` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '省份',
+  `city` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '城市',
+  `raw_response` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL COMMENT 'API原始响应JSON',
+  `create_time` datetime NULL DEFAULT NULL COMMENT '缓存时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `idx_ip`(`ip` ASC) USING BTREE
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = 'IP地理位置缓存表' ROW_FORMAT = DYNAMIC;
+
+-- ----------------------------
 -- Table structure for cs_global_config
 -- ----------------------------
 DROP TABLE IF EXISTS `cs_global_config`;
 CREATE TABLE `cs_global_config`  (
   `config_key` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '配置Key',
-  `config_value` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '配置Value',
+  `config_value` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '配置Value',
   `create_time` datetime NULL DEFAULT NULL COMMENT '创建时间',
   `update_time` datetime NULL DEFAULT NULL COMMENT '更新时间',
   PRIMARY KEY (`config_key`) USING BTREE
@@ -398,6 +422,36 @@ CREATE TABLE `cs_global_config`  (
 -- ----------------------------
 -- Records of cs_global_config
 -- ----------------------------
+INSERT INTO `cs_global_config` (`config_key`, `config_value`, `create_time`, `update_time`) VALUES
+('ai_enabled', 'true', NOW(), NOW()),
+('conversation_assign', '{"assignMode":"saturation","inheritLastAgent":{"enabled":true,"expireMinutes":60},"conversationHold":{"minutes":10},"agentTimeoutReminder":{"enabled":false,"seconds":20}}', NOW(), NOW()),
+('message_board', '{"subtitle":"客服不在线，请留言","fields":{"name":{"show":true,"required":true},"phone":{"show":true,"required":false},"email":{"show":true,"required":false},"qq":{"show":false,"required":false},"wechat":{"show":false,"required":false},"image":{"show":true,"required":false}}}', NOW(), NOW());
+
+-- ----------------------------
+-- Table structure for cs_leave_message
+-- ----------------------------
+DROP TABLE IF EXISTS `cs_leave_message`;
+CREATE TABLE `cs_leave_message`  (
+  `id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `user_id` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '访客用户ID',
+  `content` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL COMMENT '留言内容',
+  `name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '姓名',
+  `phone` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '手机',
+  `email` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '邮箱',
+  `qq` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT 'QQ',
+  `wechat` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '微信',
+  `image_url` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '图片URL',
+  `reply` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL COMMENT '客服回复',
+  `reply_agent_id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '回复客服ID',
+  `reply_time` datetime NULL DEFAULT NULL COMMENT '回复时间',
+  `status` int NULL DEFAULT 0 COMMENT '0-待回复 1-已回复',
+  `user_read` tinyint NULL DEFAULT 0 COMMENT '用户是否已读回复',
+  `create_time` datetime NULL DEFAULT NULL COMMENT '创建时间',
+  `update_time` datetime NULL DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX `idx_user_id`(`user_id` ASC) USING BTREE,
+  INDEX `idx_status`(`status` ASC) USING BTREE
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '客服留言表' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for cs_quick_reply
@@ -3713,6 +3767,9 @@ INSERT INTO `sys_permission` VALUES ('cs_quick_reply_edit', 'cs_quick_reply', '�
 INSERT INTO `sys_permission` VALUES ('cs_statistics', 'cs_parent', '数据统计', '/cs/statistics', 'super/airag/cs/statistics/index', 1, NULL, NULL, 1, NULL, '1', 6.00, 0, 'ant-design:bar-chart-outlined', 1, 0, 0, 0, '客服数据统计', 'admin', '2026-01-07 17:22:52', NULL, NULL, 0, 0, '1', 0);
 INSERT INTO `sys_permission` VALUES ('cs_visitor', 'airag_cs', '访客管理', '/super/airag/cs/visitor', 'super/airag/cs/visitor/index', 1, NULL, NULL, 1, NULL, '1', 5.00, 0, 'ant-design:user-outlined', 1, 0, 0, 0, '访客信息管理', 'admin', '2026-01-12 17:13:12', NULL, NULL, 0, 0, '1', 0);
 INSERT INTO `sys_permission` VALUES ('cs_workbench', 'cs_parent', '客服工作台', '/cs/workbench', 'super/airag/cs/workbench/index', 1, NULL, NULL, 1, NULL, '1', 1.00, 0, 'ant-design:message-outlined', 1, 0, 0, 0, '客服工作台', 'admin', '2026-01-07 17:22:52', NULL, NULL, 0, 0, '1', 0);
+INSERT INTO `sys_permission` VALUES ('cs_conversation_assign', 'cs_parent', '对话分配', '/cs/conversationAssign', 'super/airag/cs/conversationAssign/index', 1, NULL, NULL, 1, NULL, '1', 4.00, 0, 'ant-design:swap-outlined', 1, 0, 0, 0, '对话分配配置', 'admin', '2026-02-06 10:00:00', NULL, NULL, 0, 0, '1', 0);
+INSERT INTO `sys_permission` VALUES ('cs_message_board_settings', 'cs_parent', '留言板设置', '/cs/messageBoardSettings', 'super/airag/cs/messageBoard/settings', 1, NULL, NULL, 1, NULL, '1', 8.00, 0, 'ant-design:form-outlined', 1, 0, 0, 0, '留言板设置', 'admin', '2026-02-06 10:00:00', NULL, NULL, 0, 0, '1', 0);
+INSERT INTO `sys_permission` VALUES ('cs_message_board_records', 'cs_parent', '留言记录', '/cs/messageBoardRecords', 'super/airag/cs/messageBoard/records', 1, NULL, NULL, 1, NULL, '1', 9.00, 0, 'ant-design:file-text-outlined', 1, 0, 0, 0, '留言记录管理', 'admin', '2026-02-06 10:00:00', NULL, NULL, 0, 0, '1', 0);
 INSERT INTO `sys_permission` VALUES ('d7d6e2e4e2934f2c9385a623fd98c6f3', '', '系统管理', '/isystem', 'layouts/RouteView', 1, NULL, NULL, 0, NULL, NULL, 4.00, 0, 'ant-design:setting', 0, 0, 0, 0, NULL, NULL, '2018-12-25 20:34:38', 'admin', '2025-06-25 14:24:07', 0, 0, NULL, 0);
 INSERT INTO `sys_permission` VALUES ('f15543b0263cf6c5fac85afdd3eba3f2', '3f915b2769fc80648e92d04e84ca059d', '用户导入', '', NULL, 0, NULL, NULL, 2, 'system:user:import', '1', 1.00, 0, NULL, 1, 0, 0, 0, NULL, 'admin', '2019-05-13 19:15:27', 'admin', '2022-06-30 15:05:12', 0, 0, '1', 0);
 
@@ -3983,6 +4040,9 @@ INSERT INTO `sys_role_permission` VALUES ('2013531115265773570', '20135310333635
 INSERT INTO `sys_role_permission` VALUES ('2013531115265773571', '2013531033363599361', 'cs_conversation', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
 INSERT INTO `sys_role_permission` VALUES ('2013531115265773572', '2013531033363599361', 'cs_quick_reply', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
 INSERT INTO `sys_role_permission` VALUES ('2013531115265773573', '2013531033363599361', 'cs_statistics', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
+INSERT INTO `sys_role_permission` VALUES ('cs_conv_assign_perm_02', '2013531033363599361', 'cs_conversation_assign', NULL, '2026-02-06 10:00:00', '0:0:0:0:0:0:0:1');
+INSERT INTO `sys_role_permission` VALUES ('cs_mb_settings_perm_02', '2013531033363599361', 'cs_message_board_settings', NULL, '2026-02-06 10:00:00', '0:0:0:0:0:0:0:1');
+INSERT INTO `sys_role_permission` VALUES ('cs_mb_records_perm_02', '2013531033363599361', 'cs_message_board_records', NULL, '2026-02-06 10:00:00', '0:0:0:0:0:0:0:1');
 INSERT INTO `sys_role_permission` VALUES ('2013531115265773574', '2013531033363599361', '1892553163993931777', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
 INSERT INTO `sys_role_permission` VALUES ('2013531115265773575', '2013531033363599361', '1893865471550578689', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
 INSERT INTO `sys_role_permission` VALUES ('2013531115265773576', '2013531033363599361', '1930221213607591937', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
@@ -4188,6 +4248,9 @@ INSERT INTO `sys_role_permission` VALUES ('aefc8c22e061171806e59cd222f6b7e1', '5
 INSERT INTO `sys_role_permission` VALUES ('d3fe195d59811531c05d31d8436f5c8b', '1750a8fb3e6d90cb7957c02de1dc8e59', 'e8af452d8948ea49d37c934f5100ae6a', NULL, NULL, NULL);
 INSERT INTO `sys_role_permission` VALUES ('dea74b33f5ce11f089be56ca9804d785', 'f6817f48af4fb3af11b9e8bf182f618b', 'cs_brand_config', NULL, '2026-01-20 15:08:49', '127.0.0.1');
 INSERT INTO `sys_role_permission` VALUES ('dea76150f5ce11f089be56ca9804d785', 'f6817f48af4fb3af11b9e8bf182f618b', 'cs_brand_save', NULL, '2026-01-20 15:08:49', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_conv_assign_perm_01', 'f6817f48af4fb3af11b9e8bf182f618b', 'cs_conversation_assign', NULL, '2026-02-06 10:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_mb_settings_perm_01', 'f6817f48af4fb3af11b9e8bf182f618b', 'cs_message_board_settings', NULL, '2026-02-06 10:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_mb_records_perm_01', 'f6817f48af4fb3af11b9e8bf182f618b', 'cs_message_board_records', NULL, '2026-02-06 10:00:00', '127.0.0.1');
 INSERT INTO `sys_role_permission` VALUES ('e3e922673f4289b18366bb51b6200f17', '52b0cf022ac4187b2a70dfa4f8b2d940', '45c966826eeff4c99b8f8ebfe74511fc', NULL, NULL, NULL);
 INSERT INTO `sys_role_permission` VALUES ('f17ab8ad1e71341140857ef4914ef297', '21c5a3187763729408b40afb0d0fdfa8', '732d48f8e0abe99fe6a23d18a3171cd1', NULL, NULL, NULL);
 INSERT INTO `sys_role_permission` VALUES ('fed41a4671285efb266cd404f24dd378', '52b0cf022ac4187b2a70dfa4f8b2d940', '00a2a0ae65cdca5e93209cdbde97cbe6', NULL, NULL, NULL);

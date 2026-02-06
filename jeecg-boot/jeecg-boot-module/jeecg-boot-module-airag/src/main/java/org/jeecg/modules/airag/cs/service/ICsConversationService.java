@@ -27,13 +27,17 @@ public interface ICsConversationService extends IService<CsConversation> {
     /**
      * 创建会话 (用户发起对话时调用)
      * 
-     * @param appId    应用ID
-     * @param userId   用户ID
-     * @param userName 用户名称
-     * @param source   来源渠道
+     * @param appId     应用ID
+     * @param userId    用户ID
+     * @param userName  用户名称
+     * @param source    来源渠道
+     * @param userIp    用户IP地址
+     * @param userAgent User-Agent 字符串
+     * @param deviceId  设备指纹
      * @return 会话
      */
-    CsConversation createConversation(String appId, String userId, String userName, String source);
+    CsConversation createConversation(String appId, String userId, String userName, String source,
+                                      String userIp, String userAgent, String deviceId);
 
     /**
      * 获取或创建会话 (用户发消息时调用)

@@ -1,5 +1,6 @@
 package org.jeecg.modules.airag.cs.service.impl;
 
+import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
@@ -10,16 +11,21 @@ import org.jeecg.common.util.oConvertUtils;
 import org.jeecg.modules.airag.cs.entity.CsAgent;
 import org.jeecg.modules.airag.cs.entity.CsCollaborator;
 import org.jeecg.modules.airag.cs.entity.CsConversation;
+import org.jeecg.modules.airag.cs.entity.CsGlobalConfig;
 import org.jeecg.modules.airag.cs.mapper.CsCollaboratorMapper;
 import org.jeecg.modules.airag.cs.mapper.CsConversationMapper;
+import org.jeecg.modules.airag.cs.mapper.CsGlobalConfigMapper;
+import org.jeecg.modules.airag.cs.service.CsIpGeoService;
 import org.jeecg.modules.airag.cs.service.ICsAgentService;
 import org.jeecg.modules.airag.cs.service.ICsConversationService;
 import org.jeecg.modules.airag.cs.service.ICsMessageService;
+import org.jeecg.modules.airag.cs.util.CsUserAgentUtil;
 import org.jeecg.modules.airag.cs.websocket.CsWebSocketMessage;
 import org.jeecg.modules.airag.cs.websocket.CsWebSocketSessionManager;
 import org.jeecg.modules.airag.cs.vo.CsAgentWorkloadVO;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,6 +48,11 @@ import java.util.List;
 public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper, CsConversation> 
         implements ICsConversationService {
 
+    private static final String AI_ENABLED_REDIS_KEY = "cs:global:ai_enabled";
+    private static final String AI_ENABLED_CONFIG_KEY = "ai_enabled";
+    private static final String CONVERSATION_ASSIGN_REDIS_KEY = "cs:global:conversation_assign";
+    private static final String CONVERSATION_ASSIGN_CONFIG_KEY = "conversation_assign";
+
     @Autowired
     @Lazy
     private ICsAgentService agentService;
@@ -56,28 +67,109 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
     @Autowired
     private CsWebSocketSessionManager sessionManager;
 
+    @Autowired
+    private RedisTemplate<String, String> redisTemplate;
+
+    @Autowired
+    private CsGlobalConfigMapper csGlobalConfigMapper;
+
+    @Autowired
+    private CsIpGeoService ipGeoService;
+
     // ==================== 会话生命周期 ====================
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public CsConversation createConversation(String appId, String userId, String userName, String source) {
+    public CsConversation createConversation(String appId, String userId, String userName, String source,
+                                             String userIp, String userAgent, String deviceId) {
+        // 读取AI开关和对话分配配置
+        boolean aiEnabled = isAiEnabled();
+        JSONObject assignConfig = getConversationAssignConfig();
+
+        // 尝试自动分配客服
+        String lastAgentId = null;
+        // 继承上一次客服逻辑
+        if (assignConfig != null) {
+            JSONObject inherit = assignConfig.getJSONObject("inheritLastAgent");
+            if (inherit != null && inherit.getBooleanValue("enabled")) {
+                int expireMinutes = inherit.getIntValue("expireMinutes");
+                lastAgentId = findLastAgentForUser(userId, expireMinutes);
+            }
+        }
+
+        CsAgent assignedAgent = agentService.assignAgent(lastAgentId);
+
+        // ====== 解析设备信息和IP地理位置 ======
+        Map<String, String> uaInfo = CsUserAgentUtil.parse(userAgent);
+        Map<String, String> geoInfo = ipGeoService.queryGeoByIp(userIp);
+
+        // 默认用户名逻辑：基于地理位置生成
+        String finalUserName = userName;
+        if (oConvertUtils.isEmpty(finalUserName)) {
+            finalUserName = generateDefaultUserName(geoInfo);
+        }
+
         CsConversation conversation = new CsConversation();
         conversation.setAppId(appId);
         conversation.setUserId(userId);
-        conversation.setUserName(oConvertUtils.isNotEmpty(userName) ? userName : "访客");
+        conversation.setUserName(finalUserName);
         conversation.setSource(source);
-        conversation.setStatus(CsConversation.STATUS_UNASSIGNED);
-        conversation.setReplyMode(CsConversation.REPLY_MODE_AI_AUTO);
         conversation.setUnreadCount(0);
         conversation.setMessageCount(0);
         conversation.setCreateTime(new Date());
         conversation.setLastMessageTime(new Date());
-        
-        save(conversation);
-        log.info("[CS-Conversation] 创建会话: id={}, userId={}", conversation.getId(), userId);
-        
-        // ★ 广播新会话给所有在线客服
-        broadcastNewConversation(conversation);
+
+        // 设置设备信息
+        conversation.setUserIp(userIp);
+        conversation.setUserDevice(userAgent);
+        conversation.setUserOs(uaInfo.get("os"));
+        conversation.setUserOsVersion(uaInfo.get("osVersion"));
+        conversation.setUserBrowser(uaInfo.get("browser"));
+        conversation.setUserBrowserVersion(uaInfo.get("browserVersion"));
+        conversation.setUserDeviceId(deviceId);
+
+        // 设置地理位置
+        conversation.setUserCountry(geoInfo.get("country"));
+        conversation.setUserProvince(geoInfo.get("province"));
+        conversation.setUserCity(geoInfo.get("city"));
+
+        if (assignedAgent != null) {
+            // 有可用客服，直接分配
+            conversation.setOwnerAgentId(assignedAgent.getId());
+            conversation.setStatus(CsConversation.STATUS_ASSIGNED);
+            conversation.setAssignTime(new Date());
+            // AI开关决定回复模式
+            conversation.setReplyMode(aiEnabled ? CsConversation.REPLY_MODE_AI_AUTO : CsConversation.REPLY_MODE_MANUAL);
+            
+            save(conversation);
+            log.info("[CS-Conversation] 创建会话(自动分配): id={}, agentId={}, aiEnabled={}", 
+                    conversation.getId(), assignedAgent.getId(), aiEnabled);
+
+            // 创建协作者记录（主负责人）
+            CsCollaborator collaborator = new CsCollaborator();
+            collaborator.setConversationId(conversation.getId());
+            collaborator.setAgentId(assignedAgent.getId());
+            collaborator.setRole(CsCollaborator.ROLE_OWNER);
+            collaborator.setJoinTime(new Date());
+            collaboratorMapper.insert(collaborator);
+
+            // 广播新会话给所有在线客服
+            broadcastNewConversation(conversation);
+
+            // 通知用户客服已接入
+            Map<String, Object> extra = new HashMap<>();
+            extra.put("replyMode", conversation.getReplyMode());
+            extra.put("agentName", assignedAgent.getNickname());
+            extra.put("agentId", assignedAgent.getId());
+            notifyUser(conversation.getId(), "agent_connected", 
+                    "客服 " + assignedAgent.getNickname() + " 为您服务", extra);
+        } else {
+            // 无可用客服 → 标记noAgent，前端展示留言板
+            conversation.setStatus(CsConversation.STATUS_UNASSIGNED);
+            conversation.setReplyMode(CsConversation.REPLY_MODE_MANUAL);
+            save(conversation);
+            log.info("[CS-Conversation] 创建会话(无在线客服): id={}, userId={}", conversation.getId(), userId);
+        }
 
         // 发送访客开场白（作为第一条消息）
         try {
@@ -87,6 +179,119 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         }
         
         return conversation;
+    }
+
+    /**
+     * 根据地理位置信息生成默认用户名
+     * 例如: "中国北京用户"、"中国用户"、"访客"
+     */
+    private String generateDefaultUserName(Map<String, String> geoInfo) {
+        if (geoInfo == null || geoInfo.isEmpty()) {
+            return "访客";
+        }
+        String country = geoInfo.get("country");
+        String city = geoInfo.get("city");
+
+        if (oConvertUtils.isNotEmpty(country) && oConvertUtils.isNotEmpty(city)) {
+            return country + city + "用户";
+        }
+        if (oConvertUtils.isNotEmpty(country)) {
+            return country + "用户";
+        }
+        return "访客";
+    }
+
+    /**
+     * 查找用户上一次会话的客服ID（在有效期内）
+     * 
+     * 查询范围：已分配(ASSIGNED)和已结束(CLOSED)的会话，排除未分配的
+     * 排序依据：优先用endTime，endTime为空时用lastMessageTime，最后用createTime
+     */
+    private String findLastAgentForUser(String userId, int expireMinutes) {
+        try {
+            if (expireMinutes <= 0) {
+                // 有效期为0表示永远继承
+                LambdaQueryWrapper<CsConversation> query = new LambdaQueryWrapper<>();
+                query.eq(CsConversation::getUserId, userId)
+                        .in(CsConversation::getStatus, CsConversation.STATUS_ASSIGNED, CsConversation.STATUS_CLOSED)
+                        .isNotNull(CsConversation::getOwnerAgentId)
+                        .orderByDesc(CsConversation::getLastMessageTime)
+                        .last("LIMIT 1");
+                CsConversation lastConv = getOne(query);
+                if (lastConv != null) {
+                    log.info("[CS-Conversation] 找到用户上次客服(永久继承): userId={}, lastAgentId={}, convId={}", 
+                            userId, lastConv.getOwnerAgentId(), lastConv.getId());
+                }
+                return lastConv != null ? lastConv.getOwnerAgentId() : null;
+            }
+            
+            Date expireTime = new Date(System.currentTimeMillis() - (long) expireMinutes * 60 * 1000);
+            LambdaQueryWrapper<CsConversation> query = new LambdaQueryWrapper<>();
+            query.eq(CsConversation::getUserId, userId)
+                    .in(CsConversation::getStatus, CsConversation.STATUS_ASSIGNED, CsConversation.STATUS_CLOSED)
+                    .isNotNull(CsConversation::getOwnerAgentId)
+                    // 有效期判断：endTime或lastMessageTime在有效期内
+                    .and(w -> w
+                            .gt(CsConversation::getEndTime, expireTime)
+                            .or()
+                            .gt(CsConversation::getLastMessageTime, expireTime)
+                    )
+                    .orderByDesc(CsConversation::getLastMessageTime)
+                    .last("LIMIT 1");
+            CsConversation lastConv = getOne(query);
+            if (lastConv != null) {
+                log.info("[CS-Conversation] 找到用户上次客服(有效期{}分钟内): userId={}, lastAgentId={}, convId={}", 
+                        expireMinutes, userId, lastConv.getOwnerAgentId(), lastConv.getId());
+            } else {
+                log.info("[CS-Conversation] 未找到用户上次客服(有效期{}分钟内): userId={}", expireMinutes, userId);
+            }
+            return lastConv != null ? lastConv.getOwnerAgentId() : null;
+        } catch (Exception e) {
+            log.warn("[CS-Conversation] 查找用户上次客服失败: userId={}", userId, e);
+            return null;
+        }
+    }
+
+    /**
+     * 读取AI开关状态
+     */
+    private boolean isAiEnabled() {
+        try {
+            String value = redisTemplate.opsForValue().get(AI_ENABLED_REDIS_KEY);
+            if (value == null) {
+                CsGlobalConfig config = csGlobalConfigMapper.selectById(AI_ENABLED_CONFIG_KEY);
+                value = config != null ? config.getConfigValue() : null;
+                if (value != null) {
+                    redisTemplate.opsForValue().set(AI_ENABLED_REDIS_KEY, value);
+                }
+            }
+            return value == null || "true".equalsIgnoreCase(value);
+        } catch (Exception e) {
+            log.warn("[CS-Conversation] 读取AI开关失败", e);
+            return true; // 默认开启
+        }
+    }
+
+    /**
+     * 读取对话分配配置
+     */
+    private JSONObject getConversationAssignConfig() {
+        try {
+            String json = redisTemplate.opsForValue().get(CONVERSATION_ASSIGN_REDIS_KEY);
+            if (json == null || json.isEmpty()) {
+                CsGlobalConfig config = csGlobalConfigMapper.selectById(CONVERSATION_ASSIGN_CONFIG_KEY);
+                json = config != null ? config.getConfigValue() : null;
+                if (json != null && !json.isEmpty()) {
+                    redisTemplate.opsForValue().set(CONVERSATION_ASSIGN_REDIS_KEY, json);
+                }
+            }
+            if (json != null && !json.isEmpty()) {
+                return JSONObject.parseObject(json);
+            }
+        } catch (Exception e) {
+            log.warn("[CS-Conversation] 读取对话分配配置失败", e);
+        }
+        return null;
     }
     
     /**
@@ -100,6 +305,18 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             extra.put("createTime", conversation.getCreateTime());
             extra.put("status", conversation.getStatus());
             extra.put("replyMode", conversation.getReplyMode());
+            extra.put("ownerAgentId", conversation.getOwnerAgentId());
+            // 设备信息
+            extra.put("userIp", conversation.getUserIp());
+            extra.put("userOs", conversation.getUserOs());
+            extra.put("userOsVersion", conversation.getUserOsVersion());
+            extra.put("userBrowser", conversation.getUserBrowser());
+            extra.put("userBrowserVersion", conversation.getUserBrowserVersion());
+            extra.put("userDeviceId", conversation.getUserDeviceId());
+            // 地理位置
+            extra.put("userCountry", conversation.getUserCountry());
+            extra.put("userProvince", conversation.getUserProvince());
+            extra.put("userCity", conversation.getUserCity());
             
             CsWebSocketMessage notification = CsWebSocketMessage.builder()
                     .type("new_conversation")
@@ -126,33 +343,9 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
                 return existing;
             }
             
-            // 不存在则创建（使用指定的ID）
-            CsConversation conversation = new CsConversation();
-            conversation.setId(conversationId);
-            conversation.setAppId(appId);
-            conversation.setUserId(userId);
-            conversation.setUserName(oConvertUtils.isNotEmpty(userName) ? userName : "访客");
-            conversation.setStatus(CsConversation.STATUS_UNASSIGNED);
-            conversation.setReplyMode(CsConversation.REPLY_MODE_AI_AUTO);
-            conversation.setUnreadCount(0);
-            conversation.setMessageCount(0);
-            conversation.setCreateTime(new Date());
-            conversation.setLastMessageTime(new Date());
-            
-            save(conversation);
-            log.info("[CS-Conversation] 创建会话(指定ID): id={}, userId={}", conversationId, userId);
-            
-            // ★ 广播新会话给所有在线客服
-            broadcastNewConversation(conversation);
-
-            // 发送访客开场白（作为第一条消息）
-            try {
-                messageService.sendVisitorPrologue(conversation.getId());
-            } catch (Exception e) {
-                log.warn("[CS-Conversation] 发送开场白失败: {}", e.getMessage());
-            }
-            
-            return conversation;
+            // 不存在则通过createConversation创建（自动分配）
+            // 注意：指定ID的场景已不常见，走统一创建逻辑
+            return createConversation(appId, userId, userName, null, null, null, null);
         }
         
         // 没有指定ID，查找用户的活跃会话
@@ -162,7 +355,7 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         }
         
         // 创建新会话 (createConversation内部会广播)
-        return createConversation(appId, userId, userName, null);
+        return createConversation(appId, userId, userName, null, null, null, null);
     }
 
     @Override

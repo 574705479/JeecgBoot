@@ -56,8 +56,32 @@ public class CsConversation implements Serializable {
     @Schema(description = "用户IP")
     private String userIp;
 
-    @Schema(description = "用户设备信息")
+    @Schema(description = "用户设备信息(User-Agent)")
     private String userDevice;
+
+    @Schema(description = "操作系统")
+    private String userOs;
+
+    @Schema(description = "操作系统版本")
+    private String userOsVersion;
+
+    @Schema(description = "浏览器")
+    private String userBrowser;
+
+    @Schema(description = "浏览器版本")
+    private String userBrowserVersion;
+
+    @Schema(description = "设备指纹")
+    private String userDeviceId;
+
+    @Schema(description = "国家")
+    private String userCountry;
+
+    @Schema(description = "省份")
+    private String userProvince;
+
+    @Schema(description = "城市")
+    private String userCity;
 
     // ==================== 客服信息 ====================
 

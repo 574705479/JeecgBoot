@@ -48,9 +48,27 @@
               </a-select-option>
             </a-select>
           </div>
-          
-          <!-- 访客AI应用（全局配置） -->
+
+          <a-divider />
+
+          <!-- AI自动回复开关（全局配置） -->
           <div class="setting-item">
+            <div class="setting-label">
+              <RobotOutlined />
+              <span>AI自动回复</span>
+              <a-tag color="orange" size="small">全局</a-tag>
+            </div>
+            <div class="setting-desc">开启后，访客进入会话将先由AI自动回复；关闭后，访客默认接入在线客服人工回复</div>
+            <a-switch 
+              v-model:checked="aiEnabled" 
+              checked-children="开启" 
+              un-checked-children="关闭"
+              @change="onAiEnabledChange"
+            />
+          </div>
+          
+          <!-- 访客AI应用（全局配置，仅AI开启时显示） -->
+          <div class="setting-item" v-if="aiEnabled">
             <div class="setting-label">
               <RobotOutlined />
               <span>访客AI应用</span>
@@ -139,6 +157,8 @@
         >
           我的 <span class="count">{{ myCount }}</span>
         </div>
+        <!-- 待接入标签已隐藏：会话创建时后端自动分配客服 -->
+        <!--
         <div 
           class="filter-tab" 
           :class="{ active: filter === 'unassigned' }"
@@ -146,6 +166,7 @@
         >
           待接入 <span class="count">{{ unassignedCount }}</span>
         </div>
+        -->
         <div 
           class="filter-tab" 
           :class="{ active: filter === 'closed' }"
@@ -207,6 +228,8 @@
           </div>
           <!-- 操作按钮组 -->
           <div class="conv-actions">
+            <!-- 接入按钮已隐藏：会话创建时后端自动分配客服 -->
+            <!--
             <a-button 
               v-if="conv.status === 0" 
               type="primary" 
@@ -215,6 +238,7 @@
             >
               接入
             </a-button>
+            -->
             <a-dropdown v-if="conv.status === 2" :trigger="['click']" @click.stop>
               <a-button size="small" type="text">
                 <MoreOutlined />
@@ -602,8 +626,31 @@
             <span class="info-value">{{ currentConversation.userIp || '-' }}</span>
           </div>
           <div class="info-item">
-            <label>设备信息</label>
-            <span class="info-value device-info">{{ currentConversation.userDevice || '-' }}</span>
+            <label>地理位置</label>
+            <span class="info-value">
+              <EnvironmentOutlined style="margin-right: 4px; color: #1890ff;" />
+              {{ formatGeoLocation(currentConversation) }}
+            </span>
+          </div>
+          <div class="info-item">
+            <label>操作系统</label>
+            <span class="info-value device-info-icon">
+              <span v-html="getOsIcon(currentConversation.userOs)" style="margin-right: 4px; display: inline-flex; vertical-align: middle;"></span>
+              {{ currentConversation.userOs || '-' }}
+              <span v-if="currentConversation.userOsVersion" style="color: #999; margin-left: 2px;">{{ currentConversation.userOsVersion }}</span>
+            </span>
+          </div>
+          <div class="info-item">
+            <label>浏览器</label>
+            <span class="info-value device-info-icon">
+              <span v-html="getBrowserIcon(currentConversation.userBrowser)" style="margin-right: 4px; display: inline-flex; vertical-align: middle;"></span>
+              {{ currentConversation.userBrowser || '-' }}
+              <span v-if="currentConversation.userBrowserVersion" style="color: #999; margin-left: 2px;">{{ formatBrowserVersion(currentConversation.userBrowserVersion) }}</span>
+            </span>
+          </div>
+          <div class="info-item" v-if="currentConversation.userDeviceId">
+            <label>设备码</label>
+            <span class="info-value" style="font-family: monospace; font-size: 12px;">{{ currentConversation.userDeviceId }}</span>
           </div>
           <div class="info-item">
             <label>来源</label>
@@ -787,7 +834,7 @@ import {
   StarFilled, StarOutlined, SwapOutlined, MenuUnfoldOutlined, MenuFoldOutlined,
   CloseOutlined, EditOutlined, PlusOutlined, InboxOutlined, MessageOutlined,
   SmileOutlined, ThunderboltOutlined, RobotOutlined, EyeOutlined, SettingOutlined,
-  MoreOutlined, DeleteOutlined, PaperClipOutlined, KeyOutlined
+  MoreOutlined, DeleteOutlined, PaperClipOutlined, KeyOutlined, EnvironmentOutlined
 } from '@ant-design/icons-vue';
 import { defHttp } from '/@/utils/http/axios';
 import { useGlobSetting } from '/@/hooks/setting';
@@ -828,6 +875,7 @@ const selectedAppId = ref<string | undefined>(undefined);  // 客服AI建议应�
 const visitorAppId = ref<string | undefined>(undefined);   // 访客AI应用
 const aiAppList = ref<any[]>([]);
 const showSettingsDrawer = ref(false);
+const aiEnabled = ref(true);  // AI自动回复开关
 const visitorSecretKey = ref('');
 const visitorDomainWhitelist = ref('');
 const visitorSecretSaving = ref(false);
@@ -843,7 +891,7 @@ const currentReplyMode = ref(0);
 // 统计数据（从后端获取）
 const statsData = ref({ myCount: 0, unassignedCount: 0, closedCount: 0 });
 const myCount = computed(() => statsData.value.myCount);
-const unassignedCount = computed(() => statsData.value.unassignedCount);
+const _unassignedCount = computed(() => statsData.value.unassignedCount); // 待接入标签已隐藏
 const closedCount = computed(() => statsData.value.closedCount);
 
 // 消息
@@ -1115,6 +1163,7 @@ const filteredQuickReplies = computed(() => {
 onMounted(async () => {
   await loadAgentInfo();
   await loadAiAppList();
+  await loadAiEnabled();          // 加载AI开关状态
   await loadGlobalVisitorApp();  // 加载全局访客AI应用配置
   await loadVisitorAccessConfig(); // 加载全局访客接入配置
   await loadConversations();
@@ -1588,6 +1637,34 @@ async function loadGlobalVisitorApp() {
   }
 }
 
+// 加载AI开关状态
+async function loadAiEnabled() {
+  try {
+    const res = await httpGet({ url: '/cs/agent/global/ai-enabled' });
+    aiEnabled.value = res?.enabled !== false;
+  } catch (e) {
+    console.error('加载AI开关状态失败', e);
+  }
+}
+
+// AI开关切换
+async function onAiEnabledChange(checked: boolean) {
+  try {
+    await httpPut({
+      url: '/cs/agent/global/ai-enabled',
+      data: { enabled: checked }
+    });
+    aiEnabled.value = checked;
+    message.success(checked ? 'AI自动回复已开启' : 'AI自动回复已关闭');
+    console.log('[Workbench] AI开关已更新:', checked);
+  } catch (e) {
+    console.error('设置AI开关失败', e);
+    message.error('设置失败');
+    // 恢复状态
+    aiEnabled.value = !checked;
+  }
+}
+
 function resetVisitorAccessConfig() {
   visitorSecretKey.value = '';
   visitorDomainWhitelist.value = '';
@@ -1853,7 +1930,29 @@ async function selectConversation(conv: any) {
   aiSuggestion.value = '';
   
   // AI应用使用客服全局设置，不跟随会话变化
-  
+
+  // 从API拉取完整会话详情（补充设备/地理位置等字段）
+  try {
+    const convDetail = await httpGet({ url: `/cs/conversation/${conv.id}` });
+    if (convDetail) {
+      const detail = convDetail.result || convDetail;
+      // 合并详情到当前会话对象（保留列表中已有的额外字段如 visitorNickname）
+      const fieldsToMerge = [
+        'userIp', 'userDevice', 'userOs', 'userOsVersion', 
+        'userBrowser', 'userBrowserVersion', 'userDeviceId',
+        'userCountry', 'userProvince', 'userCity',
+        'ownerAgentName', 'ownerAgentAvatar', 'source',
+      ];
+      for (const field of fieldsToMerge) {
+        if (detail[field] !== undefined && detail[field] !== null) {
+          conv[field] = detail[field];
+        }
+      }
+    }
+  } catch {
+    // 获取会话详情失败不影响主流程
+  }
+
   await loadMessages(conv.id);
   await loadVisitorInfo(conv.appId, conv.userId);
   await loadBlacklistStatus();
@@ -2299,8 +2398,8 @@ async function sendMessage() {
   }
 }
 
-// 接入会话
-async function assignConversation(conversationId: string) {
+// 接入会话（已隐藏待接入功能，保留函数以备后用）
+async function _assignConversation(conversationId: string) {
   try {
     const res = await httpPost({
       url: `/cs/conversation/${conversationId}/assign`,
@@ -2827,28 +2926,47 @@ function handleWsMessage(data: any) {
       }
       break;
     case 'new_conversation':
-      // 新会话通知 - 只在待接入列表中实时添加
+      // 新会话通知 - 自动分配模式下，新会话已分配给客服
       {
         console.log('[Workbench] 有新的会话接入');
         
-        // ★ 只有在待接入列表时才添加到当前列表
-        if (filter.value === 'unassigned') {
-          // 检查是否已经在列表中（避免重复）
-          const exists = conversations.value.find(c => c.id === data.conversationId);
-          if (!exists) {
-            // 构建新会话对象
+        const convOwnerAgentId = data.extra?.ownerAgentId;
+        const convStatus = data.extra?.status;
+        
+        // 检查是否已经在列表中（避免重复）
+        const exists = conversations.value.find(c => c.id === data.conversationId);
+        if (!exists) {
+          // 判断是否应该显示在当前列表
+          const shouldAdd = 
+            (filter.value === 'mine' && convOwnerAgentId === agentId.value) ||  // 我的：分配给当前客服
+            (filter.value === 'unassigned' && convStatus === 0) ||               // 待接入：未分配
+            (filter.value === 'all');                                              // 全部
+          
+          if (shouldAdd) {
             const newConv: any = {
               id: data.conversationId,
               userId: data.senderId,
               userName: data.senderName || '访客',
               appId: data.extra?.appId,
-              status: data.extra?.status || 0,
+              status: convStatus ?? 0,
               replyMode: data.extra?.replyMode || 0,
+              ownerAgentId: convOwnerAgentId,
               createTime: data.extra?.createTime || new Date().toISOString(),
               lastMessageTime: data.extra?.createTime || new Date().toISOString(),
               lastMessage: '会话已创建',
               unreadCount: 0,
               messageCount: 0,
+              // 设备信息
+              userIp: data.extra?.userIp,
+              userOs: data.extra?.userOs,
+              userOsVersion: data.extra?.userOsVersion,
+              userBrowser: data.extra?.userBrowser,
+              userBrowserVersion: data.extra?.userBrowserVersion,
+              userDeviceId: data.extra?.userDeviceId,
+              // 地理位置
+              userCountry: data.extra?.userCountry,
+              userProvince: data.extra?.userProvince,
+              userCity: data.extra?.userCity,
             };
             
             // 添加到列表头部
@@ -3228,6 +3346,78 @@ function formatMessageTime(time: string) {
 function formatDateTime(time: string) {
   if (!time) return '-';
   return new Date(time).toLocaleString('zh-CN');
+}
+
+// ==================== 设备/地理位置展示辅助函数 ====================
+
+function formatGeoLocation(conv: any): string {
+  if (!conv) return '-';
+  const parts: string[] = [];
+  if (conv.userCountry) parts.push(conv.userCountry);
+  if (conv.userProvince) parts.push(conv.userProvince);
+  if (conv.userCity && conv.userCity !== conv.userProvince) parts.push(conv.userCity);
+  return parts.length > 0 ? parts.join(' ') : '-';
+}
+
+function formatBrowserVersion(version: string): string {
+  if (!version) return '';
+  // 只显示主版本号，例如 "120.0.6099.109" → "120"
+  const dotIndex = version.indexOf('.');
+  return dotIndex > 0 ? version.substring(0, dotIndex) : version;
+}
+
+function getOsIcon(os: string): string {
+  if (!os) return '';
+  const name = os.toLowerCase();
+  if (name.includes('windows')) {
+    return '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M1 3.2L6.6 2.5V7.7H1V3.2ZM7.4 2.4L14.6 1.3V7.7H7.4V2.4ZM1 8.3H6.6V13.5L1 12.8V8.3ZM7.4 8.3H14.6V14.7L7.4 13.6V8.3Z" fill="#0078D4"/></svg>';
+  }
+  if (name.includes('android')) {
+    return '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4.2 2.8L3.2 1.2M11.8 2.8L12.8 1.2M3 6.5C3 5.4 3.4 4.4 4.2 3.6 5 2.8 6.2 2.4 7.5 2.2H8.5C9.8 2.4 11 2.8 11.8 3.6 12.6 4.4 13 5.4 13 6.5V10C13 10.3 12.9 10.5 12.7 10.7 12.5 10.9 12.3 11 12 11H4C3.7 11 3.5 10.9 3.3 10.7 3.1 10.5 3 10.3 3 10V6.5Z" stroke="#3DDC84" stroke-width="1.2" stroke-linecap="round"/><circle cx="5.5" cy="5.5" r="0.8" fill="#3DDC84"/><circle cx="10.5" cy="5.5" r="0.8" fill="#3DDC84"/><path d="M4 11V13.5M12 11V13.5M1.5 6.5V10M14.5 6.5V10" stroke="#3DDC84" stroke-width="1.2" stroke-linecap="round"/></svg>';
+  }
+  if (name.includes('ios') || name.includes('macos')) {
+    return '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M11.3 8.4C11.3 6.8 12.3 5.9 12.4 5.8 11.5 4.5 10.2 4.3 9.8 4.3 8.6 4.2 7.5 5 6.9 5 6.3 5 5.4 4.3 4.4 4.3 3.1 4.3 1.9 5.1 1.2 6.4 -0.3 9 0.8 12.7 2.3 14.5 3 15.4 3.8 16 4.7 16 5.7 16 6 15.4 7.1 15.4 8.2 15.4 8.5 16 9.4 16 10.4 16 11 15.4 11.7 14.5 12.5 13.5 13 12.6 13.1 12.2 11.3 11.1 11.3 8.4ZM9.3 3C9.9 2.3 10.3 1.3 10.2 0.3 9.4 0.4 8.4 0.8 7.7 1.5 7.1 2.1 6.6 3.2 6.8 4.1 7.6 4.2 8.6 3.7 9.3 3Z" fill="#555"/></svg>';
+  }
+  if (name.includes('linux')) {
+    return '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1C5.8 1 4 3.2 4 6C4 8 4.5 9.5 5.5 11C4.5 11.5 3.5 12.5 3.5 13.5C3.5 14.3 4.2 15 5 15H11C11.8 15 12.5 14.3 12.5 13.5C12.5 12.5 11.5 11.5 10.5 11C11.5 9.5 12 8 12 6C12 3.2 10.2 1 8 1Z" stroke="#333" stroke-width="1" fill="#FDB813"/><circle cx="6.5" cy="5" r="1" fill="#333"/><circle cx="9.5" cy="5" r="1" fill="#333"/><path d="M6.5 7.5Q8 9 9.5 7.5" stroke="#333" stroke-width="0.8" fill="none"/></svg>';
+  }
+  if (name.includes('chromeos')) {
+    return '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="#4285F4" stroke-width="1.5" fill="none"/><circle cx="8" cy="8" r="3" fill="#4285F4"/></svg>';
+  }
+  return '';
+}
+
+function getBrowserIcon(browser: string): string {
+  if (!browser) return '';
+  const name = browser.toLowerCase();
+  if (name.includes('chrome')) {
+    return '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" fill="none" stroke="#4285F4" stroke-width="1"/><circle cx="8" cy="8" r="2.8" fill="#4285F4"/><circle cx="8" cy="8" r="1.5" fill="white"/><path d="M8 5.2L12.5 5.2" stroke="#EA4335" stroke-width="1.5"/><path d="M5.6 9.4L3.3 5" stroke="#FBBC05" stroke-width="1.5"/><path d="M10.4 9.4L8 13.3" stroke="#34A853" stroke-width="1.5"/></svg>';
+  }
+  if (name.includes('safari')) {
+    return '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" fill="#1B8BF0" stroke="#1B8BF0" stroke-width="0.5"/><path d="M5 11L7 7L11 5L9 9Z" fill="white"/><circle cx="8" cy="8" r="0.8" fill="#EA4335"/></svg>';
+  }
+  if (name.includes('firefox')) {
+    return '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" fill="#FF9500"/><path d="M8 2C5.5 2 3.5 4 3.5 6.5C3.5 9 5.5 13 8 14C10.5 13 12.5 9 12.5 6.5C12.5 4 10.5 2 8 2Z" fill="#FF4500" opacity="0.7"/><circle cx="8" cy="7" r="3" fill="#FFD700" opacity="0.5"/></svg>';
+  }
+  if (name.includes('edge')) {
+    return '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1.5C4.4 1.5 1.5 4.4 1.5 8C1.5 10.2 2.6 12.1 4.2 13.2C4.8 11.8 6.3 10.8 8 10.8C9.5 10.8 10.8 11.6 11.5 12.8C13.3 11.7 14.5 9.9 14.5 8C14.5 4.4 11.6 1.5 8 1.5Z" fill="#0078D4"/><path d="M4.2 13.2C5.2 14 6.5 14.5 8 14.5C10.5 14.5 12.7 13 13.8 10.8C12.4 10 11.2 10.8 8 10.8C6.3 10.8 4.8 11.8 4.2 13.2Z" fill="#50E6FF"/></svg>';
+  }
+  if (name.includes('opera')) {
+    return '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" fill="#FF1B2D"/><ellipse cx="8" cy="8" rx="3" ry="5.5" fill="white" opacity="0.9"/></svg>';
+  }
+  if (name.includes('wechat')) {
+    return '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 3C3.2 3 1 4.8 1 7C1 8.3 1.8 9.5 3 10.2L2.5 12L4.5 11C5 11.2 5.5 11.3 6 11.3C6.2 11.3 6.3 11.3 6.5 11.2C6.2 10.8 6 10.3 6 9.8C6 7.8 7.8 6.2 10 6.2C10.2 6.2 10.3 6.2 10.5 6.2C10 4.3 8.2 3 6 3Z" fill="#51C332"/><path d="M14.5 9.8C14.5 8 12.5 6.5 10 6.5C7.5 6.5 5.5 8 5.5 9.8C5.5 11.5 7.5 13 10 13C10.5 13 11 12.9 11.5 12.7L13 13.5L12.7 11.8C13.8 11.2 14.5 10.5 14.5 9.8Z" fill="#51C332"/></svg>';
+  }
+  if (name.includes('qq')) {
+    return '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><ellipse cx="8" cy="9" rx="5" ry="5.5" fill="#12B7F5"/><circle cx="6.5" cy="7" r="1.2" fill="white"/><circle cx="9.5" cy="7" r="1.2" fill="white"/><circle cx="6.8" cy="7" r="0.5" fill="#333"/><circle cx="9.8" cy="7" r="0.5" fill="#333"/></svg>';
+  }
+  if (name.includes('uc')) {
+    return '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" fill="#F77F00"/><text x="8" y="11" text-anchor="middle" fill="white" font-size="8" font-weight="bold">UC</text></svg>';
+  }
+  if (name.includes('samsung')) {
+    return '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" fill="#1428A0"/><text x="8" y="11" text-anchor="middle" fill="white" font-size="6" font-weight="bold">S</text></svg>';
+  }
+  return '';
 }
 
 function getModeColor(mode: number) {
@@ -4360,6 +4550,12 @@ function restoreMessageScroll() {
     &.device-info {
       font-size: 12px;
       max-width: 160px;
+    }
+
+    &.device-info-icon {
+      display: inline-flex;
+      align-items: center;
+      font-size: 13px;
     }
   }
   

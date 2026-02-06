@@ -5,6 +5,65 @@
       <div class="fatal-desc">{{ fatalErrorMessage }}</div>
     </div>
     <template v-else>
+      <!-- 留言板模式（无在线客服时显示） -->
+      <div v-if="showLeaveMessageBoard" class="leave-message-board">
+        <div class="board-header">
+          <img class="app-avatar" :src="appInfo.avatar || defaultAvatar" />
+          <div class="board-title">
+            <span class="app-name">{{ appInfo.name || '在线客服' }}</span>
+            <span class="board-subtitle">{{ messageBoardConfig.subtitle || '客服不在线，请留言' }}</span>
+          </div>
+        </div>
+        <div class="board-body">
+          <a-form :model="leaveMessageForm" layout="vertical">
+            <a-form-item label="留言内容" :rules="[{required: true, message: '请输入留言内容'}]">
+              <a-textarea v-model:value="leaveMessageForm.content" placeholder="请输入您的留言" :rows="4" />
+            </a-form-item>
+            <a-form-item v-if="messageBoardConfig.fields?.name?.show" label="姓名"
+              :rules="messageBoardConfig.fields?.name?.required ? [{required: true, message: '请输入姓名'}] : []">
+              <a-input v-model:value="leaveMessageForm.name" placeholder="请输入姓名" />
+            </a-form-item>
+            <a-form-item v-if="messageBoardConfig.fields?.phone?.show" label="手机"
+              :rules="messageBoardConfig.fields?.phone?.required ? [{required: true, message: '请输入手机号'}] : []">
+              <a-input v-model:value="leaveMessageForm.phone" placeholder="请输入手机号" />
+            </a-form-item>
+            <a-form-item v-if="messageBoardConfig.fields?.email?.show" label="邮箱"
+              :rules="messageBoardConfig.fields?.email?.required ? [{required: true, message: '请输入邮箱'}] : []">
+              <a-input v-model:value="leaveMessageForm.email" placeholder="请输入邮箱" />
+            </a-form-item>
+            <a-form-item v-if="messageBoardConfig.fields?.qq?.show" label="QQ">
+              <a-input v-model:value="leaveMessageForm.qq" placeholder="请输入QQ号" />
+            </a-form-item>
+            <a-form-item v-if="messageBoardConfig.fields?.wechat?.show" label="微信">
+              <a-input v-model:value="leaveMessageForm.wechat" placeholder="请输入微信号" />
+            </a-form-item>
+            <a-form-item>
+              <a-button type="primary" block :loading="submittingLeaveMessage" @click="submitLeaveMessage">
+                提交留言
+              </a-button>
+            </a-form-item>
+          </a-form>
+          <div v-if="leaveMessageSubmitted" class="submit-success">
+            <CheckCircleOutlined style="font-size: 32px; color: #52c41a;" />
+            <p>留言已提交，客服会尽快回复您</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 正常聊天模式 -->
+      <template v-else>
+      <!-- 留言回复提醒卡片 -->
+      <div v-if="unreadReplies.length > 0" class="leave-message-replies">
+        <div v-for="reply in unreadReplies" :key="reply.id" class="reply-card">
+          <div class="reply-header">
+            <span class="reply-label">留言回复</span>
+            <a-button type="link" size="small" @click="dismissReply(reply.id)">关闭</a-button>
+          </div>
+          <div class="reply-original">您的留言：{{ reply.content || '-' }}</div>
+          <div class="reply-content">客服回复：{{ reply.reply }}</div>
+          <div class="reply-time">{{ reply.replyTime }}</div>
+        </div>
+      </div>
       <!-- 头部 -->
       <div class="chat-header">
         <div class="header-info">
@@ -195,6 +254,7 @@
           </div>
         </div>
       </a-modal>
+      </template><!-- 正常聊天模式 end -->
     </template>
   </div>
 </template>
@@ -203,7 +263,7 @@
 import { ref, onMounted, onUnmounted, nextTick, computed, watch } from 'vue';
 import MarkdownIt from 'markdown-it';
 import { message } from 'ant-design-vue';
-import { DeleteOutlined, MessageOutlined, SendOutlined, BulbOutlined } from '@ant-design/icons-vue';
+import { DeleteOutlined, MessageOutlined, SendOutlined, BulbOutlined, CheckCircleOutlined } from '@ant-design/icons-vue';
 import { defHttp } from '/@/utils/http/axios';
 import { useGlobSetting } from '/@/hooks/setting';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
@@ -257,6 +317,12 @@ function httpPost<T = any>(config: any, options: any = {}) {
     return Promise.reject(new Error('token invalid'));
   }
   return defHttp.post<T>({ ...config, headers: buildAuthHeaders(config) }, { ...silentRequestOptions, ...options });
+}
+function httpPut<T = any>(config: any, options: any = {}) {
+  if (fatalError.value) {
+    return Promise.reject(new Error('token invalid'));
+  }
+  return defHttp.put<T>({ ...config, headers: buildAuthHeaders(config) }, { ...silentRequestOptions, ...options });
 }
 
 // 应用信息
@@ -386,6 +452,14 @@ const conversationClosed = ref(false);  // 会话是否已结束
 const replyMode = ref(0);  // 回复模式: 0=AI自动, 1=手动
 const hasAgent = ref(false);  // 是否有客服接入
 
+// 留言板相关
+const showLeaveMessageBoard = ref(false);  // 是否显示留言板
+const messageBoardConfig = ref<any>({ subtitle: '客服不在线，请留言', fields: {} });
+const leaveMessageForm = ref<any>({ content: '', name: '', phone: '', email: '', qq: '', wechat: '' });
+const submittingLeaveMessage = ref(false);
+const leaveMessageSubmitted = ref(false);
+const unreadReplies = ref<any[]>([]);  // 未读留言回复列表
+
 const handleVisibilityChange = () => {
   if (document.hidden) return;
   if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -468,6 +542,14 @@ onMounted(async () => {
 
   // 获取或创建会话
   await initConversation();
+
+  // 如果是留言板模式，不需要后续操作
+  if (showLeaveMessageBoard.value) {
+    return;
+  }
+
+  // 加载未读留言回复
+  await loadUnreadReplies();
 
   // 加载历史消息
   await loadMessages();
@@ -728,6 +810,29 @@ function selectPresetQuestion(question: string) {
   sendMessage();
 }
 
+// 生成简单设备指纹（screen + timezone + platform + language 的 hash）
+function generateDeviceId(): string {
+  try {
+    const raw = [
+      navigator.platform,
+      screen.width,
+      screen.height,
+      screen.colorDepth,
+      Intl.DateTimeFormat().resolvedOptions().timeZone,
+      navigator.language,
+      navigator.hardwareConcurrency,
+    ].join('|');
+    let hash = 0;
+    for (let i = 0; i < raw.length; i++) {
+      hash = ((hash << 5) - hash) + raw.charCodeAt(i);
+      hash |= 0;
+    }
+    return Math.abs(hash).toString(16);
+  } catch {
+    return '';
+  }
+}
+
 // 初始化会话
 async function initConversation() {
   try {
@@ -740,8 +845,17 @@ async function initConversation() {
         if (convRes && convRes.status === 2) {
           // 会话已结束，清除存储并创建新会话
           localStorage.removeItem(`cs_conversation_${userId.value}`);
+        } else if (convRes && convRes.status === 0 && !convRes.ownerAgentId) {
+          // 旧会话未分配（上次无客服在线）→ 清除并重新创建，重新尝试分配客服
+          localStorage.removeItem(`cs_conversation_${userId.value}`);
         } else {
           conversationId.value = storedConvId;
+          if (convRes?.replyMode !== undefined) {
+            replyMode.value = convRes.replyMode;
+          }
+          if (convRes?.ownerAgentId) {
+            hasAgent.value = true;
+          }
           return;
         }
       } catch {
@@ -750,22 +864,36 @@ async function initConversation() {
       }
     }
 
-    // 创建新会话（不再传appId，AI应用由客服工作台选择）
+    // 创建新会话（后端会自动分配客服），附带设备指纹
     const res = await httpPost({
       url: '/cs/conversation/create',
       data: {
         userId: userId.value,
         userName: userName.value,
+        deviceId: generateDeviceId(),
       },
     });
     if (res) {
-      // 判断是否为 Result 包装
-      if (res.id) {
-        conversationId.value = res.id;
-        localStorage.setItem(`cs_conversation_${userId.value}`, res.id);
-      } else if (res.result && res.result.id) {
-        conversationId.value = res.result.id;
-        localStorage.setItem(`cs_conversation_${userId.value}`, res.result.id);
+      const conv = res.result || res;
+      if (conv.id) {
+        conversationId.value = conv.id;
+        localStorage.setItem(`cs_conversation_${userId.value}`, conv.id);
+        
+        // 检查是否有客服分配
+        if (conv.status === 0 && !conv.ownerAgentId) {
+          // 无在线客服 → 显示留言板
+          await loadMessageBoardConfig();
+          showLeaveMessageBoard.value = true;
+          return;
+        }
+        
+        // 有客服分配
+        if (conv.replyMode !== undefined) {
+          replyMode.value = conv.replyMode;
+        }
+        if (conv.ownerAgentId) {
+          hasAgent.value = true;
+        }
       }
     }
   } catch (e) {
@@ -778,6 +906,16 @@ async function initConversation() {
 // 加载访客AI应用信息
 async function loadVisitorAppInfo() {
   try {
+    // 先检查AI开关状态
+    const aiRes = await httpGet({ url: '/cs/agent/global/ai-enabled' });
+    const aiData = aiRes?.result || aiRes;
+    const aiEnabled = aiData?.enabled !== false;
+
+    if (!aiEnabled) {
+      // AI关闭时不加载AI应用信息
+      return;
+    }
+
     const res = await httpGet({ url: '/cs/agent/global/visitor-app' });
     const appId = res?.appId || res?.result?.appId;
     if (!appId) return;
@@ -795,6 +933,83 @@ async function loadVisitorAppInfo() {
     };
   } catch (e) {
     console.warn('[UserChat] 加载访客AI应用信息失败', e);
+  }
+}
+
+// 加载留言板配置
+async function loadMessageBoardConfig() {
+  try {
+    const res = await httpGet({ url: '/cs/agent/global/message-board' });
+    const data = res?.result || res;
+    if (data) {
+      messageBoardConfig.value = data;
+    }
+  } catch (e) {
+    console.warn('[UserChat] 加载留言板配置失败', e);
+  }
+}
+
+// 提交留言
+async function submitLeaveMessage() {
+  const form = leaveMessageForm.value;
+  if (!form.content?.trim()) {
+    message.warning('请输入留言内容');
+    return;
+  }
+  // 检查必填字段
+  const fields = messageBoardConfig.value.fields || {};
+  for (const [key, cfg] of Object.entries(fields) as [string, any][]) {
+    if (cfg.show && cfg.required && !form[key]?.trim()) {
+      const labels: Record<string, string> = { name: '姓名', phone: '手机', email: '邮箱', qq: 'QQ', wechat: '微信', image: '图片' };
+      message.warning(`请填写${labels[key] || key}`);
+      return;
+    }
+  }
+
+  submittingLeaveMessage.value = true;
+  try {
+    await httpPost({
+      url: '/cs/leaveMessage/submit',
+      data: {
+        userId: userId.value,
+        content: form.content,
+        name: form.name,
+        phone: form.phone,
+        email: form.email,
+        qq: form.qq,
+        wechat: form.wechat,
+      },
+    });
+    leaveMessageSubmitted.value = true;
+    message.success('留言已提交');
+  } catch (e) {
+    console.error('[UserChat] 提交留言失败', e);
+    message.error('提交失败，请稍后重试');
+  } finally {
+    submittingLeaveMessage.value = false;
+  }
+}
+
+// 加载未读留言回复
+async function loadUnreadReplies() {
+  if (!userId.value) return;
+  try {
+    const res = await httpGet({ url: '/cs/leaveMessage/byUser', params: { userId: userId.value } });
+    const data = res?.result || res;
+    if (Array.isArray(data) && data.length > 0) {
+      unreadReplies.value = data;
+    }
+  } catch (e) {
+    console.warn('[UserChat] 加载留言回复失败', e);
+  }
+}
+
+// 关闭留言回复提醒
+function dismissReply(replyId: string) {
+  unreadReplies.value = unreadReplies.value.filter(r => r.id !== replyId);
+  // 如果所有回复都已关闭，标记为已读
+  if (unreadReplies.value.length === 0 && userId.value) {
+    httpPut({ url: '/cs/leaveMessage/markRead', data: { userId: userId.value } }).catch(() => {});
   }
 }
 
@@ -1532,6 +1747,113 @@ watch(messages, () => {
   max-width: 800px;
   margin: 0 auto;
   background: #f5f5f5;
+}
+
+/* 留言板样式 */
+.leave-message-board {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  
+  .board-header {
+    display: flex;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid #f0f0f0;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: #fff;
+    
+    .app-avatar {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      margin-right: 12px;
+      object-fit: cover;
+    }
+    
+    .board-title {
+      display: flex;
+      flex-direction: column;
+      
+      .app-name {
+        font-size: 16px;
+        font-weight: 600;
+      }
+      
+      .board-subtitle {
+        font-size: 13px;
+        opacity: 0.9;
+        margin-top: 2px;
+      }
+    }
+  }
+  
+  .board-body {
+    flex: 1;
+    padding: 24px 20px;
+    overflow-y: auto;
+    
+    .submit-success {
+      text-align: center;
+      padding: 40px 0;
+      
+      p {
+        margin-top: 12px;
+        color: #52c41a;
+        font-size: 15px;
+      }
+    }
+  }
+}
+
+/* 留言回复卡片 */
+.leave-message-replies {
+  padding: 8px 12px;
+  background: #fffbe6;
+  border-bottom: 1px solid #ffe58f;
+  
+  .reply-card {
+    background: #fff;
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 6px;
+    border: 1px solid #ffe58f;
+    
+    &:last-child {
+      margin-bottom: 0;
+    }
+    
+    .reply-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+      
+      .reply-label {
+        font-weight: 600;
+        color: #fa8c16;
+        font-size: 13px;
+      }
+    }
+    
+    .reply-original {
+      font-size: 12px;
+      color: #999;
+      margin-bottom: 4px;
+    }
+    
+    .reply-content {
+      font-size: 13px;
+      color: #333;
+    }
+    
+    .reply-time {
+      font-size: 11px;
+      color: #bbb;
+      margin-top: 4px;
+    }
+  }
 }
 
 .chat-header {

@@ -43,6 +43,18 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     private static final String VISITOR_ACCESS_REDIS_KEY = "cs:global:visitor_access";
     private static final String VISITOR_ACCESS_CONFIG_KEY = "visitor_access";
 
+    /** AI开关配置 */
+    private static final String AI_ENABLED_REDIS_KEY = "cs:global:ai_enabled";
+    private static final String AI_ENABLED_CONFIG_KEY = "ai_enabled";
+
+    /** 对话分配配置 */
+    private static final String CONVERSATION_ASSIGN_REDIS_KEY = "cs:global:conversation_assign";
+    private static final String CONVERSATION_ASSIGN_CONFIG_KEY = "conversation_assign";
+
+    /** 留言板设置配置 */
+    private static final String MESSAGE_BOARD_REDIS_KEY = "cs:global:message_board";
+    private static final String MESSAGE_BOARD_CONFIG_KEY = "message_board";
+
     @Autowired
     private ICsAgentService csAgentService;
 
@@ -289,6 +301,162 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     public Result<String> generateVisitorAccessKey() {
         String key = UUID.randomUUID().toString().replace("-", "");
         return Result.OK(key);
+    }
+
+    // ==================== AI开关 ====================
+
+    /**
+     * 获取AI开关状态（全局）
+     */
+    @Operation(summary = "获取AI开关状态（全局）")
+    @org.jeecg.config.shiro.IgnoreAuth
+    @GetMapping("/global/ai-enabled")
+    public Result<java.util.Map<String, Object>> getAiEnabled() {
+        String value = redisTemplate.opsForValue().get(AI_ENABLED_REDIS_KEY);
+        if (value == null) {
+            value = getGlobalConfigValue(AI_ENABLED_CONFIG_KEY);
+            if (value != null) {
+                redisTemplate.opsForValue().set(AI_ENABLED_REDIS_KEY, value);
+            }
+        }
+        boolean enabled = value == null || "true".equalsIgnoreCase(value);
+        java.util.Map<String, Object> result = new java.util.HashMap<>();
+        result.put("enabled", enabled);
+        return Result.OK(result);
+    }
+
+    /**
+     * 设置AI开关（全局）
+     */
+    @Operation(summary = "设置AI开关（全局）")
+    @PutMapping("/global/ai-enabled")
+    public Result<String> setAiEnabled(@RequestBody java.util.Map<String, Object> params) {
+        Boolean enabled = (Boolean) params.get("enabled");
+        if (enabled == null) {
+            enabled = true;
+        }
+        String value = enabled.toString();
+        saveGlobalConfigValue(AI_ENABLED_CONFIG_KEY, value);
+        redisTemplate.opsForValue().set(AI_ENABLED_REDIS_KEY, value);
+        log.info("[CS-Agent] AI开关已更新: enabled={}", enabled);
+        return Result.OK("设置成功");
+    }
+
+    // ==================== 对话分配配置 ====================
+
+    /**
+     * 获取对话分配配置（全局）
+     */
+    @Operation(summary = "获取对话分配配置（全局）")
+    @GetMapping("/global/conversation-assign")
+    public Result<JSONObject> getConversationAssignConfig() {
+        String json = redisTemplate.opsForValue().get(CONVERSATION_ASSIGN_REDIS_KEY);
+        if (json == null || json.isEmpty()) {
+            json = getGlobalConfigValue(CONVERSATION_ASSIGN_CONFIG_KEY);
+            if (json != null && !json.isEmpty()) {
+                redisTemplate.opsForValue().set(CONVERSATION_ASSIGN_REDIS_KEY, json);
+            }
+        }
+        JSONObject result;
+        if (json != null && !json.isEmpty()) {
+            try {
+                result = JSONObject.parseObject(json);
+            } catch (Exception e) {
+                log.warn("[CS-Agent] 解析对话分配配置失败", e);
+                result = getDefaultConversationAssignConfig();
+            }
+        } else {
+            result = getDefaultConversationAssignConfig();
+        }
+        return Result.OK(result);
+    }
+
+    /**
+     * 保存对话分配配置（全局）
+     */
+    @Operation(summary = "保存对话分配配置（全局）")
+    @PutMapping("/global/conversation-assign")
+    public Result<String> setConversationAssignConfig(@RequestBody JSONObject config) {
+        String json = config.toJSONString();
+        saveGlobalConfigValue(CONVERSATION_ASSIGN_CONFIG_KEY, json);
+        redisTemplate.opsForValue().set(CONVERSATION_ASSIGN_REDIS_KEY, json);
+        log.info("[CS-Agent] 对话分配配置已更新");
+        return Result.OK("设置成功");
+    }
+
+    private JSONObject getDefaultConversationAssignConfig() {
+        JSONObject config = new JSONObject();
+        config.put("assignMode", "saturation");
+        JSONObject inherit = new JSONObject();
+        inherit.put("enabled", true);
+        inherit.put("expireMinutes", 60);
+        config.put("inheritLastAgent", inherit);
+        JSONObject hold = new JSONObject();
+        hold.put("minutes", 10);
+        config.put("conversationHold", hold);
+        JSONObject timeout = new JSONObject();
+        timeout.put("enabled", false);
+        timeout.put("seconds", 20);
+        config.put("agentTimeoutReminder", timeout);
+        return config;
+    }
+
+    // ==================== 留言板设置 ====================
+
+    /**
+     * 获取留言板设置（全局）
+     */
+    @Operation(summary = "获取留言板设置（全局）")
+    @org.jeecg.config.shiro.IgnoreAuth
+    @GetMapping("/global/message-board")
+    public Result<JSONObject> getMessageBoardConfig() {
+        String json = redisTemplate.opsForValue().get(MESSAGE_BOARD_REDIS_KEY);
+        if (json == null || json.isEmpty()) {
+            json = getGlobalConfigValue(MESSAGE_BOARD_CONFIG_KEY);
+            if (json != null && !json.isEmpty()) {
+                redisTemplate.opsForValue().set(MESSAGE_BOARD_REDIS_KEY, json);
+            }
+        }
+        JSONObject result;
+        if (json != null && !json.isEmpty()) {
+            try {
+                result = JSONObject.parseObject(json);
+            } catch (Exception e) {
+                log.warn("[CS-Agent] 解析留言板设置失败", e);
+                result = getDefaultMessageBoardConfig();
+            }
+        } else {
+            result = getDefaultMessageBoardConfig();
+        }
+        return Result.OK(result);
+    }
+
+    /**
+     * 保存留言板设置（全局）
+     */
+    @Operation(summary = "保存留言板设置（全局）")
+    @PutMapping("/global/message-board")
+    public Result<String> setMessageBoardConfig(@RequestBody JSONObject config) {
+        String json = config.toJSONString();
+        saveGlobalConfigValue(MESSAGE_BOARD_CONFIG_KEY, json);
+        redisTemplate.opsForValue().set(MESSAGE_BOARD_REDIS_KEY, json);
+        log.info("[CS-Agent] 留言板设置已更新");
+        return Result.OK("设置成功");
+    }
+
+    private JSONObject getDefaultMessageBoardConfig() {
+        JSONObject config = new JSONObject();
+        config.put("subtitle", "客服不在线，请留言");
+        JSONObject fields = new JSONObject();
+        String[] fieldNames = {"name", "phone", "email", "qq", "wechat", "image"};
+        for (String name : fieldNames) {
+            JSONObject field = new JSONObject();
+            field.put("show", "name".equals(name));
+            field.put("required", "name".equals(name));
+            fields.put(name, field);
+        }
+        config.put("fields", fields);
+        return config;
     }
 
     private String getGlobalConfigValue(String configKey) {

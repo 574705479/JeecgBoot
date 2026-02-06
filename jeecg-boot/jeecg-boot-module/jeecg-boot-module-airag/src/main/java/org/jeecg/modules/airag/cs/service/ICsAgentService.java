@@ -57,11 +57,19 @@ public interface ICsAgentService extends IService<CsAgent> {
     List<CsAgent> getAvailableAgents();
 
     /**
-     * 自动分配客服（选择接待数最少的）
+     * 自动分配客服（根据全局配置的分配策略）
      * 
      * @return 分配到的客服，如果没有可用客服返回null
      */
     CsAgent assignAgent();
+
+    /**
+     * 自动分配客服（支持继承上次客服）
+     * 
+     * @param lastAgentId 上次服务该用户的客服ID（可为null）
+     * @return 分配到的客服，如果没有可用客服返回null
+     */
+    CsAgent assignAgent(String lastAgentId);
 
     /**
      * 增加客服当前接待数
