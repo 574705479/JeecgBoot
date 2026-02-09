@@ -284,6 +284,8 @@ CREATE TABLE `cs_agent`  (
   `update_by` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '更新人',
   `update_time` datetime NULL DEFAULT NULL COMMENT '更新时间',
   `role` int NULL DEFAULT 0 COMMENT '角色: 0-普通客服 1-管理者(可监控所有会话)',
+  `parent_agent_id` varchar(32) NULL DEFAULT NULL COMMENT '父客服ID(管理员客服创建的子客服)',
+  `allowed_menus` text NULL COMMENT '可见菜单列表(JSON数组)',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uk_user_id`(`user_id` ASC) USING BTREE,
   INDEX `idx_status`(`status` ASC) USING BTREE
@@ -409,6 +411,75 @@ CREATE TABLE `cs_ip_geo_cache`  (
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = 'IP地理位置缓存表' ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
+-- Table structure for cs_ip_blacklist
+-- ----------------------------
+DROP TABLE IF EXISTS `cs_ip_blacklist`;
+CREATE TABLE `cs_ip_blacklist` (
+  `id` varchar(36) NOT NULL COMMENT '主键',
+  `ip` varchar(50) NOT NULL COMMENT 'IP或CIDR段',
+  `reason` varchar(500) DEFAULT NULL COMMENT '拉黑原因',
+  `operator` varchar(100) DEFAULT NULL COMMENT '操作人',
+  `ban_date` datetime DEFAULT NULL COMMENT '拉黑日期',
+  `create_by` varchar(50) DEFAULT NULL COMMENT '创建人',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `update_by` varchar(50) DEFAULT NULL COMMENT '更新人',
+  `update_time` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_ip` (`ip`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='访客IP黑名单';
+
+-- ----------------------------
+-- Table structure for cs_visitor_blacklist
+-- ----------------------------
+DROP TABLE IF EXISTS `cs_visitor_blacklist`;
+CREATE TABLE `cs_visitor_blacklist` (
+  `id` varchar(36) NOT NULL COMMENT '主键',
+  `visitor_id` varchar(100) NOT NULL COMMENT '访客外部用户ID',
+  `visitor_name` varchar(200) DEFAULT NULL COMMENT '访客名称',
+  `reason` varchar(500) DEFAULT NULL COMMENT '拉黑原因',
+  `operator` varchar(100) DEFAULT NULL COMMENT '操作人',
+  `ban_date` datetime DEFAULT NULL COMMENT '拉黑日期',
+  `last_visit_time` datetime DEFAULT NULL COMMENT '最近访问时间',
+  `create_by` varchar(50) DEFAULT NULL COMMENT '创建人',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `update_by` varchar(50) DEFAULT NULL COMMENT '更新人',
+  `update_time` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_visitor_id` (`visitor_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='访客黑名单';
+
+-- ----------------------------
+-- Table structure for cs_agent_ip_whitelist
+-- ----------------------------
+DROP TABLE IF EXISTS `cs_agent_ip_whitelist`;
+CREATE TABLE `cs_agent_ip_whitelist` (
+  `id` varchar(36) NOT NULL COMMENT '主键',
+  `ip` varchar(50) NOT NULL COMMENT 'IP或CIDR段',
+  `remark` varchar(500) DEFAULT NULL COMMENT '备注',
+  `create_by` varchar(50) DEFAULT NULL COMMENT '创建人',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `update_by` varchar(50) DEFAULT NULL COMMENT '更新人',
+  `update_time` datetime DEFAULT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='客服IP白名单';
+
+-- ----------------------------
+-- Table structure for cs_agent_login_log
+-- ----------------------------
+DROP TABLE IF EXISTS `cs_agent_login_log`;
+CREATE TABLE `cs_agent_login_log` (
+  `id` varchar(36) NOT NULL COMMENT '主键',
+  `login_date` datetime DEFAULT NULL COMMENT '日期',
+  `username` varchar(100) DEFAULT NULL COMMENT '账号',
+  `event` varchar(50) DEFAULT NULL COMMENT '事件',
+  `ip` varchar(50) DEFAULT NULL COMMENT 'IP地址',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_username` (`username`),
+  KEY `idx_login_date` (`login_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='客服登录日志';
+
+-- ----------------------------
 -- Table structure for cs_global_config
 -- ----------------------------
 DROP TABLE IF EXISTS `cs_global_config`;
@@ -427,7 +498,8 @@ INSERT INTO `cs_global_config` (`config_key`, `config_value`, `create_time`, `up
 ('ai_enabled', 'true', NOW(), NOW()),
 ('conversation_assign', '{"assignMode":"saturation","inheritLastAgent":{"enabled":true,"expireMinutes":60},"conversationHold":{"minutes":10},"agentTimeoutReminder":{"enabled":false,"seconds":20}}', NOW(), NOW()),
 ('message_board', '{"subtitle":"客服不在线，请留言","fields":{"name":{"show":true,"required":true},"phone":{"show":true,"required":false},"email":{"show":true,"required":false},"qq":{"show":false,"required":false},"wechat":{"show":false,"required":false},"image":{"show":true,"required":false}}}', NOW(), NOW()),
-('auto_messages', '{"defaultLang":"zh-CN","languages":{"zh-CN":{"label":"中文简体","messages":[]},"zh-TW":{"label":"中文繁體","messages":[]},"en":{"label":"English","messages":[]}}}', NOW(), NOW());
+('auto_messages', '{"defaultLang":"zh-CN","languages":{"zh-CN":{"label":"中文简体","messages":[]},"zh-TW":{"label":"中文繁體","messages":[]},"en":{"label":"English","messages":[]}}}', NOW(), NOW()),
+('agent_ip_whitelist_enabled', 'false', NOW(), NOW());
 
 -- ----------------------------
 -- Table structure for cs_leave_message
@@ -3773,6 +3845,12 @@ INSERT INTO `sys_permission` VALUES ('cs_conversation_assign', 'cs_parent', '对
 INSERT INTO `sys_permission` VALUES ('cs_message_board_settings', 'cs_parent', '留言板设置', '/cs/messageBoardSettings', 'super/airag/cs/messageBoard/settings', 1, NULL, NULL, 1, NULL, '1', 8.00, 0, 'ant-design:form-outlined', 1, 0, 0, 0, '留言板设置', 'admin', '2026-02-06 10:00:00', NULL, NULL, 0, 0, '1', 0);
 INSERT INTO `sys_permission` VALUES ('cs_message_board_records', 'cs_parent', '留言记录', '/cs/messageBoardRecords', 'super/airag/cs/messageBoard/records', 1, NULL, NULL, 1, NULL, '1', 9.00, 0, 'ant-design:file-text-outlined', 1, 0, 0, 0, '留言记录管理', 'admin', '2026-02-06 10:00:00', NULL, NULL, 0, 0, '1', 0);
 INSERT INTO `sys_permission` VALUES ('cs_auto_message', 'cs_parent', '自动消息', '/cs/autoMessage', 'super/airag/cs/autoMessage/index', 1, NULL, NULL, 1, NULL, '1', 5.00, 0, 'ant-design:notification-outlined', 1, 1, 0, 0, '自动消息配置', 'admin', '2026-02-06 17:00:00', NULL, NULL, 0, 0, '1', 0);
+INSERT INTO `sys_permission` VALUES ('cs_sub_agent', 'cs_parent', '团队管理', '/cs/subAgent', 'super/airag/cs/subAgent/index', 1, NULL, NULL, 1, NULL, '1', 2.50, 0, 'ant-design:usergroup-add-outlined', 1, 0, 0, 0, '子客服管理', 'admin', '2026-02-06 20:00:00', NULL, NULL, 0, 0, '1', 0);
+INSERT INTO `sys_permission` VALUES ('cs_security', '', '安全设置', '/security', 'layouts/RouteView', 1, NULL, NULL, 0, NULL, '1', 2.30, 0, 'ant-design:safety-certificate-outlined', 0, 0, 0, 0, NULL, 'admin', '2026-02-09 00:00:00', NULL, NULL, 0, 0, '1', 0);
+INSERT INTO `sys_permission` VALUES ('cs_ip_blacklist', 'cs_security', '访客IP黑名单', '/security/ipBlacklist', 'super/airag/cs/security/ipBlacklist/index', 1, NULL, NULL, 1, NULL, '1', 1.00, 0, 'ant-design:stop-outlined', 0, 0, 0, 0, NULL, 'admin', '2026-02-09 00:00:00', NULL, NULL, 0, 0, '1', 0);
+INSERT INTO `sys_permission` VALUES ('cs_visitor_blacklist', 'cs_security', '访客黑名单', '/security/visitorBlacklist', 'super/airag/cs/security/visitorBlacklist/index', 1, NULL, NULL, 1, NULL, '1', 2.00, 0, 'ant-design:user-delete-outlined', 0, 0, 0, 0, NULL, 'admin', '2026-02-09 00:00:00', NULL, NULL, 0, 0, '1', 0);
+INSERT INTO `sys_permission` VALUES ('cs_agent_ip_whitelist', 'cs_security', '客服IP白名单', '/security/agentIpWhitelist', 'super/airag/cs/security/agentIpWhitelist/index', 1, NULL, NULL, 1, NULL, '1', 3.00, 0, 'ant-design:check-circle-outlined', 0, 0, 0, 0, NULL, 'admin', '2026-02-09 00:00:00', NULL, NULL, 0, 0, '1', 0);
+INSERT INTO `sys_permission` VALUES ('cs_agent_login_log', 'cs_security', '客服登录日志', '/security/loginLog', 'super/airag/cs/security/loginLog/index', 1, NULL, NULL, 1, NULL, '1', 4.00, 0, 'ant-design:file-text-outlined', 0, 0, 0, 0, NULL, 'admin', '2026-02-09 00:00:00', NULL, NULL, 0, 0, '1', 0);
 INSERT INTO `sys_permission` VALUES ('d7d6e2e4e2934f2c9385a623fd98c6f3', '', '系统管理', '/isystem', 'layouts/RouteView', 1, NULL, NULL, 0, NULL, NULL, 4.00, 0, 'ant-design:setting', 0, 0, 0, 0, NULL, NULL, '2018-12-25 20:34:38', 'admin', '2025-06-25 14:24:07', 0, 0, NULL, 0);
 INSERT INTO `sys_permission` VALUES ('f15543b0263cf6c5fac85afdd3eba3f2', '3f915b2769fc80648e92d04e84ca059d', '用户导入', '', NULL, 0, NULL, NULL, 2, 'system:user:import', '1', 1.00, 0, NULL, 1, 0, 0, 0, NULL, 'admin', '2019-05-13 19:15:27', 'admin', '2022-06-30 15:05:12', 0, 0, '1', 0);
 
@@ -3904,7 +3982,8 @@ CREATE TABLE `sys_role`  (
 -- ----------------------------
 -- Records of sys_role
 -- ----------------------------
-INSERT INTO `sys_role` VALUES ('2013531033363599361', '客服', '10002', NULL, 'admin', '2026-01-20 16:36:23', NULL, NULL, 0);
+INSERT INTO `sys_role` VALUES ('cs_admin_agent_role_001', '管理员客服', 'cs_admin_agent', '管理员客服，拥有完整在线客服权限及团队管理', 'admin', '2026-02-06 20:00:00', NULL, NULL, 0);
+INSERT INTO `sys_role` VALUES ('cs_sub_agent_role_001', '子客服', 'cs_sub_agent', '管理员客服创建的子客服角色', 'admin', '2026-02-06 20:00:00', NULL, NULL, 0);
 INSERT INTO `sys_role` VALUES ('f6817f48af4fb3af11b9e8bf182f618b', '管理员', 'admin', '管理员', NULL, '2020-12-21 18:03:39', 'admin', '2025-07-30 15:17:55', 0);
 
 -- ----------------------------
@@ -4037,43 +4116,69 @@ INSERT INTO `sys_role_permission` VALUES ('1995391337201659909', 'f6817f48af4fb3
 INSERT INTO `sys_role_permission` VALUES ('1995391337201659910', 'f6817f48af4fb3af11b9e8bf182f618b', '1930222558582472705', NULL, '2025-12-01 15:15:42', '0:0:0:0:0:0:0:1');
 INSERT INTO `sys_role_permission` VALUES ('1ac1688ef8456f384091a03d88a89ab1', '52b0cf022ac4187b2a70dfa4f8b2d940', '693ce69af3432bd00be13c3971a57961', NULL, NULL, NULL);
 INSERT INTO `sys_role_permission` VALUES ('1fe4d408b85f19618c15bcb768f0ec22', '1750a8fb3e6d90cb7957c02de1dc8e59', '9502685863ab87f0ad1134142788a385', NULL, NULL, NULL);
-INSERT INTO `sys_role_permission` VALUES ('2013531115202859010', '2013531033363599361', 'cs_parent', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773569', '2013531033363599361', 'cs_workbench', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773570', '2013531033363599361', 'cs_agent', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773571', '2013531033363599361', 'cs_conversation', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773572', '2013531033363599361', 'cs_quick_reply', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773573', '2013531033363599361', 'cs_statistics', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('cs_conv_assign_perm_02', '2013531033363599361', 'cs_conversation_assign', NULL, '2026-02-06 10:00:00', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('cs_mb_settings_perm_02', '2013531033363599361', 'cs_message_board_settings', NULL, '2026-02-06 10:00:00', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('cs_mb_records_perm_02', '2013531033363599361', 'cs_message_board_records', NULL, '2026-02-06 10:00:00', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('cs_auto_msg_perm_02', '2013531033363599361', 'cs_auto_message', NULL, '2026-02-06 17:00:00', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773574', '2013531033363599361', '1892553163993931777', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773575', '2013531033363599361', '1893865471550578689', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773576', '2013531033363599361', '1930221213607591937', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773577', '2013531033363599361', '1930221335938662401', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773578', '2013531033363599361', '1892557342028226561', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773579', '2013531033363599361', '1930221570324758530', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773580', '2013531033363599361', '1930221637551063042', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773581', '2013531033363599361', '1930221702164316161', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773582', '2013531033363599361', '1930221774230847490', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773583', '2013531033363599361', '1930221983555977217', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773584', '2013531033363599361', '1930222066120851457', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773585', '2013531033363599361', '1930222218734796802', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773586', '2013531033363599361', '1930222295012409345', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773587', '2013531033363599361', '1930222395180777474', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773588', '2013531033363599361', '1890213291321749505', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773589', '2013531033363599361', '1930222862556266498', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773590', '2013531033363599361', '1930222953853681666', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773591', '2013531033363599361', '1930223034757611522', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773592', '2013531033363599361', '1930223114757611522', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773593', '2013531033363599361', '1930223132619112449', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773594', '2013531033363599361', '1892553778493022209', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773595', '2013531033363599361', '1930222558582472705', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773596', '2013531033363599361', '1930222617197871105', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773597', '2013531033363599361', '1930222679269376001', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773598', '2013531033363599361', '1895401981290643458', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773599', '2013531033363599361', '1980223355087781889', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
-INSERT INTO `sys_role_permission` VALUES ('2013531115265773600', '2013531033363599361', '1912753560201089025', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_parent', 'cs_admin_agent_role_001', 'cs_parent', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_workbench', 'cs_admin_agent_role_001', 'cs_workbench', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_agent', 'cs_admin_agent_role_001', 'cs_agent', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_conversation', 'cs_admin_agent_role_001', 'cs_conversation', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_conv_assign', 'cs_admin_agent_role_001', 'cs_conversation_assign', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_auto_msg', 'cs_admin_agent_role_001', 'cs_auto_message', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_quick_reply', 'cs_admin_agent_role_001', 'cs_quick_reply', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_statistics', 'cs_admin_agent_role_001', 'cs_statistics', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_mb_settings', 'cs_admin_agent_role_001', 'cs_message_board_settings', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_mb_records', 'cs_admin_agent_role_001', 'cs_message_board_records', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_sub_agent', 'cs_admin_agent_role_001', 'cs_sub_agent', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_airag_parent', 'cs_admin_agent_role_001', '1892553163993931777', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_airag_app', 'cs_admin_agent_role_001', '1893865471550578689', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_airag_kb', 'cs_admin_agent_role_001', '1892557342028226561', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_airag_flow', 'cs_admin_agent_role_001', '1890213291321749505', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_airag_model', 'cs_admin_agent_role_001', '1892553778493022209', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_airag_chat', 'cs_admin_agent_role_001', '1895401981290643458', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_airag_ocr', 'cs_admin_agent_role_001', '1912753560201089025', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_airag_mcp', 'cs_admin_agent_role_001', '1980223355087781889', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_airag_app_edit', 'cs_admin_agent_role_001', '1930221213607591937', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_airag_app_del', 'cs_admin_agent_role_001', '1930221335938662401', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_airag_kb_add', 'cs_admin_agent_role_001', '1930221570324758530', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_airag_kb_edit', 'cs_admin_agent_role_001', '1930221637551063042', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_airag_kb_rebuild', 'cs_admin_agent_role_001', '1930221702164316161', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_airag_kb_del', 'cs_admin_agent_role_001', '1930221774230847490', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_airag_kb_doc_edit', 'cs_admin_agent_role_001', '1930221983555977217', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_airag_kb_doc_zip', 'cs_admin_agent_role_001', '1930222066120851457', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_airag_kb_doc_rb', 'cs_admin_agent_role_001', '1930222218734796802', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_airag_kb_doc_bd', 'cs_admin_agent_role_001', '1930222295012409345', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_airag_kb_doc_da', 'cs_admin_agent_role_001', '1930222395180777474', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_airag_model_add', 'cs_admin_agent_role_001', '1930222558582472705', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_airag_model_edit', 'cs_admin_agent_role_001', '1930222617197871105', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_airag_model_del', 'cs_admin_agent_role_001', '1930222679269376001', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_airag_flow_add', 'cs_admin_agent_role_001', '1930222862556266498', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_airag_flow_edit', 'cs_admin_agent_role_001', '1930222953853681666', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_airag_flow_save', 'cs_admin_agent_role_001', '1930223034757611522', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_airag_flow_dbg', 'cs_admin_agent_role_001', '1930223114757611522', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_airag_flow_del', 'cs_admin_agent_role_001', '1930223132619112449', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_brand', 'cs_admin_agent_role_001', 'cs_brand_config', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_brand_save', 'cs_admin_agent_role_001', 'cs_brand_save', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_admin_perm_sys_parent', 'cs_admin_agent_role_001', 'd7d6e2e4e2934f2c9385a623fd98c6f3', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_sec_admin_parent', 'f6817f48af4fb3af11b9e8bf182f618b', 'cs_security', NULL, '2026-02-09 00:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_sec_admin_ipbl', 'f6817f48af4fb3af11b9e8bf182f618b', 'cs_ip_blacklist', NULL, '2026-02-09 00:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_sec_admin_vbl', 'f6817f48af4fb3af11b9e8bf182f618b', 'cs_visitor_blacklist', NULL, '2026-02-09 00:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_sec_admin_wl', 'f6817f48af4fb3af11b9e8bf182f618b', 'cs_agent_ip_whitelist', NULL, '2026-02-09 00:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_sec_admin_log', 'f6817f48af4fb3af11b9e8bf182f618b', 'cs_agent_login_log', NULL, '2026-02-09 00:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_sec_cadmin_parent', 'cs_admin_agent_role_001', 'cs_security', NULL, '2026-02-09 00:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_sec_cadmin_ipbl', 'cs_admin_agent_role_001', 'cs_ip_blacklist', NULL, '2026-02-09 00:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_sec_cadmin_vbl', 'cs_admin_agent_role_001', 'cs_visitor_blacklist', NULL, '2026-02-09 00:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_sec_cadmin_wl', 'cs_admin_agent_role_001', 'cs_agent_ip_whitelist', NULL, '2026-02-09 00:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_sec_cadmin_log', 'cs_admin_agent_role_001', 'cs_agent_login_log', NULL, '2026-02-09 00:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_sub_perm_parent', 'cs_sub_agent_role_001', 'cs_parent', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_sub_perm_workbench', 'cs_sub_agent_role_001', 'cs_workbench', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_sub_perm_conversation', 'cs_sub_agent_role_001', 'cs_conversation', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_sub_perm_conv_assign', 'cs_sub_agent_role_001', 'cs_conversation_assign', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_sub_perm_auto_msg', 'cs_sub_agent_role_001', 'cs_auto_message', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_sub_perm_quick_reply', 'cs_sub_agent_role_001', 'cs_quick_reply', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_sub_perm_statistics', 'cs_sub_agent_role_001', 'cs_statistics', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_sub_perm_mb_settings', 'cs_sub_agent_role_001', 'cs_message_board_settings', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_sub_perm_mb_records', 'cs_sub_agent_role_001', 'cs_message_board_records', NULL, '2026-02-06 20:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_sec_sub_parent', 'cs_sub_agent_role_001', 'cs_security', NULL, '2026-02-09 00:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_sec_sub_ipbl', 'cs_sub_agent_role_001', 'cs_ip_blacklist', NULL, '2026-02-09 00:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_sec_sub_vbl', 'cs_sub_agent_role_001', 'cs_visitor_blacklist', NULL, '2026-02-09 00:00:00', '127.0.0.1');
 INSERT INTO `sys_role_permission` VALUES ('2013784686234210306', 'f6817f48af4fb3af11b9e8bf182f618b', '1596335805278990338', NULL, '2026-01-21 09:24:18', '0:0:0:0:0:0:0:1');
 INSERT INTO `sys_role_permission` VALUES ('2013784686234210307', 'f6817f48af4fb3af11b9e8bf182f618b', '1596141938193747970', NULL, '2026-01-21 09:24:18', '0:0:0:0:0:0:0:1');
 INSERT INTO `sys_role_permission` VALUES ('248d288586c6ff3bd14381565df84163', '52b0cf022ac4187b2a70dfa4f8b2d940', '3f915b2769fc80648e92d04e84ca059d', NULL, NULL, NULL);
@@ -4256,6 +4361,7 @@ INSERT INTO `sys_role_permission` VALUES ('cs_conv_assign_perm_01', 'f6817f48af4
 INSERT INTO `sys_role_permission` VALUES ('cs_mb_settings_perm_01', 'f6817f48af4fb3af11b9e8bf182f618b', 'cs_message_board_settings', NULL, '2026-02-06 10:00:00', '127.0.0.1');
 INSERT INTO `sys_role_permission` VALUES ('cs_mb_records_perm_01', 'f6817f48af4fb3af11b9e8bf182f618b', 'cs_message_board_records', NULL, '2026-02-06 10:00:00', '127.0.0.1');
 INSERT INTO `sys_role_permission` VALUES ('cs_auto_msg_perm_01', 'f6817f48af4fb3af11b9e8bf182f618b', 'cs_auto_message', NULL, '2026-02-06 17:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_sub_agent_perm_01', 'f6817f48af4fb3af11b9e8bf182f618b', 'cs_sub_agent', NULL, '2026-02-06 20:00:00', '127.0.0.1');
 INSERT INTO `sys_role_permission` VALUES ('e3e922673f4289b18366bb51b6200f17', '52b0cf022ac4187b2a70dfa4f8b2d940', '45c966826eeff4c99b8f8ebfe74511fc', NULL, NULL, NULL);
 INSERT INTO `sys_role_permission` VALUES ('f17ab8ad1e71341140857ef4914ef297', '21c5a3187763729408b40afb0d0fdfa8', '732d48f8e0abe99fe6a23d18a3171cd1', NULL, NULL, NULL);
 INSERT INTO `sys_role_permission` VALUES ('fed41a4671285efb266cd404f24dd378', '52b0cf022ac4187b2a70dfa4f8b2d940', '00a2a0ae65cdca5e93209cdbde97cbe6', NULL, NULL, NULL);
@@ -4711,8 +4817,8 @@ CREATE TABLE `sys_user_role`  (
 -- ----------------------------
 -- Records of sys_user_role
 -- ----------------------------
-INSERT INTO `sys_user_role` VALUES ('2013804772537962497', '2011347033756512258', '2013531033363599361', 0);
-INSERT INTO `sys_user_role` VALUES ('2013804798072885249', '2011347178300616706', '2013531033363599361', 0);
+INSERT INTO `sys_user_role` VALUES ('2013804772537962497', '2011347033756512258', 'cs_admin_agent_role_001', 0);
+INSERT INTO `sys_user_role` VALUES ('2013804798072885249', '2011347178300616706', 'cs_admin_agent_role_001', 0);
 INSERT INTO `sys_user_role` VALUES ('2013872767259951106', 'e9ca23d68d884d4ebb19d07889727dae', 'f6817f48af4fb3af11b9e8bf182f618b', 0);
 INSERT INTO `sys_user_role` VALUES ('b3ffd9311a1ca296c44e2409b547384f', '01b802058ea94b978a2c96f4807f6b48', '1', 0);
 INSERT INTO `sys_user_role` VALUES ('ee45d0343ecec894b6886effc92cb0b7', '4d8fef4667574b24a9ccfedaf257810c', 'f6817f48af4fb3af11b9e8bf182f618b', 0);

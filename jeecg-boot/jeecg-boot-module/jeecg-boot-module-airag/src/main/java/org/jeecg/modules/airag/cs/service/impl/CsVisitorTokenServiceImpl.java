@@ -2,19 +2,27 @@ package org.jeecg.modules.airag.cs.service.impl;
 
 import com.alibaba.fastjson.JSONObject;
 import lombok.extern.slf4j.Slf4j;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.jeecg.common.api.CommonAPI;
 import org.jeecg.common.system.util.JwtUtil;
 import org.jeecg.common.system.vo.LoginUser;
 import org.jeecg.common.util.oConvertUtils;
 import org.jeecg.modules.airag.cs.entity.CsGlobalConfig;
+import org.jeecg.modules.airag.cs.entity.CsIpBlacklist;
+import org.jeecg.modules.airag.cs.entity.CsVisitorBlacklist;
 import org.jeecg.modules.airag.cs.mapper.CsGlobalConfigMapper;
+import org.jeecg.modules.airag.cs.mapper.CsIpBlacklistMapper;
+import org.jeecg.modules.airag.cs.mapper.CsVisitorBlacklistMapper;
 import org.jeecg.modules.airag.cs.service.ICsVisitorTokenService;
+import org.jeecg.modules.airag.cs.util.CsIpMatchUtil;
 import org.jeecg.modules.airag.cs.vo.CsVisitorTokenPayload;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.Date;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -41,6 +49,12 @@ public class CsVisitorTokenServiceImpl implements ICsVisitorTokenService {
 
     @Autowired
     private CsGlobalConfigMapper csGlobalConfigMapper;
+
+    @Autowired
+    private CsIpBlacklistMapper ipBlacklistMapper;
+
+    @Autowired
+    private CsVisitorBlacklistMapper visitorBlacklistMapper;
 
     @Autowired
     private CommonAPI commonAPI;
@@ -221,8 +235,21 @@ public class CsVisitorTokenServiceImpl implements ICsVisitorTokenService {
         if (oConvertUtils.isEmpty(externalUserId)) {
             return false;
         }
+        // 先查Redis缓存
         Boolean member = redisTemplate.opsForSet().isMember(VISITOR_BLACKLIST_KEY, externalUserId);
-        return Boolean.TRUE.equals(member);
+        if (Boolean.TRUE.equals(member)) {
+            return true;
+        }
+        // 再查数据库
+        LambdaQueryWrapper<CsVisitorBlacklist> qw = new LambdaQueryWrapper<>();
+        qw.eq(CsVisitorBlacklist::getVisitorId, externalUserId);
+        Long count = visitorBlacklistMapper.selectCount(qw);
+        if (count != null && count > 0) {
+            // 回填Redis缓存
+            redisTemplate.opsForSet().add(VISITOR_BLACKLIST_KEY, externalUserId);
+            return true;
+        }
+        return false;
     }
 
     @Override
@@ -234,11 +261,38 @@ public class CsVisitorTokenServiceImpl implements ICsVisitorTokenService {
     }
 
     @Override
+    public void blacklistWithReason(String externalUserId, String visitorName, String reason, String operator) {
+        if (oConvertUtils.isEmpty(externalUserId)) {
+            return;
+        }
+        // 写入Redis
+        redisTemplate.opsForSet().add(VISITOR_BLACKLIST_KEY, externalUserId);
+        // 写入数据库（先查重）
+        LambdaQueryWrapper<CsVisitorBlacklist> qw = new LambdaQueryWrapper<>();
+        qw.eq(CsVisitorBlacklist::getVisitorId, externalUserId);
+        if (visitorBlacklistMapper.selectCount(qw) == 0) {
+            CsVisitorBlacklist record = new CsVisitorBlacklist();
+            record.setVisitorId(externalUserId);
+            record.setVisitorName(visitorName);
+            record.setReason(reason);
+            record.setOperator(operator);
+            record.setBanDate(new Date());
+            record.setCreateBy(operator);
+            record.setCreateTime(new Date());
+            visitorBlacklistMapper.insert(record);
+        }
+    }
+
+    @Override
     public void unblacklist(String externalUserId) {
         if (oConvertUtils.isEmpty(externalUserId)) {
             return;
         }
         redisTemplate.opsForSet().remove(VISITOR_BLACKLIST_KEY, externalUserId);
+        // 同步删除数据库记录
+        LambdaQueryWrapper<CsVisitorBlacklist> qw = new LambdaQueryWrapper<>();
+        qw.eq(CsVisitorBlacklist::getVisitorId, externalUserId);
+        visitorBlacklistMapper.delete(qw);
     }
 
     @Override
@@ -246,8 +300,25 @@ public class CsVisitorTokenServiceImpl implements ICsVisitorTokenService {
         if (oConvertUtils.isEmpty(clientIp)) {
             return false;
         }
+        // 先查Redis精确匹配
         Boolean member = redisTemplate.opsForSet().isMember(VISITOR_IP_BLACKLIST_KEY, clientIp);
-        return Boolean.TRUE.equals(member);
+        if (Boolean.TRUE.equals(member)) {
+            return true;
+        }
+        // 再查数据库（包括CIDR段匹配）
+        List<CsIpBlacklist> allRecords = ipBlacklistMapper.selectList(null);
+        if (allRecords != null) {
+            for (CsIpBlacklist record : allRecords) {
+                if (CsIpMatchUtil.matches(clientIp, record.getIp())) {
+                    // 精确IP回填Redis缓存
+                    if (!CsIpMatchUtil.isCidr(record.getIp())) {
+                        redisTemplate.opsForSet().add(VISITOR_IP_BLACKLIST_KEY, clientIp);
+                    }
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     @Override
@@ -259,11 +330,39 @@ public class CsVisitorTokenServiceImpl implements ICsVisitorTokenService {
     }
 
     @Override
+    public void blacklistIpWithReason(String ip, String reason, String operator) {
+        if (oConvertUtils.isEmpty(ip)) {
+            return;
+        }
+        // 精确IP加入Redis
+        if (!CsIpMatchUtil.isCidr(ip)) {
+            redisTemplate.opsForSet().add(VISITOR_IP_BLACKLIST_KEY, ip);
+        }
+        // 写入数据库（先查重）
+        LambdaQueryWrapper<CsIpBlacklist> qw = new LambdaQueryWrapper<>();
+        qw.eq(CsIpBlacklist::getIp, ip.trim());
+        if (ipBlacklistMapper.selectCount(qw) == 0) {
+            CsIpBlacklist record = new CsIpBlacklist();
+            record.setIp(ip.trim());
+            record.setReason(reason);
+            record.setOperator(operator);
+            record.setBanDate(new Date());
+            record.setCreateBy(operator);
+            record.setCreateTime(new Date());
+            ipBlacklistMapper.insert(record);
+        }
+    }
+
+    @Override
     public void unblacklistIp(String clientIp) {
         if (oConvertUtils.isEmpty(clientIp)) {
             return;
         }
         redisTemplate.opsForSet().remove(VISITOR_IP_BLACKLIST_KEY, clientIp);
+        // 同步删除数据库记录
+        LambdaQueryWrapper<CsIpBlacklist> qw = new LambdaQueryWrapper<>();
+        qw.eq(CsIpBlacklist::getIp, clientIp);
+        ipBlacklistMapper.delete(qw);
     }
 
     @Override

@@ -709,7 +709,7 @@
                 :loading="blacklistLoading"
                 :disabled="!currentConversation.userId"
                 checked-children="已拉黑"
-                @change="(checked) => checked ? applyBlacklist('user') : removeBlacklist('user')"
+                @change="(checked) => checked ? openBanModal('user') : removeBlacklist('user')"
               />
             </span>
           </div>
@@ -721,11 +721,32 @@
                 :loading="blacklistLoading"
                 :disabled="!currentConversation.userIp"
                 checked-children="已拉黑"
-                @change="(checked) => checked ? applyBlacklist('ip') : removeBlacklist('ip')"
+                @change="(checked) => checked ? openBanModal('ip') : removeBlacklist('ip')"
               />
             </span>
           </div>
         </div>
+
+        <!-- 拉黑原因弹窗 -->
+        <a-modal
+          v-model:open="banModalVisible"
+          :title="banModalType === 'user' ? '拉黑访客' : '拉黑IP'"
+          @ok="confirmBan"
+          @cancel="banModalVisible = false"
+          :okButtonProps="{ disabled: !banReason.trim() }"
+        >
+          <a-form :label-col="{ span: 5 }" :wrapper-col="{ span: 18 }">
+            <a-form-item v-if="banModalType === 'ip'" label="IP地址">
+              <a-input v-model:value="banIpValue" placeholder="IP或IP段（如192.168.1.0/24）" />
+            </a-form-item>
+            <a-form-item v-if="banModalType === 'user'" label="访客信息">
+              <span>{{ currentConversation?.userName || currentConversation?.userId || '-' }}</span>
+            </a-form-item>
+            <a-form-item label="拉黑原因" required>
+              <a-textarea v-model:value="banReason" :rows="3" placeholder="请输入拉黑原因（必填）" />
+            </a-form-item>
+          </a-form>
+        </a-modal>
 
         <!-- 备注 -->
         <div class="info-section">
@@ -954,6 +975,10 @@ const userOnline = ref(false);
 const userIdBlacklisted = ref(false);
 const ipBlacklisted = ref(false);
 const blacklistLoading = ref(false);
+const banModalVisible = ref(false);
+const banModalType = ref<'user' | 'ip'>('user');
+const banReason = ref('');
+const banIpValue = ref('');
 const savedScrollTop = ref<number | null>(null);
 
 // 访客信息缓存 (key -> visitorInfo)
@@ -2218,7 +2243,29 @@ async function loadBlacklistStatus() {
   }
 }
 
-async function applyBlacklist(type: 'user' | 'ip' | 'both') {
+function openBanModal(type: 'user' | 'ip') {
+  banModalType.value = type;
+  banReason.value = '';
+  if (type === 'ip') {
+    banIpValue.value = currentConversation.value?.userIp || '';
+  }
+  banModalVisible.value = true;
+}
+
+async function confirmBan() {
+  if (!banReason.value.trim()) {
+    message.warning('请输入拉黑原因');
+    return;
+  }
+  if (banModalType.value === 'ip') {
+    await applyBlacklist('ip', banReason.value.trim(), banIpValue.value.trim());
+  } else {
+    await applyBlacklist('user', banReason.value.trim());
+  }
+  banModalVisible.value = false;
+}
+
+async function applyBlacklist(type: 'user' | 'ip' | 'both', reason?: string, customIp?: string) {
   if (blacklistLoading.value || !currentConversation.value) {
     return;
   }
@@ -2235,11 +2282,13 @@ async function applyBlacklist(type: 'user' | 'ip' | 'both') {
   blacklistLoading.value = true;
   try {
     if (type === 'user' || type === 'both') {
-      await httpPost({ url: '/airag/cs/visitor/blacklist/add', data: { userId } });
+      const visitorName = currentConversation.value.userName || '';
+      await httpPost({ url: '/airag/cs/visitor/blacklist/add', data: { userId, visitorName, reason: reason || '' } });
       userIdBlacklisted.value = true;
     }
     if (type === 'ip' || type === 'both') {
-      await httpPost({ url: '/airag/cs/visitor/blacklist/ip/add', data: { ip: userIp } });
+      const targetIp = customIp || userIp;
+      await httpPost({ url: '/airag/cs/visitor/blacklist/ip/add', data: { ip: targetIp, reason: reason || '' } });
       ipBlacklisted.value = true;
     }
     message.success('已拉黑');

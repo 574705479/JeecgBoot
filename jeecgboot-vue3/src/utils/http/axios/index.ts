@@ -286,7 +286,7 @@ function createAxios(opt?: Partial<CreateAxiosOptions>) {
           // 异常消息提示类型
           errorMessageMode: 'message',
           // 成功消息提示类型
-          successMessageMode: 'success',
+          successMessageMode: 'none',
           // 接口地址
           apiUrl: globSetting.apiUrl,
           // 接口拼接地址

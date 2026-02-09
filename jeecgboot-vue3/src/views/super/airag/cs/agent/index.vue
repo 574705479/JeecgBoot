@@ -2,7 +2,7 @@
   <div class="cs-agent-page">
     <BasicTable @register="registerTable" :rowSelection="rowSelection">
       <template #tableTitle>
-        <a-button type="primary" preIcon="ant-design:plus-outlined" @click="handleAdd">新增客服</a-button>
+        <a-button type="primary" preIcon="ant-design:plus-outlined" @click="handleAdd">新增管理员客服</a-button>
       </template>
       <template #action="{ record }">
         <TableAction :actions="getActions(record)" />
@@ -31,20 +31,17 @@ const [registerModal, { openModal }] = useModal();
 
 const columns = [
   { title: '客服昵称', dataIndex: 'nickname', width: 120 },
-  { title: '关联用户', dataIndex: 'userId', width: 120 },
-  { title: '角色', dataIndex: 'role', width: 100, customRender: ({ text }) => text === 1 ? '管理者' : '普通客服' },
   { title: '最大接待数', dataIndex: 'maxSessions', width: 100 },
   { title: '当前接待数', dataIndex: 'currentSessions', width: 100 },
   { title: '状态', dataIndex: 'status', width: 100, slots: { customRender: 'status' } },
   { title: '累计服务', dataIndex: 'totalServed', width: 100 },
-  { title: '满意度', dataIndex: 'satisfactionRate', width: 100, customRender: ({ text }) => text ? `${text}%` : '-' },
   { title: '创建时间', dataIndex: 'createTime', width: 160 },
 ];
 
 const [registerTable, { reload }] = useTable({
   title: '客服管理',
   api: async (params) => {
-    const res = await defHttp.get({ url: '/cs/agent/list', params });
+    const res = await defHttp.get({ url: '/cs/agent/list', params: { ...params, role: 1 } });
     return res;
   },
   columns,
@@ -96,7 +93,7 @@ function getStatusText(status: number) {
 function getActions(record: any) {
   return [
     { label: '编辑', onClick: () => handleEdit(record) },
-    { label: '删除', color: 'error', popConfirm: { title: '确定删除吗?', confirm: () => handleDelete(record) } },
+    { label: '删除', color: 'error', popConfirm: { title: '确定删除该管理员客服吗?', confirm: () => handleDelete(record) } },
   ];
 }
 

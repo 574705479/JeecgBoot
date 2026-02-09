@@ -2,7 +2,7 @@
   <BasicModal
     v-bind="$attrs"
     @register="registerModal"
-    :title="isUpdate ? '编辑客服' : '新增客服'"
+    :title="isUpdate ? '编辑管理员客服' : '新增管理员客服'"
     @ok="handleSubmit"
     width="600px"
   >
@@ -11,7 +11,7 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, computed } from 'vue';
+import { ref, computed, unref } from 'vue';
 import { BasicModal, useModalInner } from '/@/components/Modal';
 import { BasicForm, useForm } from '/@/components/Form';
 import { defHttp } from '/@/utils/http/axios';
@@ -23,37 +23,31 @@ const { createMessage } = useMessage();
 const isUpdate = ref(false);
 const recordId = ref('');
 
-const [registerForm, { setFieldsValue, resetFields, validate }] = useForm({
+const [registerForm, { setFieldsValue, resetFields, validate, updateSchema }] = useForm({
   labelWidth: 100,
   schemas: [
-    { field: 'userId', label: '关联用户', component: 'JSelectUser', required: true,
-      componentProps: {
-        customListApi: async (params) => {
-          const res = await defHttp.get({ url: '/sys/user/list', params });
-          if (res && Array.isArray(res.records)) {
-            res.records = res.records.filter((item) => {
-              const username = String(item?.username || '').toLowerCase();
-              return username !== 'admin';
-            });
-          }
-          return res;
-        },
-      }
+    {
+      field: 'username',
+      label: '登录用户名',
+      component: 'Input',
+      required: true,
+      componentProps: { placeholder: '请输入登录用户名' },
+      ifShow: () => !unref(isUpdate),
     },
-    { field: 'nickname', label: '客服昵称', component: 'Input', required: true },
+    {
+      field: 'password',
+      label: '登录密码',
+      component: 'InputPassword',
+      required: true,
+      componentProps: { placeholder: '请输入登录密码' },
+      ifShow: () => !unref(isUpdate),
+    },
+    { field: 'nickname', label: '客服昵称', component: 'Input', required: true,
+      componentProps: { placeholder: '请输入客服昵称' }
+    },
     { field: 'avatar', label: '头像', component: 'JImageUpload' },
-    { field: 'maxSessions', label: '最大接待数', component: 'InputNumber', defaultValue: 5,
-      componentProps: { min: 1, max: 20 }
-    },
-    { field: 'role', label: '角色', component: 'Select', defaultValue: 0,
-      componentProps: {
-        options: [
-          { label: '普通客服', value: 0 },
-          { label: '管理者', value: 1 },
-        ],
-        placeholder: '请选择角色'
-      },
-      helpMessage: '管理者可监控所有会话'
+    { field: 'maxSessions', label: '最大接待数', component: 'InputNumber', defaultValue: 10,
+      componentProps: { min: 1, max: 50 }
     },
     { field: 'welcomeMessage', label: '欢迎语', component: 'InputTextArea',
       componentProps: { rows: 3, placeholder: '用户接入时发送的欢迎语' }
@@ -65,10 +59,15 @@ const [registerForm, { setFieldsValue, resetFields, validate }] = useForm({
 const [registerModal, { setModalProps, closeModal }] = useModalInner(async (data) => {
   resetFields();
   isUpdate.value = !!data?.isUpdate;
-  
+
   if (data?.record) {
     recordId.value = data.record.id;
-    setFieldsValue(data.record);
+    setFieldsValue({
+      nickname: data.record.nickname,
+      avatar: data.record.avatar,
+      maxSessions: data.record.maxSessions,
+      welcomeMessage: data.record.welcomeMessage,
+    });
   }
 });
 
@@ -76,13 +75,13 @@ async function handleSubmit() {
   try {
     const values = await validate();
     setModalProps({ confirmLoading: true });
-    
+
     if (isUpdate.value) {
       await defHttp.put({ url: '/cs/agent/edit', data: { ...values, id: recordId.value } });
     } else {
       await defHttp.post({ url: '/cs/agent/add', data: values });
     }
-    
+
     createMessage.success(isUpdate.value ? '编辑成功' : '新增成功');
     closeModal();
     emit('success');

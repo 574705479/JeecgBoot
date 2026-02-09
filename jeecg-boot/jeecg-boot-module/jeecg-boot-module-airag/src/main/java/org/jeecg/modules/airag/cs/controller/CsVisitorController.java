@@ -280,7 +280,11 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
         if (oConvertUtils.isEmpty(target)) {
             return Result.error("userId不能为空");
         }
-        visitorTokenService.blacklist(target);
+        String reason = body != null ? body.get("reason") : null;
+        String visitorName = body != null ? body.get("visitorName") : null;
+        org.jeecg.common.system.vo.LoginUser loginUser = (org.jeecg.common.system.vo.LoginUser) org.apache.shiro.SecurityUtils.getSubject().getPrincipal();
+        String operator = loginUser != null ? loginUser.getUsername() : "system";
+        visitorTokenService.blacklistWithReason(target, visitorName, reason, operator);
         return Result.OK("已拉黑");
     }
 
@@ -337,7 +341,7 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
     }
 
     /**
-     * 拉黑IP
+     * 拉黑IP（支持IP段）
      */
     @Operation(summary = "拉黑IP")
     @PostMapping("/blacklist/ip/add")
@@ -347,7 +351,13 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
         if (oConvertUtils.isEmpty(target)) {
             return Result.error("ip不能为空");
         }
-        visitorTokenService.blacklistIp(target);
+        if (!org.jeecg.modules.airag.cs.util.CsIpMatchUtil.isValidIpOrCidr(target)) {
+            return Result.error("IP格式无效，支持单个IP或CIDR段（如192.168.1.0/24）");
+        }
+        String reason = body != null ? body.get("reason") : null;
+        org.jeecg.common.system.vo.LoginUser loginUser = (org.jeecg.common.system.vo.LoginUser) org.apache.shiro.SecurityUtils.getSubject().getPrincipal();
+        String operator = loginUser != null ? loginUser.getUsername() : "system";
+        visitorTokenService.blacklistIpWithReason(target.trim(), reason, operator);
         return Result.OK("已拉黑");
     }
 

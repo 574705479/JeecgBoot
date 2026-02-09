@@ -1,5 +1,7 @@
 package org.jeecg.modules.airag.cs.controller;
 
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
@@ -7,22 +9,31 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.shiro.SecurityUtils;
 import org.jeecg.common.api.vo.Result;
 import org.jeecg.common.aspect.annotation.AutoLog;
 import org.jeecg.common.system.base.controller.JeecgController;
 import org.jeecg.common.system.query.QueryGenerator;
+import org.jeecg.common.system.vo.LoginUser;
+import org.jeecg.common.util.PasswordUtil;
+import org.jeecg.common.util.oConvertUtils;
 import org.jeecg.modules.airag.cs.entity.CsAgent;
+import org.jeecg.modules.airag.cs.entity.CsAgentLoginLog;
 import org.jeecg.modules.airag.cs.entity.CsGlobalConfig;
+import org.jeecg.modules.airag.cs.mapper.CsAgentLoginLogMapper;
 import org.jeecg.modules.airag.cs.mapper.CsGlobalConfigMapper;
+import org.jeecg.modules.airag.cs.mapper.CsSubAgentMapper;
 import org.jeecg.modules.airag.cs.service.ICsAgentService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -59,6 +70,11 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     private static final String AUTO_MESSAGES_REDIS_KEY = "cs:global:auto_messages";
     private static final String AUTO_MESSAGES_CONFIG_KEY = "auto_messages";
 
+    /** 管理员客服角色编码 */
+    private static final String ADMIN_AGENT_ROLE_CODE = "cs_admin_agent";
+    /** 子客服角色编码 */
+    private static final String SUB_AGENT_ROLE_CODE = "cs_sub_agent";
+
     @Autowired
     private ICsAgentService csAgentService;
 
@@ -67,6 +83,12 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
 
     @Autowired
     private CsGlobalConfigMapper csGlobalConfigMapper;
+
+    @Autowired
+    private CsSubAgentMapper csSubAgentMapper;
+
+    @Autowired
+    private CsAgentLoginLogMapper csAgentLoginLogMapper;
 
     /**
      * 分页列表查询
@@ -84,33 +106,126 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     }
 
     /**
-     * 添加
+     * 添加管理员客服
+     * 自动创建 sys_user 并分配 cs_admin_agent 角色
      */
     @AutoLog(value = "客服管理-添加")
-    @Operation(summary = "添加")
+    @Operation(summary = "添加管理员客服")
     @PostMapping("/add")
-    public Result<String> add(@RequestBody CsAgent csAgent) {
+    @Transactional(rollbackFor = Exception.class)
+    public Result<String> add(@RequestBody Map<String, Object> params) {
+        String username = (String) params.get("username");
+        String password = (String) params.get("password");
+        String nickname = (String) params.get("nickname");
+        String avatar = (String) params.get("avatar");
+        String welcomeMessage = (String) params.get("welcomeMessage");
+        Integer maxSessions = params.get("maxSessions") != null ? Integer.parseInt(params.get("maxSessions").toString()) : 10;
+
+        if (oConvertUtils.isEmpty(username) || oConvertUtils.isEmpty(password)) {
+            return Result.error("用户名和密码不能为空");
+        }
+        if (oConvertUtils.isEmpty(nickname)) {
+            return Result.error("客服昵称不能为空");
+        }
+
+        // 1. 检查用户名是否已存在
+        int existCount = csSubAgentMapper.countByUsername(username);
+        if (existCount > 0) {
+            return Result.error("用户名已存在: " + username);
+        }
+
+        // 2. 创建 sys_user
+        String sysUserId = UUID.randomUUID().toString().replace("-", "");
+        String salt = oConvertUtils.randomGen(8);
+        String passwordEncode = PasswordUtil.encrypt(username, password, salt);
+        csSubAgentMapper.insertSysUser(sysUserId, username, nickname, passwordEncode, salt, null, null);
+
+        // 3. 分配管理员客服角色
+        String roleId = csSubAgentMapper.getRoleIdByCode(ADMIN_AGENT_ROLE_CODE);
+        if (oConvertUtils.isNotEmpty(roleId)) {
+            String userRoleId = UUID.randomUUID().toString().replace("-", "");
+            csSubAgentMapper.insertSysUserRole(userRoleId, sysUserId, roleId);
+        } else {
+            log.warn("[CS-Agent] 未找到管理员客服角色: {}", ADMIN_AGENT_ROLE_CODE);
+        }
+
+        // 4. 创建 cs_agent
+        CsAgent csAgent = new CsAgent();
+        csAgent.setUserId(sysUserId);
+        csAgent.setNickname(nickname);
+        csAgent.setAvatar(avatar);
+        csAgent.setMaxSessions(maxSessions);
+        csAgent.setWelcomeMessage(welcomeMessage);
+        csAgent.setStatus(CsAgent.STATUS_OFFLINE);
+        csAgent.setCurrentSessions(0);
+        csAgent.setTotalServed(0);
+        csAgent.setRole(CsAgent.ROLE_SUPERVISOR); // 管理员客服固定 role=1
+        csAgent.setCreateBy(((LoginUser) SecurityUtils.getSubject().getPrincipal()).getUsername());
+        csAgent.setCreateTime(new Date());
         csAgentService.save(csAgent);
+
         return Result.OK("添加成功！");
     }
 
     /**
-     * 编辑
+     * 编辑客服
+     * 支持角色变更联动（子客服提升为管理员时清空 parent_agent_id 和 allowed_menus，并更换 sys_role）
      */
     @AutoLog(value = "客服管理-编辑")
-    @Operation(summary = "编辑")
+    @Operation(summary = "编辑客服")
     @PutMapping("/edit")
+    @Transactional(rollbackFor = Exception.class)
     public Result<String> edit(@RequestBody CsAgent csAgent) {
+        if (oConvertUtils.isEmpty(csAgent.getId())) {
+            return Result.error("ID不能为空");
+        }
+        CsAgent existing = csAgentService.getById(csAgent.getId());
+        if (existing == null) {
+            return Result.error("客服不存在");
+        }
+
+        // 检测是否有角色变更
+        if (csAgent.getRole() != null && !csAgent.getRole().equals(existing.getRole())) {
+            int newRole = csAgent.getRole();
+            String userId = existing.getUserId();
+            if (oConvertUtils.isNotEmpty(userId)) {
+                // 删除旧角色
+                csSubAgentMapper.deleteSysUserRoleByUserId(userId);
+                // 分配新角色
+                String newRoleCode = (newRole == CsAgent.ROLE_SUPERVISOR) ? ADMIN_AGENT_ROLE_CODE : SUB_AGENT_ROLE_CODE;
+                String roleId = csSubAgentMapper.getRoleIdByCode(newRoleCode);
+                if (oConvertUtils.isNotEmpty(roleId)) {
+                    String userRoleId = UUID.randomUUID().toString().replace("-", "");
+                    csSubAgentMapper.insertSysUserRole(userRoleId, userId, roleId);
+                }
+            }
+
+            // 子客服提升为管理员时，清空子客服相关字段
+            if (newRole == CsAgent.ROLE_SUPERVISOR) {
+                csAgent.setParentAgentId(null);
+                csAgent.setAllowedMenus(null);
+            }
+        }
+
+        // 同步更新 sys_user 的 realname
+        if (oConvertUtils.isNotEmpty(csAgent.getNickname()) && oConvertUtils.isNotEmpty(existing.getUserId())) {
+            csSubAgentMapper.updateSysUserRealname(existing.getUserId(), csAgent.getNickname());
+        }
+
+        csAgent.setUpdateBy(((LoginUser) SecurityUtils.getSubject().getPrincipal()).getUsername());
+        csAgent.setUpdateTime(new Date());
         csAgentService.updateById(csAgent);
         return Result.OK("编辑成功!");
     }
 
     /**
-     * 删除
+     * 删除客服（同时清理 sys_user_role 和逻辑删除 sys_user）
+     * 不允许删除自己
      */
     @AutoLog(value = "客服管理-删除")
-    @Operation(summary = "删除")
+    @Operation(summary = "删除客服")
     @DeleteMapping("/delete")
+    @Transactional(rollbackFor = Exception.class)
     public Result<String> delete(@RequestParam(name = "id", required = false) String id,
                                  @RequestBody(required = false) java.util.Map<String, Object> body) {
         if (id == null || id.isEmpty()) {
@@ -119,6 +234,20 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
         }
         if (id == null || id.isEmpty()) {
             return Result.error("id不能为空");
+        }
+        CsAgent agent = csAgentService.getById(id);
+        if (agent == null) {
+            return Result.error("客服不存在");
+        }
+        // 防止删除自己
+        LoginUser loginUser = (LoginUser) SecurityUtils.getSubject().getPrincipal();
+        if (loginUser != null && oConvertUtils.isNotEmpty(agent.getUserId())
+                && agent.getUserId().equals(loginUser.getId())) {
+            return Result.error("不能删除自己的账号");
+        }
+        if (oConvertUtils.isNotEmpty(agent.getUserId())) {
+            csSubAgentMapper.deleteSysUserRoleByUserId(agent.getUserId());
+            csSubAgentMapper.logicDeleteSysUser(agent.getUserId());
         }
         csAgentService.removeById(id);
         return Result.OK("删除成功!");
@@ -152,7 +281,25 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     @AutoLog(value = "客服管理-下线")
     @Operation(summary = "客服下线")
     @PostMapping("/offline/{id}")
-    public Result<String> goOffline(@PathVariable String id) {
+    public Result<String> goOffline(@PathVariable String id, HttpServletRequest request) {
+        // 记录退出日志
+        try {
+            CsAgent agent = csAgentService.getById(id);
+            if (agent != null && oConvertUtils.isNotEmpty(agent.getUserId())) {
+                String username = csSubAgentMapper.getUsernameByUserId(agent.getUserId());
+                if (oConvertUtils.isNotEmpty(username)) {
+                    CsAgentLoginLog logRecord = new CsAgentLoginLog();
+                    logRecord.setLoginDate(new Date());
+                    logRecord.setUsername(username);
+                    logRecord.setEvent(CsAgentLoginLog.EVENT_LOGOUT);
+                    logRecord.setIp(getClientIp(request));
+                    logRecord.setCreateTime(new Date());
+                    csAgentLoginLogMapper.insert(logRecord);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[CS-Security] 记录退出日志失败: {}", e.getMessage());
+        }
         csAgentService.goOffline(id);
         return Result.OK("下线成功!");
     }
@@ -531,6 +678,40 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
         return config != null ? config.getConfigValue() : null;
     }
 
+    /**
+     * 获取当前登录用户（子客服）可见菜单ID列表
+     * 前端 permissionGuard 调用此接口来过滤菜单
+     */
+    @Operation(summary = "获取当前客服可见菜单")
+    @GetMapping("/current-menus")
+    public Result<JSONObject> getCurrentMenus() {
+        LoginUser loginUser = (LoginUser) SecurityUtils.getSubject().getPrincipal();
+        if (loginUser == null) {
+            return Result.error("未登录");
+        }
+        CsAgent agent = csAgentService.getByUserId(loginUser.getId());
+        JSONObject data = new JSONObject();
+        if (agent == null) {
+            // 非客服用户，不做菜单限制
+            data.put("isSubAgent", false);
+            data.put("allowedMenus", new JSONArray());
+            return Result.OK(data);
+        }
+        if (oConvertUtils.isNotEmpty(agent.getParentAgentId())) {
+            // 是子客服，返回允许的菜单列表
+            data.put("isSubAgent", true);
+            if (oConvertUtils.isNotEmpty(agent.getAllowedMenus())) {
+                data.put("allowedMenus", JSON.parseArray(agent.getAllowedMenus()));
+            } else {
+                data.put("allowedMenus", new JSONArray());
+            }
+        } else {
+            data.put("isSubAgent", false);
+            data.put("allowedMenus", new JSONArray());
+        }
+        return Result.OK(data);
+    }
+
     private void saveGlobalConfigValue(String configKey, String configValue) {
         CsGlobalConfig existing = csGlobalConfigMapper.selectById(configKey);
         Date now = new Date();
@@ -546,6 +727,20 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
             existing.setUpdateTime(now);
             csGlobalConfigMapper.updateById(existing);
         }
+    }
+
+    private String getClientIp(HttpServletRequest request) {
+        if (request == null) return "unknown";
+        String ip = request.getHeader("X-Forwarded-For");
+        if (oConvertUtils.isNotEmpty(ip)) {
+            int idx = ip.indexOf(',');
+            return idx > -1 ? ip.substring(0, idx).trim() : ip.trim();
+        }
+        ip = request.getHeader("X-Real-IP");
+        if (oConvertUtils.isNotEmpty(ip)) {
+            return ip.trim();
+        }
+        return request.getRemoteAddr();
     }
 
 }

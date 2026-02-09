@@ -23,6 +23,7 @@ import { getBackMenuAndPerms } from '/@/api/sys/menu';
 
 import { useMessage } from '/@/hooks/web/useMessage';
 import { PageEnum } from '/@/enums/pageEnum';
+import { defHttp } from '/@/utils/http/axios';
 
 // 系统权限
 interface AuthItem {
@@ -284,6 +285,38 @@ export const usePermissionStore = defineStore({
               });
           };
           routeList = hideHomeMenu(routeList);
+
+          // === 子客服菜单过滤 ===
+          try {
+            const menuRes = await defHttp.get({ url: '/cs/agent/current-menus' });
+            if (menuRes && menuRes.isSubAgent === true) {
+              const allowedMenuIds: string[] = menuRes.allowedMenus || [];
+              if (allowedMenuIds.length > 0) {
+                const allowedSet = new Set(allowedMenuIds);
+                const filterByAllowedMenus = (list: AppRouteRecordRaw[]): AppRouteRecordRaw[] => {
+                  return list.filter((route) => {
+                    const menuId = (route as any).id || (route.meta as any)?.id;
+                    // 保留在允许列表中的菜单，或保留包含允许子菜单的父菜单
+                    if (menuId && allowedSet.has(menuId)) {
+                      return true;
+                    }
+                    if (route.children && route.children.length) {
+                      route.children = filterByAllowedMenus(route.children);
+                      return route.children.length > 0;
+                    }
+                    return menuId ? false : true; // 没有menuId的路由保留(如根路由)
+                  });
+                };
+                routeList = filterByAllowedMenus(routeList);
+              } else {
+                // 子客服没有分配任何菜单，清空路由
+                routeList = [];
+              }
+            }
+          } catch (e) {
+            console.warn('[CS-SubAgent] 获取菜单权限失败，跳过过滤', e);
+          }
+
           // 动态引入组件
           routeList = transformObjToRoute(routeList);
 

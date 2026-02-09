@@ -74,6 +74,12 @@ public class CsAgent implements Serializable {
     @Schema(description = "角色: 0-普通客服 1-管理者(可监控所有会话)")
     private Integer role;
 
+    @Schema(description = "父客服ID(管理员客服创建的子客服)")
+    private String parentAgentId;
+
+    @Schema(description = "可见菜单列表(JSON数组)")
+    private String allowedMenus;
+
     @Excel(name = "最后在线时间", width = 20, format = "yyyy-MM-dd HH:mm:ss")
     @JsonFormat(timezone = "GMT+8", pattern = "yyyy-MM-dd HH:mm:ss")
     @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss")
