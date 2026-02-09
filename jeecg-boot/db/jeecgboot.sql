@@ -362,6 +362,7 @@ CREATE TABLE `cs_conversation`  (
   `user_country` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '国家',
   `user_province` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '省份',
   `user_city` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '城市',
+  `user_lang` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '浏览器语言',
   `agent_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '主负责客服ID',
   `status` tinyint NULL DEFAULT 0 COMMENT '状态: 0-未分配 1-已分配 2-已结束',
   `reply_mode` tinyint NULL DEFAULT 0 COMMENT '回复模式: 0-AI自动 1-手动 2-AI辅助',
@@ -425,7 +426,8 @@ CREATE TABLE `cs_global_config`  (
 INSERT INTO `cs_global_config` (`config_key`, `config_value`, `create_time`, `update_time`) VALUES
 ('ai_enabled', 'true', NOW(), NOW()),
 ('conversation_assign', '{"assignMode":"saturation","inheritLastAgent":{"enabled":true,"expireMinutes":60},"conversationHold":{"minutes":10},"agentTimeoutReminder":{"enabled":false,"seconds":20}}', NOW(), NOW()),
-('message_board', '{"subtitle":"客服不在线，请留言","fields":{"name":{"show":true,"required":true},"phone":{"show":true,"required":false},"email":{"show":true,"required":false},"qq":{"show":false,"required":false},"wechat":{"show":false,"required":false},"image":{"show":true,"required":false}}}', NOW(), NOW());
+('message_board', '{"subtitle":"客服不在线，请留言","fields":{"name":{"show":true,"required":true},"phone":{"show":true,"required":false},"email":{"show":true,"required":false},"qq":{"show":false,"required":false},"wechat":{"show":false,"required":false},"image":{"show":true,"required":false}}}', NOW(), NOW()),
+('auto_messages', '{"defaultLang":"zh-CN","languages":{"zh-CN":{"label":"中文简体","messages":[]},"zh-TW":{"label":"中文繁體","messages":[]},"en":{"label":"English","messages":[]}}}', NOW(), NOW());
 
 -- ----------------------------
 -- Table structure for cs_leave_message
@@ -3770,6 +3772,7 @@ INSERT INTO `sys_permission` VALUES ('cs_workbench', 'cs_parent', '客服工作�
 INSERT INTO `sys_permission` VALUES ('cs_conversation_assign', 'cs_parent', '对话分配', '/cs/conversationAssign', 'super/airag/cs/conversationAssign/index', 1, NULL, NULL, 1, NULL, '1', 4.00, 0, 'ant-design:swap-outlined', 1, 0, 0, 0, '对话分配配置', 'admin', '2026-02-06 10:00:00', NULL, NULL, 0, 0, '1', 0);
 INSERT INTO `sys_permission` VALUES ('cs_message_board_settings', 'cs_parent', '留言板设置', '/cs/messageBoardSettings', 'super/airag/cs/messageBoard/settings', 1, NULL, NULL, 1, NULL, '1', 8.00, 0, 'ant-design:form-outlined', 1, 0, 0, 0, '留言板设置', 'admin', '2026-02-06 10:00:00', NULL, NULL, 0, 0, '1', 0);
 INSERT INTO `sys_permission` VALUES ('cs_message_board_records', 'cs_parent', '留言记录', '/cs/messageBoardRecords', 'super/airag/cs/messageBoard/records', 1, NULL, NULL, 1, NULL, '1', 9.00, 0, 'ant-design:file-text-outlined', 1, 0, 0, 0, '留言记录管理', 'admin', '2026-02-06 10:00:00', NULL, NULL, 0, 0, '1', 0);
+INSERT INTO `sys_permission` VALUES ('cs_auto_message', 'cs_parent', '自动消息', '/cs/autoMessage', 'super/airag/cs/autoMessage/index', 1, NULL, NULL, 1, NULL, '1', 5.00, 0, 'ant-design:notification-outlined', 1, 1, 0, 0, '自动消息配置', 'admin', '2026-02-06 17:00:00', NULL, NULL, 0, 0, '1', 0);
 INSERT INTO `sys_permission` VALUES ('d7d6e2e4e2934f2c9385a623fd98c6f3', '', '系统管理', '/isystem', 'layouts/RouteView', 1, NULL, NULL, 0, NULL, NULL, 4.00, 0, 'ant-design:setting', 0, 0, 0, 0, NULL, NULL, '2018-12-25 20:34:38', 'admin', '2025-06-25 14:24:07', 0, 0, NULL, 0);
 INSERT INTO `sys_permission` VALUES ('f15543b0263cf6c5fac85afdd3eba3f2', '3f915b2769fc80648e92d04e84ca059d', '用户导入', '', NULL, 0, NULL, NULL, 2, 'system:user:import', '1', 1.00, 0, NULL, 1, 0, 0, 0, NULL, 'admin', '2019-05-13 19:15:27', 'admin', '2022-06-30 15:05:12', 0, 0, '1', 0);
 
@@ -4043,6 +4046,7 @@ INSERT INTO `sys_role_permission` VALUES ('2013531115265773573', '20135310333635
 INSERT INTO `sys_role_permission` VALUES ('cs_conv_assign_perm_02', '2013531033363599361', 'cs_conversation_assign', NULL, '2026-02-06 10:00:00', '0:0:0:0:0:0:0:1');
 INSERT INTO `sys_role_permission` VALUES ('cs_mb_settings_perm_02', '2013531033363599361', 'cs_message_board_settings', NULL, '2026-02-06 10:00:00', '0:0:0:0:0:0:0:1');
 INSERT INTO `sys_role_permission` VALUES ('cs_mb_records_perm_02', '2013531033363599361', 'cs_message_board_records', NULL, '2026-02-06 10:00:00', '0:0:0:0:0:0:0:1');
+INSERT INTO `sys_role_permission` VALUES ('cs_auto_msg_perm_02', '2013531033363599361', 'cs_auto_message', NULL, '2026-02-06 17:00:00', '0:0:0:0:0:0:0:1');
 INSERT INTO `sys_role_permission` VALUES ('2013531115265773574', '2013531033363599361', '1892553163993931777', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
 INSERT INTO `sys_role_permission` VALUES ('2013531115265773575', '2013531033363599361', '1893865471550578689', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
 INSERT INTO `sys_role_permission` VALUES ('2013531115265773576', '2013531033363599361', '1930221213607591937', NULL, '2026-01-20 16:36:42', '0:0:0:0:0:0:0:1');
@@ -4251,6 +4255,7 @@ INSERT INTO `sys_role_permission` VALUES ('dea76150f5ce11f089be56ca9804d785', 'f
 INSERT INTO `sys_role_permission` VALUES ('cs_conv_assign_perm_01', 'f6817f48af4fb3af11b9e8bf182f618b', 'cs_conversation_assign', NULL, '2026-02-06 10:00:00', '127.0.0.1');
 INSERT INTO `sys_role_permission` VALUES ('cs_mb_settings_perm_01', 'f6817f48af4fb3af11b9e8bf182f618b', 'cs_message_board_settings', NULL, '2026-02-06 10:00:00', '127.0.0.1');
 INSERT INTO `sys_role_permission` VALUES ('cs_mb_records_perm_01', 'f6817f48af4fb3af11b9e8bf182f618b', 'cs_message_board_records', NULL, '2026-02-06 10:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_auto_msg_perm_01', 'f6817f48af4fb3af11b9e8bf182f618b', 'cs_auto_message', NULL, '2026-02-06 17:00:00', '127.0.0.1');
 INSERT INTO `sys_role_permission` VALUES ('e3e922673f4289b18366bb51b6200f17', '52b0cf022ac4187b2a70dfa4f8b2d940', '45c966826eeff4c99b8f8ebfe74511fc', NULL, NULL, NULL);
 INSERT INTO `sys_role_permission` VALUES ('f17ab8ad1e71341140857ef4914ef297', '21c5a3187763729408b40afb0d0fdfa8', '732d48f8e0abe99fe6a23d18a3171cd1', NULL, NULL, NULL);
 INSERT INTO `sys_role_permission` VALUES ('fed41a4671285efb266cd404f24dd378', '52b0cf022ac4187b2a70dfa4f8b2d940', '00a2a0ae65cdca5e93209cdbde97cbe6', NULL, NULL, NULL);

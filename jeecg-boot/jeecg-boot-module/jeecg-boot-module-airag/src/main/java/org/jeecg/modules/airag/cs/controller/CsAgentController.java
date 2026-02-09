@@ -55,6 +55,10 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     private static final String MESSAGE_BOARD_REDIS_KEY = "cs:global:message_board";
     private static final String MESSAGE_BOARD_CONFIG_KEY = "message_board";
 
+    /** 自动消息配置 */
+    private static final String AUTO_MESSAGES_REDIS_KEY = "cs:global:auto_messages";
+    private static final String AUTO_MESSAGES_CONFIG_KEY = "auto_messages";
+
     @Autowired
     private ICsAgentService csAgentService;
 
@@ -442,6 +446,69 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
         redisTemplate.opsForValue().set(MESSAGE_BOARD_REDIS_KEY, json);
         log.info("[CS-Agent] 留言板设置已更新");
         return Result.OK("设置成功");
+    }
+
+    /**
+     * 获取自动消息配置（全局）
+     */
+    @Operation(summary = "获取自动消息配置（全局）")
+    @GetMapping("/global/auto-messages")
+    public Result<JSONObject> getAutoMessagesConfig() {
+        String json = redisTemplate.opsForValue().get(AUTO_MESSAGES_REDIS_KEY);
+        if (json == null || json.isEmpty()) {
+            json = getGlobalConfigValue(AUTO_MESSAGES_CONFIG_KEY);
+            if (json != null && !json.isEmpty()) {
+                redisTemplate.opsForValue().set(AUTO_MESSAGES_REDIS_KEY, json);
+            }
+        }
+        JSONObject result;
+        if (json != null && !json.isEmpty()) {
+            try {
+                result = JSONObject.parseObject(json);
+            } catch (Exception e) {
+                result = getDefaultAutoMessagesConfig();
+            }
+        } else {
+            result = getDefaultAutoMessagesConfig();
+        }
+        return Result.OK(result);
+    }
+
+    /**
+     * 保存自动消息配置（全局）
+     */
+    @Operation(summary = "保存自动消息配置（全局）")
+    @PutMapping("/global/auto-messages")
+    public Result<String> setAutoMessagesConfig(@RequestBody JSONObject config) {
+        String json = config.toJSONString();
+        saveGlobalConfigValue(AUTO_MESSAGES_CONFIG_KEY, json);
+        redisTemplate.opsForValue().set(AUTO_MESSAGES_REDIS_KEY, json);
+        log.info("[CS-Agent] 自动消息配置已更新");
+        return Result.OK("设置成功");
+    }
+
+    private JSONObject getDefaultAutoMessagesConfig() {
+        JSONObject config = new JSONObject();
+        config.put("defaultLang", "zh-CN");
+        JSONObject languages = new JSONObject();
+
+        JSONObject zhCN = new JSONObject();
+        zhCN.put("label", "中文简体");
+        zhCN.put("messages", new com.alibaba.fastjson.JSONArray());
+        languages.put("zh-CN", zhCN);
+
+        JSONObject zhTW = new JSONObject();
+        zhTW.put("label", "中文繁體");
+        zhTW.put("messages", new com.alibaba.fastjson.JSONArray());
+        languages.put("zh-TW", zhTW);
+
+        JSONObject en = new JSONObject();
+        en.put("label", "English");
+        en.put("messages", new com.alibaba.fastjson.JSONArray());
+        languages.put("en", en);
+
+        config.put("languages", languages);
+        return config;
     }
 
     private JSONObject getDefaultMessageBoardConfig() {

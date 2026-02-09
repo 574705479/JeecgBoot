@@ -83,6 +83,9 @@ public class CsConversation implements Serializable {
     @Schema(description = "城市")
     private String userCity;
 
+    @Schema(description = "浏览器语言")
+    private String userLang;
+
     // ==================== 客服信息 ====================
 
     @TableField("agent_id")

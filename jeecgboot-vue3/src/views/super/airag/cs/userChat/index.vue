@@ -871,6 +871,7 @@ async function initConversation() {
         userId: userId.value,
         userName: userName.value,
         deviceId: generateDeviceId(),
+        lang: navigator.language || navigator.userLanguage || 'en',
       },
     });
     if (res) {

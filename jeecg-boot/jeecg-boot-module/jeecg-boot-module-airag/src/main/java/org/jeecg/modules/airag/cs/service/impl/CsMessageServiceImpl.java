@@ -284,6 +284,95 @@ public class CsMessageServiceImpl implements ICsMessageService {
     }
 
     @Override
+    public void sendAutoMessages(String conversationId, String agentId, String agentName, String userLang) {
+        if (oConvertUtils.isEmpty(conversationId) || oConvertUtils.isEmpty(agentId)) {
+            return;
+        }
+
+        // 从配置读取自动消息
+        String autoMsgRedisKey = "cs:global:auto_messages";
+        String autoMsgConfigKey = "auto_messages";
+        String json = redisTemplate.opsForValue().get(autoMsgRedisKey);
+        if (json == null || json.isEmpty()) {
+            CsGlobalConfig config = csGlobalConfigMapper.selectById(autoMsgConfigKey);
+            json = config != null ? config.getConfigValue() : null;
+            if (json != null && !json.isEmpty()) {
+                redisTemplate.opsForValue().set(autoMsgRedisKey, json);
+            }
+        }
+        if (json == null || json.isEmpty()) {
+            return;
+        }
+
+        try {
+            JSONObject autoConfig = JSONObject.parseObject(json);
+            String defaultLang = autoConfig.getString("defaultLang");
+            JSONObject languages = autoConfig.getJSONObject("languages");
+            if (languages == null || languages.isEmpty()) {
+                return;
+            }
+
+            // 语言映射：将浏览器语言映射到配置中的语言key
+            String mappedLang = mapUserLang(userLang);
+            
+            // 查找匹配的语言配置
+            com.alibaba.fastjson.JSONArray messages = null;
+            JSONObject langConfig = languages.getJSONObject(mappedLang);
+            if (langConfig != null) {
+                messages = langConfig.getJSONArray("messages");
+            }
+            
+            // 如果没找到或消息为空，使用默认语言
+            if ((messages == null || messages.isEmpty()) && oConvertUtils.isNotEmpty(defaultLang)) {
+                langConfig = languages.getJSONObject(defaultLang);
+                if (langConfig != null) {
+                    messages = langConfig.getJSONArray("messages");
+                }
+            }
+
+            if (messages == null || messages.isEmpty()) {
+                return;
+            }
+
+            // 依次发送自动消息
+            for (int i = 0; i < messages.size(); i++) {
+                JSONObject msgObj = messages.getJSONObject(i);
+                String content = msgObj.getString("content");
+                if (oConvertUtils.isNotEmpty(content)) {
+                    sendAgentMessage(conversationId, agentId, agentName, content, null, null);
+                }
+            }
+
+            log.info("[CS-Message] 自动消息已发送: conversationId={}, agentId={}, lang={}, count={}",
+                    conversationId, agentId, mappedLang, messages.size());
+        } catch (Exception e) {
+            log.warn("[CS-Message] 发送自动消息失败: conversationId={}, error={}", conversationId, e.getMessage());
+        }
+    }
+
+    /**
+     * 映射用户浏览器语言到配置语言key
+     * zh-CN -> zh-CN, zh -> zh-CN, zh-TW/zh-HK -> zh-TW, en-* -> en
+     */
+    private String mapUserLang(String userLang) {
+        if (oConvertUtils.isEmpty(userLang)) {
+            return "";
+        }
+        String lang = userLang.toLowerCase().trim();
+        if ("zh-cn".equals(lang) || "zh".equals(lang)) {
+            return "zh-CN";
+        }
+        if ("zh-tw".equals(lang) || "zh-hk".equals(lang)) {
+            return "zh-TW";
+        }
+        if (lang.startsWith("en")) {
+            return "en";
+        }
+        // 原样返回，尝试直接匹配
+        return userLang;
+    }
+
+    @Override
     public CsMessage sendMessage(CsMessage message) {
         // 保存到MongoDB
         saveToMongo(message);

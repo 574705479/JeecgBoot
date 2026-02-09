@@ -653,6 +653,13 @@
             <span class="info-value" style="font-family: monospace; font-size: 12px;">{{ currentConversation.userDeviceId }}</span>
           </div>
           <div class="info-item">
+            <label>浏览器语言</label>
+            <span class="info-value">
+              <GlobalOutlined style="margin-right: 4px; color: #1890ff;" />
+              {{ currentConversation.userLang || '-' }}
+            </span>
+          </div>
+          <div class="info-item">
             <label>来源</label>
             <span class="info-value">{{ currentConversation.source || '直接访问' }}</span>
           </div>
@@ -834,7 +841,7 @@ import {
   StarFilled, StarOutlined, SwapOutlined, MenuUnfoldOutlined, MenuFoldOutlined,
   CloseOutlined, EditOutlined, PlusOutlined, InboxOutlined, MessageOutlined,
   SmileOutlined, ThunderboltOutlined, RobotOutlined, EyeOutlined, SettingOutlined,
-  MoreOutlined, DeleteOutlined, PaperClipOutlined, KeyOutlined, EnvironmentOutlined
+  MoreOutlined, DeleteOutlined, PaperClipOutlined, KeyOutlined, EnvironmentOutlined, GlobalOutlined
 } from '@ant-design/icons-vue';
 import { defHttp } from '/@/utils/http/axios';
 import { useGlobSetting } from '/@/hooks/setting';
@@ -2967,6 +2974,8 @@ function handleWsMessage(data: any) {
               userCountry: data.extra?.userCountry,
               userProvince: data.extra?.userProvince,
               userCity: data.extra?.userCity,
+              // 浏览器语言
+              userLang: data.extra?.userLang,
             };
             
             // 添加到列表头部

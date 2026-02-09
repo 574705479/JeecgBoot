@@ -74,6 +74,16 @@ public interface ICsMessageService {
     CsMessage sendVisitorPrologue(String conversationId);
 
     /**
+     * 发送自动消息（AI关闭时客服自动欢迎语）
+     *
+     * @param conversationId 会话ID
+     * @param agentId        客服ID
+     * @param agentName      客服名称
+     * @param userLang       用户浏览器语言
+     */
+    void sendAutoMessages(String conversationId, String agentId, String agentName, String userLang);
+
+    /**
      * 发送消息（通用）
      * 
      * @param message 消息实体

@@ -80,8 +80,24 @@ public class CsConversationController extends JeecgController<CsConversation, IC
         String userIp = IpUtils.getIpAddr(request);
         String userAgent = request.getHeader("User-Agent");
 
+        // 解析浏览器语言（优先前端传递的lang，其次Accept-Language头）
+        String userLang = params.get("lang");
+        if (userLang == null || userLang.isEmpty()) {
+            String acceptLang = request.getHeader("Accept-Language");
+            if (acceptLang != null && !acceptLang.isEmpty()) {
+                // 取首选语言，如 "zh-CN,zh;q=0.9,en;q=0.8" -> "zh-CN"
+                int commaIdx = acceptLang.indexOf(',');
+                userLang = commaIdx > 0 ? acceptLang.substring(0, commaIdx).trim() : acceptLang.trim();
+                // 去掉权重部分，如 "zh-CN;q=0.9" -> "zh-CN"
+                int semicolonIdx = userLang.indexOf(';');
+                if (semicolonIdx > 0) {
+                    userLang = userLang.substring(0, semicolonIdx).trim();
+                }
+            }
+        }
+
         CsConversation conversation = conversationService.createConversation(
-                appId, userId, userName, source, userIp, userAgent, deviceId);
+                appId, userId, userName, source, userIp, userAgent, deviceId, userLang);
         return Result.OK(conversation);
     }
 

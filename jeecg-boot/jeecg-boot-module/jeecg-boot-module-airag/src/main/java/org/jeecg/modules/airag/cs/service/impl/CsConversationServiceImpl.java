@@ -81,7 +81,7 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
     @Override
     @Transactional(rollbackFor = Exception.class)
     public CsConversation createConversation(String appId, String userId, String userName, String source,
-                                             String userIp, String userAgent, String deviceId) {
+                                             String userIp, String userAgent, String deviceId, String userLang) {
         // 读取AI开关和对话分配配置
         boolean aiEnabled = isAiEnabled();
         JSONObject assignConfig = getConversationAssignConfig();
@@ -133,6 +133,9 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         conversation.setUserProvince(geoInfo.get("province"));
         conversation.setUserCity(geoInfo.get("city"));
 
+        // 设置浏览器语言
+        conversation.setUserLang(userLang);
+
         if (assignedAgent != null) {
             // 有可用客服，直接分配
             conversation.setOwnerAgentId(assignedAgent.getId());
@@ -171,11 +174,21 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             log.info("[CS-Conversation] 创建会话(无在线客服): id={}, userId={}", conversation.getId(), userId);
         }
 
-        // 发送访客开场白（作为第一条消息）
-        try {
-            messageService.sendVisitorPrologue(conversation.getId());
-        } catch (Exception e) {
-            log.warn("[CS-Conversation] 发送开场白失败: {}", e.getMessage());
+        // 仅AI开启时发送AI开场白
+        if (aiEnabled) {
+            try {
+                messageService.sendVisitorPrologue(conversation.getId());
+            } catch (Exception e) {
+                log.warn("[CS-Conversation] 发送开场白失败: {}", e.getMessage());
+            }
+        } else if (assignedAgent != null) {
+            // AI关闭时发送自动消息（如果有配置）
+            try {
+                messageService.sendAutoMessages(conversation.getId(),
+                        assignedAgent.getId(), assignedAgent.getNickname(), conversation.getUserLang());
+            } catch (Exception e) {
+                log.warn("[CS-Conversation] 发送自动消息失败: {}", e.getMessage());
+            }
         }
         
         return conversation;
@@ -317,6 +330,8 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             extra.put("userCountry", conversation.getUserCountry());
             extra.put("userProvince", conversation.getUserProvince());
             extra.put("userCity", conversation.getUserCity());
+            // 浏览器语言
+            extra.put("userLang", conversation.getUserLang());
             
             CsWebSocketMessage notification = CsWebSocketMessage.builder()
                     .type("new_conversation")
@@ -345,7 +360,7 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             
             // 不存在则通过createConversation创建（自动分配）
             // 注意：指定ID的场景已不常见，走统一创建逻辑
-            return createConversation(appId, userId, userName, null, null, null, null);
+            return createConversation(appId, userId, userName, null, null, null, null, null);
         }
         
         // 没有指定ID，查找用户的活跃会话
@@ -355,7 +370,7 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         }
         
         // 创建新会话 (createConversation内部会广播)
-        return createConversation(appId, userId, userName, null, null, null, null);
+        return createConversation(appId, userId, userName, null, null, null, null, null);
     }
 
     @Override
