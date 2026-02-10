@@ -1,175 +1,81 @@
 <template>
-  <div :class="prefixCls" class="login-background-img" :style="loginBgStyle">
-    <AppLocalePicker class="absolute top-4 right-4 enter-x xl:text-gray-600" :showText="false"/>
-    <AppDarkModeToggle class="absolute top-3 right-7 enter-x" />
-    <div class="aui-logo" v-if="!getIsMobile">
-      <div>
-        <h3>
-          <img :src="logoDisplayUrl || logoUrl" :alt="appTitle" />
-        </h3>
+  <div class="cs-login-page" :style="loginBgStyle">
+    <!-- 登录卡片 -->
+    <div v-show="type === 'login'" class="cs-login-card">
+      <!-- Logo + 品牌 -->
+      <div class="cs-login-header">
+        <div class="cs-avatar-ring">
+          <img :src="logoDisplayUrl || logoUrl" :alt="appTitle" class="cs-logo-img" />
+        </div>
+        <h1 class="cs-app-title">{{ appTitle }}</h1>
+        <p class="cs-app-subtitle" v-if="appSubtitle">{{ appSubtitle }}</p>
       </div>
-    </div>
-    <div v-else class="aui-phone-logo">
-      <img :src="logoDisplayUrl || logoUrl" :alt="appTitle" />
-    </div>
-    <div v-show="type === 'login'">
-      <div class="aui-content">
-        <div class="aui-container">
-          <div class="aui-form">
-            <div class="aui-image">
-            <div class="aui-image-text">
-              <div class="login-brand-text">
-                <div class="login-brand-title">{{ appTitle }}</div>
-                <div class="login-brand-subtitle" v-if="appSubtitle">{{ appSubtitle }}</div>
-              </div>
+
+      <!-- 表单区 -->
+      <a-form ref="loginRef" :model="formData" v-if="activeIndex === 'accountLogin'" @keyup.enter.native="loginHandleClick" class="cs-login-form">
+        <div class="cs-input-group">
+          <div class="cs-input-wrapper">
+            <span class="cs-input-icon">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </span>
+            <a-input class="fix-auto-fill cs-input" :placeholder="t('sys.login.userName')" v-model:value="formData.username" :bordered="false" />
+          </div>
+          <div class="cs-input-wrapper">
+            <span class="cs-input-icon">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            </span>
+            <a-input class="fix-auto-fill cs-input" type="password" :placeholder="t('sys.login.password')" v-model:value="formData.password" :bordered="false" />
+          </div>
+          <div class="cs-input-wrapper cs-captcha-row">
+            <span class="cs-input-icon">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            </span>
+            <a-input class="fix-auto-fill cs-input cs-captcha-input" type="text" :placeholder="t('sys.login.inputCode')" v-model:value="formData.inputCode" :bordered="false" />
+            <div class="cs-captcha-img" @click="handleChangeCheckCode">
+              <img v-if="randCodeData.requestCodeSuccess" :src="randCodeData.randCodeImage" />
+              <img v-else :src="codeImg" />
             </div>
-            </div>
-            <div class="aui-formBox">
-              <div class="aui-formWell">
-                <div class="aui-flex aui-form-nav investment_title">
-                  <div class="aui-flex-box activeNav on">
-                    {{ t('sys.login.signInFormTitle') }}
-                  </div>
-                  <div class="aui-flex-box" v-show="!hideExtraLogin">
-                    {{ t('sys.login.mobileSignInFormTitle') }}
-                  </div>
-                </div>
-                <div class="aui-form-box" style="height: 240px">
-                  <a-form ref="loginRef" :model="formData" v-if="activeIndex === 'accountLogin'" @keyup.enter.native="loginHandleClick">
-                    <div class="aui-account">
-                      <div class="aui-inputClear">
-                        <i class="icon icon-code"></i>
-                        <a-form-item>
-                          <a-input class="fix-auto-fill" :placeholder="t('sys.login.userName')" v-model:value="formData.username" />
-                        </a-form-item>
-                      </div>
-                      <div class="aui-inputClear">
-                        <i class="icon icon-password"></i>
-                        <a-form-item>
-                          <a-input class="fix-auto-fill" type="password" :placeholder="t('sys.login.password')" v-model:value="formData.password" />
-                        </a-form-item>
-                      </div>
-                      <div class="aui-inputClear">
-                        <i class="icon icon-code"></i>
-                        <a-form-item>
-                          <a-input class="fix-auto-fill" type="text" :placeholder="t('sys.login.inputCode')" v-model:value="formData.inputCode" />
-                        </a-form-item>
-                        <div class="aui-code">
-                          <img v-if="randCodeData.requestCodeSuccess" :src="randCodeData.randCodeImage" @click="handleChangeCheckCode" />
-                          <img v-else style="margin-top: 2px; max-width: initial" :src="codeImg" @click="handleChangeCheckCode" />
-                        </div>
-                      </div>
-                      <div class="aui-inputClear" v-if="showDepart">
-                        <i class="icon icon-depart"></i>
-                        <div class="JLoginSelectDept">
-                          <a-select allow-clear style="width: 100%" :bordered="false" v-model:value="formData.loginOrgCode" :placeholder="t('sys.login.loginOrgCode')">
-                            <template #suffixIcon>
-                              <Icon icon="ant-design:gold-outline" />
-                            </template>
-                            <template v-for="depart in departList" :key="depart.orgCode">
-                              <a-select-option :value="depart.orgCode">{{ getShortDeptName(depart.label) }}</a-select-option>
-                            </template>
-                          </a-select>
-                        </div>
-                      </div>
-                      <div class="aui-flex">
-                        <div class="aui-flex-box">
-                          <div class="aui-choice">
-                            <a-checkbox v-model:checked="rememberMe">{{ t('sys.login.rememberMe') }}</a-checkbox>
-                          </div>
-                        </div>
-                        <div class="aui-forget" v-show="!hideExtraLogin">
-                          <a @click="forgetHandelClick"> {{ t('sys.login.forgetPassword') }}</a>
-                        </div>
-                      </div>
-                      <div class="aui-flex cs-online-login-row">
-                        <div class="aui-flex-box">
-                          <div class="aui-choice">
-                            <a-checkbox v-model:checked="csOnlineLogin" @change="onCsOnlineLoginChange">
-                              以在线客服状态登录
-                            </a-checkbox>
-                            <span class="cs-online-hint">{{ csOnlineLogin ? '(在线接待)' : '(隐身不接待)' }}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </a-form>
-                  <a-form v-else-if="!hideExtraLogin" ref="phoneFormRef" :model="phoneFormData" @keyup.enter.native="loginHandleClick">
-                    <div class="aui-account phone">
-                      <div class="aui-inputClear phoneClear">
-                        <a-input class="fix-auto-fill" :placeholder="t('sys.login.mobile')" v-model:value="phoneFormData.mobile" />
-                      </div>
-                      <div class="aui-inputClear">
-                        <a-input class="fix-auto-fill" :maxlength="6" :placeholder="t('sys.login.smsCode')" v-model:value="phoneFormData.smscode" />
-                        <div v-if="showInterval" class="aui-code" @click="getLoginCode">
-                          <a>{{ t('component.countdown.normalText') }}</a>
-                        </div>
-                        <div v-else class="aui-code">
-                          <span class="aui-get-code code-shape">{{ t('component.countdown.sendText', [unref(timeRuning)]) }}</span>
-                        </div>
-                      </div>
-                      <div class="aui-inputClear" v-if="showDepart">
-                        <div class="JLoginSelectDept">
-                          <a-select allow-clear style="width: 100%" :bordered="false" v-model:value="phoneFormData.loginOrgCode" :placeholder="t('sys.login.loginOrgCode')">
-                            <template #suffixIcon>
-                              <Icon icon="ant-design:gold-outline" />
-                            </template>
-                            <template v-for="depart in departList" :key="depart.orgCode">
-                              <a-select-option :value="depart.orgCode">{{ getShortDeptName(depart.label) }}</a-select-option>
-                            </template>
-                          </a-select>
-                        </div>
-                      </div>
-                    </div>
-                  </a-form>
-                </div>
-                <div class="aui-formButton">
-                  <div class="aui-flex">
-                    <a-button :loading="loginLoading" class="aui-link-login" type="primary" @click="loginHandleClick">
-                      {{ t('sys.login.loginButton') }}</a-button>
-                  </div>
-                  <div class="aui-flex" v-if="!hideExtraLogin">
-                    <a class="aui-linek-code aui-flex-box" @click="codeHandleClick">{{ t('sys.login.qrSignInFormTitle') }}</a>
-                  </div>
-                  <div class="aui-flex" v-if="!hideExtraLogin">
-                    <a class="aui-linek-code aui-flex-box" @click="registerHandleClick">{{ t('sys.login.registerButton') }}</a>
-                  </div>
-                </div>
-              </div>
-              <a-form @keyup.enter.native="loginHandleClick" v-if="!hideExtraLogin">
-                <div class="aui-flex aui-third-text">
-                  <div class="aui-flex-box aui-third-border">
-                    <span>{{ t('sys.login.otherSignIn') }}</span>
-                  </div>
-                </div>
-                <div class="aui-flex" :class="`${prefixCls}-sign-in-way`">
-                  <div class="aui-flex-box">
-                    <div class="aui-third-login">
-                      <a title="github" @click="onThirdLogin('github')"><GithubFilled /></a>
-                    </div>
-                  </div>
-                  <div class="aui-flex-box">
-                    <div class="aui-third-login">
-                      <a title="企业微信" @click="onThirdLogin('wechat_enterprise')"><icon-font class="item-icon" type="icon-qiyeweixin3" /></a>
-                    </div>
-                  </div>
-                  <div class="aui-flex-box">
-                    <div class="aui-third-login">
-                      <a title="钉钉" @click="onThirdLogin('dingtalk')"><DingtalkCircleFilled /></a>
-                    </div>
-                  </div>
-                  <div class="aui-flex-box">
-                    <div class="aui-third-login">
-                      <a title="微信" @click="onThirdLogin('wechat_open')"><WechatFilled /></a>
-                    </div>
-                  </div>
-                </div>
-              </a-form>
+          </div>
+          <div class="cs-input-wrapper" v-if="showDepart">
+            <span class="cs-input-icon">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            </span>
+            <div class="cs-dept-select">
+              <a-select allow-clear style="width: 100%" :bordered="false" v-model:value="formData.loginOrgCode" :placeholder="t('sys.login.loginOrgCode')">
+                <template v-for="depart in departList" :key="depart.orgCode">
+                  <a-select-option :value="depart.orgCode">{{ getShortDeptName(depart.label) }}</a-select-option>
+                </template>
+              </a-select>
             </div>
           </div>
         </div>
+
+        <!-- 选项行 -->
+        <div class="cs-options-row">
+          <a-checkbox v-model:checked="rememberMe" class="cs-checkbox">{{ t('sys.login.rememberMe') }}</a-checkbox>
+        </div>
+
+        <!-- 在线状态选择 -->
+        <div class="cs-status-row">
+          <div class="cs-status-toggle" :class="{ 'is-online': csOnlineLogin }" @click="toggleCsLoginStatus">
+            <span class="cs-status-dot"></span>
+            <span class="cs-status-label">{{ csOnlineLogin ? '在线登录' : '隐身登录' }}</span>
+          </div>
+          <span class="cs-status-hint">{{ csOnlineLogin ? '登录后自动在线接待访客' : '登录后不接收新会话分配' }}</span>
+        </div>
+
+        <!-- 登录按钮 -->
+        <a-button :loading="loginLoading" class="cs-login-btn" type="primary" block size="large" @click="loginHandleClick">
+          {{ t('sys.login.loginButton') }}
+        </a-button>
+      </a-form>
+
+      <!-- 底部信息 -->
+      <div class="cs-login-footer">
+        <span class="cs-footer-text">Powered by {{ appTitle }}</span>
       </div>
     </div>
+
     <div v-if="type === 'forgot' && !hideExtraLogin" :class="`${prefixCls}-form`">
       <MiniForgotpad ref="forgotRef" @go-back="goBack" @success="handleSuccess" />
     </div>
@@ -179,10 +85,7 @@
     <div v-if="type === 'codeLogin' && !hideExtraLogin" :class="`${prefixCls}-form`">
       <MiniCodelogin ref="codeRef" @go-back="goBack" @success="handleSuccess" />
     </div>
-    <!-- 第三方登录相关弹框 -->
     <ThirdModal ref="thirdModalRef"></ThirdModal>
-
-    <!-- 图片验证码弹窗 -->
     <CaptchaModal @register="captchaRegisterModal" @ok="getLoginCode" />
   </div>
 </template>
@@ -249,6 +152,10 @@
   function onCsOnlineLoginChange(e: any) {
     const checked = e?.target?.checked ?? e;
     localStorage.setItem(CS_ONLINE_LOGIN_KEY, String(checked));
+  }
+  function toggleCsLoginStatus() {
+    csOnlineLogin.value = !csOnlineLogin.value;
+    localStorage.setItem(CS_ONLINE_LOGIN_KEY, String(csOnlineLogin.value));
   }
   //手机号登录还是账号登录
   const activeIndex = ref<string>('accountLogin');
@@ -606,157 +513,409 @@
 </script>
 
 <style lang="less" scoped>
-  @import '/@/assets/loginmini/style/home.less';
-  @import '/@/assets/loginmini/style/base.less';
+/* ============ 聊天软件风格登录页 ============ */
 
-  :deep(.ant-input:focus) {
-    box-shadow: none;
-  }
-  .aui-get-code {
-    float: right;
-    position: relative;
-    z-index: 3;
-    background: #ffffff;
-    color: #1573e9;
-    border-radius: 100px;
-    padding: 5px 16px;
-    margin: 7px;
-    border: 1px solid #1573e9;
-    top: 12px;
-  }
+.cs-login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  position: relative;
+  overflow: hidden;
 
-  .aui-get-code:hover {
-    color: #1573e9;
-  }
-
-  .code-shape {
-    border-color: #dadada !important;
-    color: #aaa !important;
-  }
-
-  :deep(.jeecg-dark-switch){
-    position:absolute;
-    margin-right: 10px;
-  }
-  .cs-online-login-row {
-    margin-top: 2px;
-
-    .cs-online-hint {
-      font-size: 12px;
-      color: #999;
-      margin-left: 4px;
-    }
-  }
-  .aui-link-login{
-    height: 42px;
-    padding: 10px 15px;
-    font-size: 14px;
-    border-radius: 8px;
-    margin-top: 15px;
-    margin-bottom: 8px;
-    flex: 1;
-    color: #fff;
-  }
-  .aui-phone-logo{
+  &::before {
+    content: '';
     position: absolute;
-    margin-left: 10px;
-    width: 60px;
-    top:2px;
-    z-index: 4;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(circle, rgba(255,255,255,0.08) 0%, transparent 60%);
+    animation: cs-bg-rotate 20s linear infinite;
   }
-  .top-3{
-    top: 0.45rem;
+}
+
+@keyframes cs-bg-rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.cs-login-card {
+  position: relative;
+  z-index: 2;
+  width: 400px;
+  max-width: 92vw;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(20px);
+  border-radius: 24px;
+  padding: 40px 36px 30px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(255,255,255,0.1);
+  animation: cs-card-in 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes cs-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(30px) scale(0.96);
   }
-  .JLoginSelectDept {
-    margin:5px auto;
-    :deep(.ant-select-selection-placeholder) {
-      font-size: 14px;
-      color: #9a9a9a;
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ---- Header 区域 ---- */
+.cs-login-header {
+  text-align: center;
+  margin-bottom: 28px;
+}
+
+.cs-avatar-ring {
+  width: 80px;
+  height: 80px;
+  margin: 0 auto 16px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  padding: 3px;
+  box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
+  animation: cs-ring-pulse 3s ease-in-out infinite;
+}
+
+@keyframes cs-ring-pulse {
+  0%, 100% { box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4); }
+  50% { box-shadow: 0 4px 30px rgba(102, 126, 234, 0.6); }
+}
+
+.cs-logo-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #fff;
+  display: block;
+}
+
+.cs-app-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: #1a1a2e;
+  margin: 0 0 4px;
+  letter-spacing: 0.5px;
+}
+
+.cs-app-subtitle {
+  font-size: 13px;
+  color: #888;
+  margin: 0;
+}
+
+/* ---- 表单区 ---- */
+.cs-login-form {
+  :deep(.ant-form-item) {
+    margin-bottom: 0;
+  }
+}
+
+.cs-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.cs-input-wrapper {
+  display: flex;
+  align-items: center;
+  background: #f4f6fb;
+  border-radius: 12px;
+  padding: 0 14px;
+  height: 48px;
+  border: 2px solid transparent;
+  transition: all 0.25s ease;
+
+  &:hover {
+    background: #eef1f8;
+  }
+
+  &:focus-within {
+    background: #fff;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.12);
+  }
+}
+
+.cs-input-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #aab0c6;
+  margin-right: 10px;
+  transition: color 0.25s;
+
+  .cs-input-wrapper:focus-within & {
+    color: #667eea;
+  }
+}
+
+.cs-input {
+  flex: 1;
+  font-size: 14px;
+  height: 44px;
+  background: transparent !important;
+
+  :deep(input) {
+    background: transparent !important;
+    font-size: 14px;
+    color: #333;
+  }
+}
+
+/* 验证码行 */
+.cs-captcha-row {
+  position: relative;
+}
+
+.cs-captcha-input {
+  flex: 1;
+  margin-right: 100px;
+}
+
+.cs-captcha-img {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 95px;
+  height: 34px;
+  cursor: pointer;
+  border-radius: 6px;
+  overflow: hidden;
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+}
+
+/* 部门选择 */
+.cs-dept-select {
+  flex: 1;
+
+  :deep(.ant-select-selection-placeholder) {
+    font-size: 14px;
+    color: #aab0c6;
+  }
+}
+
+/* ---- 选项行 ---- */
+.cs-options-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14px;
+  padding: 0 2px;
+}
+
+.cs-checkbox {
+  font-size: 13px;
+  color: #666;
+
+  :deep(.ant-checkbox-inner) {
+    border-radius: 4px;
+  }
+
+  :deep(.ant-checkbox-checked .ant-checkbox-inner) {
+    background-color: #667eea;
+    border-color: #667eea;
+  }
+}
+
+/* ---- 在线状态行 ---- */
+.cs-status-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: #f8f9fd;
+  border-radius: 10px;
+}
+
+.cs-status-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  padding: 4px 12px;
+  border-radius: 20px;
+  background: #e8e8ee;
+  transition: all 0.3s ease;
+  flex-shrink: 0;
+
+  &.is-online {
+    background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+
+    .cs-status-dot {
+      background: #fff;
+      box-shadow: 0 0 6px rgba(255,255,255,0.8);
+    }
+
+    .cs-status-label {
+      color: #fff;
+      font-weight: 600;
     }
   }
+}
+
+.cs-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #aaa;
+  transition: all 0.3s;
+}
+
+.cs-status-label {
+  font-size: 12px;
+  color: #888;
+  font-weight: 500;
+  transition: all 0.3s;
+}
+
+.cs-status-hint {
+  font-size: 11px;
+  color: #aab0c6;
+  line-height: 1.4;
+}
+
+/* ---- 登录按钮 ---- */
+.cs-login-btn {
+  margin-top: 22px;
+  height: 48px;
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.35);
+  transition: all 0.3s ease;
+
+  &:hover, &:focus {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5);
+    background: linear-gradient(135deg, #5a6fd6 0%, #6a4396 100%);
+  }
+
+  &:active {
+    transform: translateY(0);
+    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.35);
+  }
+}
+
+/* ---- 底部 ---- */
+.cs-login-footer {
+  text-align: center;
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid #eef0f5;
+}
+
+.cs-footer-text {
+  font-size: 11px;
+  color: #c0c4d0;
+  letter-spacing: 0.3px;
+}
+
+/* ---- 自适应 ---- */
+@media (max-width: 480px) {
+  .cs-login-card {
+    border-radius: 18px;
+    padding: 32px 24px 24px;
+  }
+
+  .cs-avatar-ring {
+    width: 64px;
+    height: 64px;
+  }
+
+  .cs-app-title {
+    font-size: 18px;
+  }
+
+  .cs-input-wrapper {
+    height: 44px;
+  }
+
+  .cs-login-btn {
+    height: 44px;
+    font-size: 15px;
+  }
+}
 </style>
 
 <style lang="less">
-@prefix-cls: ~'@{namespace}-mini-login';
-@dark-bg: #293146;
-
+/* 暗色模式兼容 */
 html[data-theme='dark'] {
-  .@{prefix-cls} {
-    background-color: @dark-bg !important;
-    background-image: none;
+  .cs-login-page {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  }
 
-    &::before {
-      background-image: url(/@/assets/svg/login-bg-dark.svg);
-    }
-    .aui-inputClear{
-      background-color: #232a3b !important;
-    }
-    .ant-input,
-    .ant-input-password {
-      background-color: #232a3b !important;
-    }
+  .cs-login-card {
+    background: rgba(30, 36, 54, 0.95);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+  }
 
-    .ant-btn:not(.ant-btn-link):not(.ant-btn-primary) {
-      border: 1px solid #4a5569 !important;
-    }
+  .cs-app-title {
+    color: #e0e0e0;
+  }
 
-    &-form {
-      background: @dark-bg !important;
+  .cs-input-wrapper {
+    background: #252d3f;
+
+    &:hover {
+      background: #2a3348;
     }
 
-    .app-iconify {
-      color: #fff !important;
-    }
-    .aui-inputClear input,.aui-input-line input,.aui-choice{
-      color: #c9d1d9 !important;
-    }
-
-    .aui-formBox{
-      background-color: @dark-bg !important;
-    }
-    .aui-third-text span{
-      background-color: @dark-bg !important;
-    }
-    .aui-form-nav .aui-flex-box{
-      color: #c9d1d9 !important;
-    }
-
-    .aui-formButton .aui-linek-code{
-      background:  @dark-bg !important;
-      color: white !important;
-    }
-    .aui-code-line{
-      border-left: none !important;
-    }
-    .ant-checkbox-inner,.aui-success h3{
-      border-color: #c9d1d9;
-    }
-    // 代码逻辑说明: 【QQYUN-6363】这个样式代码有问题，不在里面，导致表达式有问题------------
-    &-sign-in-way {
-      .anticon {
-        font-size: 22px !important;
-        color: #888 !important;
-        cursor: pointer !important;
-
-        &:hover {
-          color: @primary-color !important;
-        }
-      }
+    &:focus-within {
+      background: #1e2438;
+      border-color: #667eea;
     }
   }
 
+  .cs-input :deep(input),
   input.fix-auto-fill,
   .fix-auto-fill input {
-    -webkit-text-fill-color: #c9d1d9 !important;
-    box-shadow: inherit !important;
+    color: #e0e0e0 !important;
+    -webkit-text-fill-color: #e0e0e0 !important;
   }
 
-  .ant-divider-inner-text {
-    font-size: 12px !important;
-    color: @text-color-secondary !important;
+  .cs-status-row {
+    background: #252d3f;
   }
-  .aui-third-login a{
-    background: transparent;
+
+  .cs-status-toggle:not(.is-online) {
+    background: #333c52;
+
+    .cs-status-label {
+      color: #aab0c6;
+    }
+  }
+
+  .cs-checkbox {
+    color: #aab0c6;
+  }
+
+  .cs-login-footer {
+    border-top-color: #2a3348;
+  }
+
+  .cs-footer-text {
+    color: #555e72;
   }
 }
 </style>
