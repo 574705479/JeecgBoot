@@ -82,6 +82,16 @@
                           <a @click="forgetHandelClick"> {{ t('sys.login.forgetPassword') }}</a>
                         </div>
                       </div>
+                      <div class="aui-flex cs-online-login-row">
+                        <div class="aui-flex-box">
+                          <div class="aui-choice">
+                            <a-checkbox v-model:checked="csOnlineLogin" @change="onCsOnlineLoginChange">
+                              以在线客服状态登录
+                            </a-checkbox>
+                            <span class="cs-online-hint">{{ csOnlineLogin ? '(在线接待)' : '(隐身不接待)' }}</span>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </a-form>
                   <a-form v-else-if="!hideExtraLogin" ref="phoneFormRef" :model="phoneFormData" @keyup.enter.native="loginHandleClick">
@@ -233,6 +243,13 @@
   // 记住用户名
   const rememberMe = ref<boolean>(false);
   const REMEMBER_USERNAME_KEY = 'LOGIN_REMEMBER_USERNAME';
+  // 客服在线状态登录
+  const CS_ONLINE_LOGIN_KEY = 'CS_ONLINE_LOGIN';
+  const csOnlineLogin = ref<boolean>(localStorage.getItem(CS_ONLINE_LOGIN_KEY) !== 'false');
+  function onCsOnlineLoginChange(e: any) {
+    const checked = e?.target?.checked ?? e;
+    localStorage.setItem(CS_ONLINE_LOGIN_KEY, String(checked));
+  }
   //手机号登录还是账号登录
   const activeIndex = ref<string>('accountLogin');
   const type = ref<string>('login');
@@ -620,6 +637,15 @@
   :deep(.jeecg-dark-switch){
     position:absolute;
     margin-right: 10px;
+  }
+  .cs-online-login-row {
+    margin-top: 2px;
+
+    .cs-online-hint {
+      font-size: 12px;
+      color: #999;
+      margin-left: 4px;
+    }
   }
   .aui-link-login{
     height: 42px;

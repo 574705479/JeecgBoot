@@ -130,7 +130,7 @@ function getStatusText(status: number) {
   switch (status) {
     case 1: return '在线';
     case 2: return '忙碌';
-    default: return '离线';
+    default: return '隐身';
   }
 }
 

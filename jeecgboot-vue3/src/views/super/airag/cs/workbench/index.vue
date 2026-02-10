@@ -12,7 +12,7 @@
           <a-switch 
             v-model:checked="isOnline" 
             checked-children="在线" 
-            un-checked-children="离线"
+            un-checked-children="隐身"
             @change="toggleOnline"
           />
           <a-tooltip title="设置">
@@ -823,7 +823,7 @@
               <div class="agent-stats">
                 <span>
                   <a-badge :status="agent.status === 1 ? 'success' : 'default'" />
-                  {{ agent.status === 1 ? '在线' : '离线' }}
+                  {{ agent.status === 1 ? '在线' : '隐身' }}
                 </span>
                 <span>当前接待: {{ agent.currentSessions || 0 }}/{{ agent.maxSessions || 10 }}</span>
               </div>
@@ -855,6 +855,7 @@
         :placeholder="'请输入' + editModalTitle"
       />
     </a-modal>
+
   </div>
 </template>
 
@@ -1315,10 +1316,16 @@ async function loadAgentInfo() {
       }
       // 注意：visitorAppId 是全局配置，在 loadGlobalVisitorApp() 中加载
       
+      // 根据登录页选择的状态决定是否自动上线
       if (!isOnline.value) {
-        await httpPost({ url: `/cs/agent/online/${agentId.value}` });
-        agentStatus.value = 1;
-        isOnline.value = true;
+        const csOnlineLogin = localStorage.getItem('CS_ONLINE_LOGIN');
+        if (csOnlineLogin !== 'false') {
+          // 登录页选择了"在线"（默认），自动上线
+          await httpPost({ url: `/cs/agent/online/${agentId.value}` });
+          agentStatus.value = 1;
+          isOnline.value = true;
+        }
+        // 否则隐身进入，不调用上线接口
       }
     }
   } catch (e) {
@@ -1781,6 +1788,8 @@ async function toggleOnline(checked: boolean) {
       await httpPost({ url: `/cs/agent/offline/${agentId.value}` });
     }
     agentStatus.value = checked ? 1 : 0;
+    // 同步到 localStorage，刷新页面后保持当前状态
+    localStorage.setItem('CS_ONLINE_LOGIN', String(checked));
   } catch (e) {
     message.error('操作失败');
     isOnline.value = !checked;
@@ -3313,11 +3322,11 @@ function handleWsMessage(data: any) {
         // 显示提示（仅当其他客服状态变化时）
         if (changedAgentId !== agentId.value) {
           const agentName = statusData.agentName || '客服';
-          // 只在上线/下线时提示，忙碌状态不提示
+          // 只在上线/隐身时提示，忙碌状态不提示
           if (newStatus === 1) {
             console.log('[Workbench] 客服已上线:', agentName);
           } else if (newStatus === 0) {
-            console.log('[Workbench] 客服已下线:', agentName);
+            console.log('[Workbench] 客服已隐身:', agentName);
           }
         }
       }
@@ -4890,4 +4899,6 @@ function restoreMessageScroll() {
     transition: opacity 0.2s;
   }
 }
+
+
 </style>

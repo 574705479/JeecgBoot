@@ -51,7 +51,7 @@ const [registerTable, { reload }] = useTable({
       { field: 'status', label: '状态', component: 'Select', colProps: { span: 6 },
         componentProps: {
           options: [
-            { label: '离线', value: 0 },
+            { label: '隐身', value: 0 },
             { label: '在线', value: 1 },
             { label: '忙碌', value: 2 },
           ]
@@ -86,7 +86,7 @@ function getStatusText(status: number) {
   switch (status) {
     case 1: return '在线';
     case 2: return '忙碌';
-    default: return '离线';
+    default: return '隐身';
   }
 }
 
