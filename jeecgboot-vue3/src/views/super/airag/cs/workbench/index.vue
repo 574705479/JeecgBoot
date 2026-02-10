@@ -222,6 +222,10 @@
               <span class="agent-label">对话中:</span>
               <span class="agent-name">{{ getLastTalkingAgent(conv) }}</span>
             </div>
+            <div class="conv-waiting" v-if="agentTimeoutConfig.enabled && visitorWaitingSeconds[conv.id]">
+              <span class="waiting-icon">⏱</span>
+              <span class="waiting-text">等待回复 {{ formatWaitingTime(visitorWaitingSeconds[conv.id]) }}</span>
+            </div>
           </div>
           <div class="conv-badge" v-if="conv.unreadCount > 0">
             {{ conv.unreadCount > 99 ? '99+' : conv.unreadCount }}
@@ -909,6 +913,14 @@ const visitorDomainWhitelist = ref('');
 const visitorSecretSaving = ref(false);
 const visitorSecretGenerating = ref(false);
 
+// 客服超时未回复配置
+const agentTimeoutConfig = ref({ enabled: false, seconds: 20 });
+// 访客等待回复时长（conversationId -> 等待秒数），每秒刷新
+const visitorWaitingSeconds = ref<Record<string, number>>({});
+// 访客最后发消息时间戳（conversationId -> timestamp ms），客服回复后清除
+const visitorLastMsgTime = new Map<string, number>();
+let waitingTimerHandle: ReturnType<typeof setInterval> | null = null;
+
 // 会话列表
 const filter = ref('mine');
 const conversations = ref<any[]>([]);
@@ -1198,7 +1210,9 @@ onMounted(async () => {
   await loadAiEnabled();          // 加载AI开关状态
   await loadGlobalVisitorApp();  // 加载全局访客AI应用配置
   await loadVisitorAccessConfig(); // 加载全局访客接入配置
+  await loadAgentTimeoutConfig();  // 加载客服超时未回复配置
   await loadConversations();
+  startWaitingTimer();             // 启动访客等待时长计时器
   connectWebSocket();
   startFallbackPoll();
   hasMounted.value = true;
@@ -1219,6 +1233,7 @@ onUnmounted(() => {
     stopWsHealthCheck();
   }
   refreshTimer && clearInterval(refreshTimer);
+  stopWaitingTimer();
   window.removeEventListener('online', handleNetworkOnline);
   document.removeEventListener('visibilitychange', handleVisibilityChange);
   if (messagesEl) {
@@ -1803,6 +1818,86 @@ function loadStatsDebounced() {
   }, 500); // 500ms 延迟
 }
 
+// ============ 客服超时未回复 - 访客等待时长 ============
+
+/** 加载超时配置 */
+async function loadAgentTimeoutConfig() {
+  try {
+    const res = await httpGet({ url: '/cs/agent/global/conversation-assign' });
+    const data = res?.result || res;
+    if (data?.agentTimeoutReminder) {
+      agentTimeoutConfig.value = {
+        enabled: data.agentTimeoutReminder.enabled === true,
+        seconds: data.agentTimeoutReminder.seconds ?? 20,
+      };
+    }
+  } catch (e) {
+    console.warn('[CS-Timeout] 加载超时配置失败', e);
+  }
+}
+
+/** 启动访客等待时长计时器（每秒刷新） */
+function startWaitingTimer() {
+  stopWaitingTimer();
+  waitingTimerHandle = setInterval(() => {
+    if (!agentTimeoutConfig.value.enabled) return;
+    const now = Date.now();
+    const threshold = agentTimeoutConfig.value.seconds;
+    const newWaiting: Record<string, number> = {};
+    visitorLastMsgTime.forEach((ts, convId) => {
+      const elapsed = Math.floor((now - ts) / 1000);
+      if (elapsed >= threshold) {
+        newWaiting[convId] = elapsed;
+      }
+    });
+    visitorWaitingSeconds.value = newWaiting;
+  }, 1000);
+}
+
+function stopWaitingTimer() {
+  if (waitingTimerHandle) {
+    clearInterval(waitingTimerHandle);
+    waitingTimerHandle = null;
+  }
+}
+
+/** 格式化等待秒数为可读文本 */
+function formatWaitingTime(seconds: number): string {
+  if (seconds < 60) return `${seconds}秒`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}分${seconds % 60}秒`;
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return `${h}时${m}分`;
+}
+
+/** 标记会话 - 访客发来消息（开始计时） */
+function markVisitorWaiting(conversationId: string, timestamp?: number) {
+  visitorLastMsgTime.set(conversationId, timestamp || Date.now());
+}
+
+/** 清除会话的等待标记（客服已回复） */
+function clearVisitorWaiting(conversationId: string) {
+  visitorLastMsgTime.delete(conversationId);
+  const w = { ...visitorWaitingSeconds.value };
+  delete w[conversationId];
+  visitorWaitingSeconds.value = w;
+}
+
+/** 初始化已有会话的等待追踪（基于未读数 > 0 且已分配） */
+function initWaitingTracking() {
+  conversations.value.forEach((conv: any) => {
+    if (conv.status === 1 && conv.unreadCount > 0 && conv.lastMessageTime) {
+      // 有未读消息表示可能有访客消息未回复
+      const ts = new Date(conv.lastMessageTime).getTime();
+      if (ts > 0) {
+        visitorLastMsgTime.set(conv.id, ts);
+      }
+    }
+  });
+}
+
+// ============ 加载会话列表 ============
+
 async function loadConversations() {
   const requestId = ++conversationsRequestSeq;
   loadingConversations.value = true;
@@ -1858,7 +1953,10 @@ async function loadConversations() {
     const cacheKey = getConversationsCacheKey();
     conversationsCache.set(cacheKey, newConversations);
     conversationsCacheTime.set(cacheKey, Date.now());
-    
+
+    // 初始化访客等待追踪
+    initWaitingTracking();
+
     // 异步预取昵称，避免首次加载显示为“访客”
     newConversations.forEach((conv: any) => {
       if (!conv.visitorNickname) {
@@ -2348,6 +2446,9 @@ async function sendMessage() {
   
   const wasUnassigned = currentConversation.value.status === 0; // 记录是否是待接入状态
   let localMsgId = '';
+
+  // 客服发送消息，清除该会话的访客等待标记
+  clearVisitorWaiting(currentConversation.value.id);
   
   try {
     if (currentReplyMode.value === 0) {
@@ -2864,11 +2965,17 @@ function handleWsMessage(data: any) {
         conv.lastMessageTime = new Date().toISOString();
         if (data.senderType === 0) {
           conv.userOnline = true;
+          // 访客发消息 → 标记开始等待客服回复
+          markVisitorWaiting(data.conversationId);
         }
         
         // ★ 问题2修复：如果是客服消息，更新"对话中"的客服名称
         if (data.senderType === 2 && data.senderName && conv.status === 1) {
           conv.lastTalkingAgent = data.senderName;
+        }
+        // 客服回复 → 清除访客等待标记
+        if (data.senderType === 2) {
+          clearVisitorWaiting(data.conversationId);
         }
         
         // 如果不是当前会话，增加未读数
@@ -3053,6 +3160,9 @@ function handleWsMessage(data: any) {
           rawData: data
         });
         
+        // 清除超时等待标记
+        clearVisitorWaiting(conversationId);
+
         const closedConv = conversations.value.find(c => c.id === conversationId);
         if (closedConv) {
           // 更新会话状态
@@ -3279,6 +3389,17 @@ function handleWsMessage(data: any) {
         currentConversation.value.status = 2;
       }
       loadConversations();
+      break;
+    case 'agent_timeout_reminder':
+      // 客服超时未回复提醒（后端定时任务推送）
+      if (data.conversationId) {
+        // 确保该会话被标记为等待中（可能前端重连后丢失了追踪）
+        if (!visitorLastMsgTime.has(data.conversationId)) {
+          const timeoutSec = data.extra?.timeoutSeconds || agentTimeoutConfig.value.seconds;
+          // 倒推开始等待的时间
+          markVisitorWaiting(data.conversationId, Date.now() - timeoutSec * 1000);
+        }
+      }
       break;
     case 'visitor_updated': {
       const extraData = data.extra || data;
@@ -3880,6 +4001,30 @@ function restoreMessageScroll() {
       color: #1890ff;
       font-weight: 500;
     }
+  }
+
+  .conv-waiting {
+    font-size: 11px;
+    margin-top: 3px;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    color: #ff4d4f;
+    font-weight: 500;
+    animation: waiting-pulse 2s ease-in-out infinite;
+
+    .waiting-icon {
+      font-size: 12px;
+    }
+
+    .waiting-text {
+      white-space: nowrap;
+    }
+  }
+
+  @keyframes waiting-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
   }
   
   .conv-badge {
