@@ -34,6 +34,13 @@ export async function loadBrandConfig(): Promise<BrandConfig | null> {
     const data = res?.result || res;
     const normalized = normalizeBrand(data);
     if (Object.keys(normalized).length) {
+      // 预解析资源URL并存入localStorage，供 index.html 加载页直接使用
+      if (normalized.logoUrl) {
+        normalized._resolvedLogoUrl = resolveBrandUrl(normalized.logoUrl);
+      }
+      if (normalized.faviconUrl) {
+        normalized._resolvedFaviconUrl = resolveBrandUrl(normalized.faviconUrl);
+      }
       window.__APP_BRAND__ = Object.assign({}, window.__APP_BRAND__ || {}, normalized);
       window.localStorage.setItem(BRAND_STORAGE_KEY, JSON.stringify(normalized));
       applyBrandToDom(normalized);
@@ -76,5 +83,13 @@ export function applyBrandToDom(brand: Record<string, string>) {
   const loadingEl = document.getElementById('app-loading-title');
   if (loadingEl) {
     loadingEl.textContent = brand.loadingTitle || title || loadingEl.textContent || '';
+  }
+  // 更新 loading logo
+  const logoUrl = brand.logoUrl;
+  if (logoUrl) {
+    const logoEl = document.getElementById('app-loading-logo') as HTMLImageElement | null;
+    if (logoEl) {
+      logoEl.src = resolveBrandUrl(logoUrl);
+    }
   }
 }
