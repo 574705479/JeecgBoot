@@ -52,6 +52,8 @@
 
       <!-- 正常聊天模式 -->
       <template v-else>
+      <div class="chat-main-layout" :style="dynamicCssVars">
+      <div class="chat-main-column">
       <!-- 留言回复提醒卡片 -->
       <div v-if="unreadReplies.length > 0" class="leave-message-replies">
         <div v-for="reply in unreadReplies" :key="reply.id" class="reply-card">
@@ -65,11 +67,11 @@
         </div>
       </div>
       <!-- 头部 -->
-      <div class="chat-header">
+      <div class="chat-header" v-if="chatWindowConfig.headerVisible !== false" :style="{ background: chatWindowConfig.themeColor || '#667eea' }">
         <div class="header-info">
-          <img class="app-avatar" :src="appInfo.avatar || defaultAvatar" />
+          <img class="app-avatar" :src="chatWindowConfig.logo ? resolveFileUrl(chatWindowConfig.logo) : (appInfo.avatar || defaultAvatar)" />
           <div class="app-info">
-            <span class="app-name">{{ appInfo.name || '在线客服' }}</span>
+            <span class="app-name">{{ chatWindowConfig.pageTitle || appInfo.name || '在线客服' }}</span>
             <span class="status-text">
               <span :class="['status-dot', connectionStatus]"></span>
               {{ connectionStatusText }}
@@ -79,9 +81,13 @@
           </div>
         </div>
         <div class="header-actions">
-          <a-tooltip title="清空聊天记录">
-            <DeleteOutlined @click="clearMessages" />
-          </a-tooltip>
+        </div>
+      </div>
+      <!-- 滚动文字（跑马灯） -->
+      <div v-if="chatWindowConfig.scrollText" class="scroll-text-bar"
+           :style="{ background: chatWindowConfig.scrollTextBgColor || '#1890ff', color: chatWindowConfig.scrollTextColor || '#fff' }">
+        <div class="scroll-text-content" :style="{ animationDuration: (chatWindowConfig.scrollDuration || 15) + 's' }">
+          {{ chatWindowConfig.scrollText }}
         </div>
       </div>
 
@@ -194,8 +200,8 @@
       </template>
     </div>
 
-    <!-- 预设问题 -->
-    <div v-if="presetQuestions.length > 0" class="preset-questions">
+    <!-- 预设问题（配置FAQ开启时隐藏AI预设问题，优先展示配置FAQ） -->
+    <div v-if="presetQuestions.length > 0 && !(chatWindowConfig.faqEnabled && chatWindowConfig.faqList?.length > 0)" class="preset-questions">
       <div class="preset-title">
         <BulbOutlined />
         <span>常见问题</span>
@@ -212,8 +218,49 @@
       </div>
     </div>
 
+    <!-- 手机端FAQ（仅窄屏显示，PC端在右侧sidebar展示） -->
+    <div v-if="chatWindowConfig.faqEnabled && chatWindowConfig.faqList?.length > 0" class="faq-mobile-section">
+      <div class="faq-mobile-header" @click="faqMobileExpanded = !faqMobileExpanded">
+        <QuestionCircleOutlined />
+        <span>常见问题</span>
+        <span class="faq-mobile-toggle">{{ faqMobileExpanded ? '收起' : '展开' }}</span>
+      </div>
+      <div v-if="faqMobileExpanded" class="faq-mobile-list">
+        <div v-for="(faq, idx) in chatWindowConfig.faqList" :key="idx" class="faq-mobile-item" @click="handleFaqClick(faq)">
+          {{ faq.question }}
+        </div>
+      </div>
+    </div>
+
     <!-- 输入区域 -->
     <div class="chat-input" v-if="!conversationClosed">
+      <!-- 附件预览 -->
+      <div v-if="attachmentList.length > 0" class="attachment-preview-bar">
+        <div v-for="(att, idx) in attachmentList" :key="idx" class="attachment-thumb">
+          <img v-if="att.type === 'image'" :src="att.previewUrl || att.url" class="att-img" />
+          <div v-else class="att-file">
+            <span v-if="att.type === 'video'">🎬</span>
+            <span v-else>📄</span>
+            <span class="att-name">{{ att.name }}</span>
+          </div>
+          <span class="att-remove" @click="removeAttachment(idx)">×</span>
+          <div v-if="att.uploading" class="att-uploading"><a-spin size="small" /></div>
+        </div>
+      </div>
+      <!-- 工具栏 -->
+      <div class="input-toolbar" v-if="chatWindowConfig.sendEmoji || chatWindowConfig.sendImage || chatWindowConfig.sendVideo || chatWindowConfig.sendPdf">
+        <SmileOutlined v-if="chatWindowConfig.sendEmoji" class="toolbar-icon" @click="showEmojiPanel = !showEmojiPanel" title="表情" />
+        <PictureOutlined v-if="chatWindowConfig.sendImage" class="toolbar-icon" @click="triggerFileInput('image')" title="图片" />
+        <VideoCameraOutlined v-if="chatWindowConfig.sendVideo" class="toolbar-icon" @click="triggerFileInput('video')" title="视频" />
+        <FilePdfOutlined v-if="chatWindowConfig.sendPdf" class="toolbar-icon" @click="triggerFileInput('pdf')" title="PDF" />
+        <input ref="imageInputRef" type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/bmp,image/svg+xml" style="display:none" @change="handleFileSelected($event, 'image')" />
+        <input ref="videoInputRef" type="file" accept="video/mp4,video/webm,video/ogg,video/quicktime,video/x-msvideo,video/x-matroska,video/x-flv,video/3gpp,.mp4,.webm,.ogg,.mov,.avi,.mkv,.flv,.3gp" style="display:none" @change="handleFileSelected($event, 'video')" />
+        <input ref="pdfInputRef" type="file" accept=".pdf,application/pdf" style="display:none" @change="handleFileSelected($event, 'pdf')" />
+      </div>
+      <!-- 表情面板 -->
+      <div style="position:relative">
+        <EmojiPicker :visible="showEmojiPanel" @select="appendEmoji" @close="showEmojiPanel = false" />
+      </div>
       <a-textarea
         v-model:value="inputMessage"
         :placeholder="aiResponding ? 'AI正在回复中，请稍候...' : '请输入您要咨询的问题...'"
@@ -225,7 +272,7 @@
         type="primary" 
         @click="sendMessage" 
         :loading="sending || aiResponding" 
-        :disabled="!inputMessage.trim() || aiResponding"
+        :disabled="(!inputMessage.trim() && !attachmentList.length) || aiResponding"
       >
         <SendOutlined />
         {{ aiResponding ? 'AI回复中...' : '发送' }}
@@ -254,20 +301,43 @@
           </div>
         </div>
       </a-modal>
+      </div><!-- chat-main-column end -->
+      <!-- PC右侧区域（广告+FAQ） -->
+      <div v-if="chatWindowConfig.pcAdImage || (chatWindowConfig.faqEnabled && chatWindowConfig.faqList?.length > 0)" class="chat-sidebar">
+        <div v-if="chatWindowConfig.pcAdImage" class="sidebar-ad">
+          <a :href="chatWindowConfig.pcAdLink || '#'" target="_blank" rel="noopener">
+            <img :src="resolveFileUrl(chatWindowConfig.pcAdImage)" class="ad-sidebar-img" alt="广告" />
+          </a>
+        </div>
+        <div v-if="chatWindowConfig.faqEnabled && chatWindowConfig.faqList?.length > 0" class="sidebar-faq">
+          <div class="sidebar-faq-title"><QuestionCircleOutlined /> 常见问题</div>
+          <div class="sidebar-faq-list">
+            <div v-for="(faq, idx) in chatWindowConfig.faqList" :key="idx" class="sidebar-faq-item" @click="handleFaqClick(faq)">
+              {{ faq.question }}
+            </div>
+          </div>
+        </div>
+      </div>
+      </div><!-- chat-main-layout end -->
       </template><!-- 正常聊天模式 end -->
     </template>
   </div>
 </template>
 
 <script setup lang="ts" name="UserChatPage">
-import { ref, onMounted, onUnmounted, nextTick, computed, watch } from 'vue';
+import { ref, reactive, onMounted, onUnmounted, nextTick, computed, watch } from 'vue';
 import MarkdownIt from 'markdown-it';
 import { message } from 'ant-design-vue';
-import { DeleteOutlined, MessageOutlined, SendOutlined, BulbOutlined, CheckCircleOutlined } from '@ant-design/icons-vue';
+import {
+  MessageOutlined, SendOutlined, BulbOutlined, CheckCircleOutlined,
+  SmileOutlined, PictureOutlined, VideoCameraOutlined, FilePdfOutlined, QuestionCircleOutlined,
+} from '@ant-design/icons-vue';
 import { defHttp } from '/@/utils/http/axios';
+import axios from 'axios';
 import { useGlobSetting } from '/@/hooks/setting';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
 import { createImgPreview } from '/@/components/Preview';
+import EmojiPicker from '../components/EmojiPicker.vue';
 
 const globSetting = useGlobSetting();
 const silentRequestOptions = { successMessageMode: 'none' as const };
@@ -346,6 +416,259 @@ const appInfo = ref({
 const defaultAvatar = 'https://gw.alipayobjects.com/zos/rmsportal/KDpgvguMpGfqaHPjicRK.svg';
 const defaultUserAvatar = 'https://gw.alipayobjects.com/zos/antfincdn/XAosXuNZyF/BiazfanxmamNRoxxVxka.png';
 
+// ==================== 聊天窗口配置 ====================
+const chatWindowConfig = reactive({
+  themeColor: '#667eea',
+  headerVisible: true,
+  pageTitle: '',
+  logo: '',
+  agentBubbleBgColor: '#f5f5f5',
+  agentBubbleFontColor: '#333333',
+  visitorBubbleBgColor: '#667eea',
+  visitorBubbleFontColor: '#ffffff',
+  visitorAvatar: '',
+  visitorHistory: true,
+  visitorMessageConnect: false,
+  sendEmoji: true,
+  sendImage: true,
+  sendVideo: true,
+  sendPdf: true,
+  maxFileSize: 10,
+  visitorTimezone: 'Asia/Shanghai',
+  scrollText: '',
+  scrollDuration: 15,
+  scrollTextColor: '#ffffff',
+  scrollTextBgColor: '#1890ff',
+  backgroundImage: '',
+  pcAdLink: '',
+  pcAdImage: '',
+  faqEnabled: false,
+  faqList: [] as Array<{ question: string; answer: string }>,
+});
+
+// FAQ展开状态（手机端）
+const faqMobileExpanded = ref(false);
+
+// CSS变量
+const dynamicCssVars = computed(() => ({
+  '--theme-color': chatWindowConfig.themeColor || '#667eea',
+  '--agent-bubble-bg': chatWindowConfig.agentBubbleBgColor || '#f5f5f5',
+  '--agent-bubble-color': chatWindowConfig.agentBubbleFontColor || '#333',
+  '--visitor-bubble-bg': chatWindowConfig.visitorBubbleBgColor || '#667eea',
+  '--visitor-bubble-color': chatWindowConfig.visitorBubbleFontColor || '#fff',
+  '--scroll-text-color': chatWindowConfig.scrollTextColor || '#fff',
+  '--scroll-text-bg': chatWindowConfig.scrollTextBgColor || '#1890ff',
+  '--scroll-duration': (chatWindowConfig.scrollDuration || 15) + 's',
+  '--chat-bg-image': chatWindowConfig.backgroundImage ? `url(${resolveFileUrl(chatWindowConfig.backgroundImage)})` : 'none',
+}));
+
+function resolveFileUrl(url: string) {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return url;
+  const base = (window as any)._JEECG_API_BASE_URL || import.meta.env.VITE_GLOB_DOMAIN_URL || '';
+  return base + '/' + url.replace(/^\//, '');
+}
+
+async function loadChatWindowConfig() {
+  try {
+    const res = await defHttp.get(
+      { url: '/cs/agent/global/chat-window-settings' },
+      { ...silentRequestOptions, isTransformResponse: false },
+    );
+    const data = res?.result || res;
+    let parsed: any = {};
+    if (typeof data === 'string') {
+      try { parsed = JSON.parse(data); } catch {}
+    } else if (data && typeof data === 'object') {
+      parsed = data;
+    }
+    Object.keys(parsed).forEach((k) => {
+      if (k in chatWindowConfig) {
+        (chatWindowConfig as any)[k] = parsed[k];
+      }
+    });
+    // 设置页面标题
+    if (chatWindowConfig.pageTitle) {
+      document.title = chatWindowConfig.pageTitle;
+    }
+  } catch (e) {
+    console.warn('加载聊天窗口配置失败', e);
+  }
+}
+
+// ==================== 敏感词配置 ====================
+const sensitiveWordsConfig = reactive({
+  enabled: false,
+  words: [] as string[],
+});
+
+async function loadSensitiveWords() {
+  try {
+    const res = await defHttp.get(
+      { url: '/cs/agent/global/sensitive-words' },
+      { ...silentRequestOptions, isTransformResponse: false },
+    );
+    const data = res?.result || res;
+    let parsed: any = {};
+    if (typeof data === 'string') {
+      try { parsed = JSON.parse(data); } catch {}
+    } else if (data && typeof data === 'object') {
+      parsed = data;
+    }
+    sensitiveWordsConfig.enabled = !!parsed.enabled;
+    sensitiveWordsConfig.words = Array.isArray(parsed.words) ? parsed.words : [];
+  } catch (e) {
+    console.warn('加载敏感词配置失败', e);
+  }
+}
+
+function checkSensitiveWords(content: string): string | null {
+  if (!sensitiveWordsConfig.enabled || !sensitiveWordsConfig.words?.length) return null;
+  const lower = content.toLowerCase();
+  for (const word of sensitiveWordsConfig.words) {
+    if (word && lower.includes(word.toLowerCase())) return word;
+  }
+  return null;
+}
+
+// ==================== 消息接通模式 ====================
+const messageConnectMode = ref(false);
+
+// ==================== 表情面板 ====================
+const showEmojiPanel = ref(false);
+function appendEmoji(emoji: string) {
+  inputMessage.value += emoji;
+}
+
+// ==================== 附件上传 ====================
+const imageInputRef = ref<HTMLInputElement | null>(null);
+const videoInputRef = ref<HTMLInputElement | null>(null);
+const pdfInputRef = ref<HTMLInputElement | null>(null);
+
+interface AttachmentItem {
+  name: string;
+  url: string;
+  previewUrl?: string;
+  size: number;
+  type: 'image' | 'video' | 'file';
+  uploading?: boolean;
+}
+const attachmentList = ref<AttachmentItem[]>([]);
+
+function triggerFileInput(fileType: 'image' | 'video' | 'pdf') {
+  if (fileType === 'image') imageInputRef.value?.click();
+  else if (fileType === 'video') videoInputRef.value?.click();
+  else if (fileType === 'pdf') pdfInputRef.value?.click();
+}
+
+// 文件上传限制（大小从聊天窗口配置动态读取，默认10MB，最大50MB）
+const ALLOWED_IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'];
+const ALLOWED_VIDEO_EXTS = ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv', 'flv', '3gp', 'wmv'];
+const ALLOWED_PDF_EXTS = ['pdf'];
+const FILE_TYPE_LABEL: Record<string, string> = { image: '图片', video: '视频', pdf: 'PDF' };
+
+function getMaxFileSize(): number {
+  const mb = chatWindowConfig.maxFileSize;
+  const val = (typeof mb === 'number' && mb > 0) ? Math.min(mb, 50) : 10;
+  return val * 1024 * 1024;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function getFileExt(name: string): string {
+  const idx = name.lastIndexOf('.');
+  return idx > -1 ? name.substring(idx + 1).toLowerCase() : '';
+}
+
+function validateFile(file: File, fileType: 'image' | 'video' | 'pdf'): string | null {
+  // 校验文件大小（从聊天窗口配置动态读取）
+  const maxSize = getMaxFileSize();
+  if (file.size > maxSize) {
+    return `文件大小 ${formatFileSize(file.size)} 超出限制，最大允许 ${formatFileSize(maxSize)}`;
+  }
+  // 校验文件类型
+  const ext = getFileExt(file.name);
+  const allowedExts = fileType === 'image' ? ALLOWED_IMAGE_EXTS : fileType === 'video' ? ALLOWED_VIDEO_EXTS : ALLOWED_PDF_EXTS;
+  if (!ext || !allowedExts.includes(ext)) {
+    return `不支持的${FILE_TYPE_LABEL[fileType]}格式（${ext || '未知'}），支持：${allowedExts.join(', ')}`;
+  }
+  return null;
+}
+
+async function handleFileSelected(e: Event, fileType: 'image' | 'video' | 'pdf') {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  input.value = ''; // 重置以允许重新选择
+
+  // 前端预校验文件大小和格式
+  const validationError = validateFile(file, fileType);
+  if (validationError) {
+    message.warning(validationError);
+    return;
+  }
+
+  const attType: 'image' | 'video' | 'file' = fileType === 'pdf' ? 'file' : fileType;
+  const previewUrl = fileType === 'image' ? URL.createObjectURL(file) : undefined;
+  const att: AttachmentItem = {
+    name: file.name,
+    url: '',
+    previewUrl,
+    size: file.size,
+    type: attType,
+    uploading: true,
+  };
+  attachmentList.value.push(att);
+  const idx = attachmentList.value.length - 1;
+
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    // 使用独立 axios 实例上传文件，避免 defHttp 全局拦截器干扰 Content-Type boundary
+    const { apiUrl, urlPrefix } = globSetting;
+    const uploadApiUrl = `${apiUrl}${urlPrefix || ''}/cs/message/visitor/upload`;
+    const authHeaders = buildAuthHeaders({});
+    const { data: res } = await axios.post(uploadApiUrl, formData, {
+      headers: authHeaders,
+    });
+    if (!res?.success) {
+      message.error(res?.message || '上传失败');
+      attachmentList.value.splice(idx, 1);
+      return;
+    }
+    const uploadedUrl = res?.message || res?.result?.url || res?.result?.message || '';
+    if (!uploadedUrl) {
+      message.error('上传失败：未获取到文件地址');
+      attachmentList.value.splice(idx, 1);
+      return;
+    }
+    attachmentList.value[idx].url = uploadedUrl;
+    attachmentList.value[idx].uploading = false;
+  } catch (err: any) {
+    console.error('文件上传失败', err);
+    // 提取后端返回的具体错误信息
+    const serverMsg = err?.response?.data?.message;
+    if (serverMsg) {
+      message.error(serverMsg);
+    } else if (err?.message?.includes('Network Error') || err?.message?.includes('ERR_CONNECTION')) {
+      message.error('网络连接异常，请检查网络后重试');
+    } else {
+      message.error('文件上传失败，请稍后重试');
+    }
+    attachmentList.value.splice(idx, 1);
+  }
+}
+
+function removeAttachment(idx: number) {
+  const att = attachmentList.value[idx];
+  if (att.previewUrl) URL.revokeObjectURL(att.previewUrl);
+  attachmentList.value.splice(idx, 1);
+}
+
 function resolveAvatarUrl(avatar?: string) {
   if (!avatar) return '';
   return getFileAccessHttpUrl(avatar);
@@ -357,6 +680,10 @@ function getAgentAvatar(msg?: any) {
 }
 
 function getUserAvatar(msg?: any) {
+  // 优先使用聊天窗口配置的访客头像
+  if (chatWindowConfig.visitorAvatar) {
+    return resolveFileUrl(chatWindowConfig.visitorAvatar);
+  }
   const avatar = msg?.senderAvatar;
   return resolveAvatarUrl(avatar) || defaultUserAvatar;
 }
@@ -581,11 +908,19 @@ onMounted(async () => {
     }
   }
 
+  // 加载聊天窗口配置和敏感词配置
+  await Promise.all([loadChatWindowConfig(), loadSensitiveWords()]);
+
   // 加载访客AI应用信息（头像/开场白/预设问题）
   await loadVisitorAppInfo();
 
-  // 获取或创建会话
-  await initConversation();
+  // 获取或创建会话（如果是消息接通模式，延迟到发送第一条消息时）
+  if (chatWindowConfig.visitorMessageConnect) {
+    // 消息接通模式：先不创建正式会话，等用户发送第一条消息
+    messageConnectMode.value = true;
+  } else {
+    await initConversation();
+  }
 
   // 如果是留言板模式，不需要后续操作
   if (showLeaveMessageBoard.value) {
@@ -595,8 +930,10 @@ onMounted(async () => {
   // 加载未读留言回复
   await loadUnreadReplies();
 
-  // 加载历史消息
-  await loadMessages();
+  // 加载历史消息（根据 visitorHistory 开关决定）
+  if (chatWindowConfig.visitorHistory !== false) {
+    await loadMessages();
+  }
 
   // 连接WebSocket
   connectWebSocket();
@@ -886,6 +1223,25 @@ function selectPresetQuestion(question: string) {
   inputMessage.value = question;
   // 直接发送
   sendMessage();
+}
+
+// FAQ点击：一次API调用完成 发送问题（不触发AI） + 返回预设答案
+async function handleFaqClick(faq: { question: string; answer: string }) {
+  if (!faq.question || !faq.answer) return;
+  if (!conversationId.value) return;
+  try {
+    await httpPost({
+      url: '/cs/message/faq/answer',
+      data: {
+        conversationId: conversationId.value,
+        question: faq.question,
+        answer: faq.answer,
+      },
+    });
+    // 问题和答案都通过WebSocket推送回来，无需手动添加
+  } catch (err) {
+    console.error('FAQ回复失败', err);
+  }
 }
 
 // 生成持久化设备码（UUID + 浏览器指纹哈希后缀）
@@ -1181,6 +1537,8 @@ async function loadMoreMessages() {
 function handleMessageScroll(event?: Event) {
   const el = (event?.target as HTMLElement) || messagesRef.value;
   if (!el) return;
+  // 如果访客历史关闭，不加载更多
+  if (chatWindowConfig.visitorHistory === false) return;
   if (loadingHistory.value || !hasMoreHistory.value) return;
   if (el.scrollTop <= 20) {
     loadMoreMessages();
@@ -1498,7 +1856,23 @@ function handleWsMessage(data: any) {
 // 发送消息
 async function sendMessage() {
   const content = inputMessage.value.trim();
-  if (!content) return;
+  const attachments = attachmentList.value.filter(a => !a.uploading && a.url);
+  if (!content && !attachments.length) return;
+
+  // 敏感词前端校验
+  if (content) {
+    const hitWord = checkSensitiveWords(content);
+    if (hitWord) {
+      message.warning('消息包含敏感内容，请修改后重试');
+      return;
+    }
+  }
+
+  // 附件是否还在上传中
+  if (attachmentList.value.some(a => a.uploading)) {
+    message.warning('文件正在上传中，请稍候');
+    return;
+  }
 
   // AI自动模式下，AI回复中时不允许发送新消息
   if (replyMode.value === 0 && aiResponding.value) {
@@ -1506,38 +1880,61 @@ async function sendMessage() {
     return;
   }
 
+  // 消息接通模式：第一次发送时才创建正式会话
+  if (messageConnectMode.value && !conversationId.value) {
+    try {
+      await initConversation();
+      messageConnectMode.value = false;
+      if (!conversationId.value) {
+        message.error('会话创建失败');
+        return;
+      }
+      // 连接WebSocket
+      connectWebSocket();
+      startFallbackPoll();
+    } catch (e) {
+      message.error('会话初始化失败');
+      return;
+    }
+  }
+
   if (!conversationId.value) {
     message.error('会话未初始化');
     return;
   }
 
+  const msgType = attachments.length > 0 ? 5 : 0;
+  const extra = attachments.length > 0 ? JSON.stringify({ attachments: attachments.map(a => ({ name: a.name, url: a.url, size: a.size, type: a.type })) }) : undefined;
+
   // 先添加到本地显示
-  const localMsg = {
+  const localMsg: any = {
     id: 'local_' + Date.now(),
     conversationId: conversationId.value,
     content: content,
-    senderType: 0, // 用户消息用0
+    senderType: 0,
     senderId: userId.value,
     senderName: userName.value,
     createTime: new Date().toISOString(),
+    msgType,
+    extra: extra ? JSON.parse(extra) : undefined,
   };
   messages.value.push(localMsg);
   
-  // 清空输入框并等待 DOM 更新
+  // 清空输入框和附件列表
   inputMessage.value = '';
+  attachmentList.value.forEach(a => { if (a.previewUrl) URL.revokeObjectURL(a.previewUrl); });
+  attachmentList.value = [];
   await nextTick();
   
   scrollToBottom();
 
   sending.value = true;
   
-  // 只有AI自动模式才设置AI正在回复状态
   const isAiMode = replyMode.value === 0;
   if (isAiMode) {
     aiResponding.value = true;
   }
   
-  // 设置超时自动解除AI回复状态（防止异常情况下一直锁定）
   if (aiResponseTimeoutTimer) {
     clearTimeout(aiResponseTimeoutTimer);
   }
@@ -1545,19 +1942,19 @@ async function sendMessage() {
     if (isAiMode) {
       stopAiResponding('AI回复超时，请稍后重试');
     }
-  }, 60000); // 60秒超时
+  }, 60000);
   
   try {
-    // 通过WebSocket发送
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
         type: 'message',
         conversationId: conversationId.value,
         content: content,
         userName: userName.value,
+        msgType,
+        extra,
       }));
     } else {
-      // 降级：通过HTTP发送
       await httpPost({
         url: '/cs/message/send',
         data: {
@@ -1566,6 +1963,8 @@ async function sendMessage() {
           senderId: userId.value,
           senderName: userName.value,
           senderType: 'user',
+          msgType,
+          extra,
         },
       });
     }
@@ -1619,10 +2018,7 @@ async function restartConversation() {
   }
 }
 
-// 清空消息
-function clearMessages() {
-  messages.value = [];
-}
+
 
 // 处理AI流式token
 function handleAiStreamToken(data: any) {
@@ -1721,10 +2117,14 @@ function formatDateSeparator(time: string | Date) {
   return date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
 }
 
-// 格式化时间
+// 格式化时间（根据聊天窗口配置的时区）
 function formatTime(time: string | Date) {
   if (!time) return '';
   const date = new Date(time);
+  if (chatWindowConfig.visitorTimezone === 'Asia/Shanghai') {
+    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Shanghai' });
+  }
+  // 自动跟随访客时区
   return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 }
 
@@ -1816,15 +2216,25 @@ function openMediaViewer(msg: any) {
   mediaViewerVisible.value = true;
 }
 
-// 渲染消息内容（简单HTML转换）
+// 渲染消息内容（支持富文本HTML、Markdown、纯文本）
 function renderMessage(content: string) {
   if (!content) return '';
-  const hasHtml = /<([a-z][\s\S]*?)>/i.test(content);
+  // 1. 检测是否为完整HTML（TinyMCE富文本，如FAQ答案）— 直接返回，不经markdown-it二次处理
+  const isRichHtml = /^\s*<(?:p|div|ul|ol|h[1-6]|table|blockquote)\b/i.test(content.trim());
+  if (isRichHtml) {
+    return content;
+  }
+  // 2. Markdown 检测
   const hasMarkdown = /!\[[^\]]*]\([^)]*\)|\*\*[^*]+\*\*|```|^\s*#/m.test(content);
-  if (hasHtml || hasMarkdown) {
+  if (hasMarkdown) {
     return md.render(content);
   }
-  // 纯文本：转义并保留换行
+  // 3. 检测内联HTML（如 <a>、<img>、<br> 等）
+  const hasInlineHtml = /<([a-z][\s\S]*?)>/i.test(content);
+  if (hasInlineHtml) {
+    return md.render(content);
+  }
+  // 4. 纯文本：转义并保留换行
   return content
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -1845,9 +2255,160 @@ watch(messages, () => {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  max-width: 800px;
+  max-width: 1100px;
   margin: 0 auto;
   background: #f5f5f5;
+}
+
+.chat-main-layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-main-column {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* PC右侧区域（广告+FAQ） */
+.chat-sidebar {
+  width: 200px;
+  flex-shrink: 0;
+  background: #fafafa;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid #f0f0f0;
+  overflow: hidden;
+}
+.sidebar-ad {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 8px;
+}
+.ad-sidebar-img {
+  width: 100%;
+  max-height: 300px;
+  object-fit: contain;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.sidebar-faq {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px;
+  border-top: 1px solid #f0f0f0;
+}
+.sidebar-faq-title {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 500;
+}
+.sidebar-faq-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sidebar-faq-item {
+  background: #fff;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #333;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+.sidebar-faq-item:hover {
+  background: #e6f7ff;
+  border-color: #91d5ff;
+}
+
+/* 手机端FAQ */
+.faq-mobile-section {
+  border-top: 1px solid #f0f0f0;
+  background: #fafafa;
+  flex-shrink: 0;
+  display: none;
+}
+.faq-mobile-header {
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #666;
+  cursor: pointer;
+  user-select: none;
+}
+.faq-mobile-toggle {
+  margin-left: auto;
+  color: #1890ff;
+  font-size: 12px;
+}
+.faq-mobile-list {
+  padding: 0 12px 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.faq-mobile-item {
+  background: #fff;
+  border: 1px solid #e8e8e8;
+  border-radius: 14px;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: #333;
+  cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.faq-mobile-item:active {
+  background: #e6f7ff;
+  border-color: #91d5ff;
+}
+
+@media (max-width: 800px) {
+  .chat-sidebar {
+    display: none;
+  }
+  .faq-mobile-section {
+    display: block;
+  }
+}
+
+/* 滚动文字跑马灯 */
+.scroll-text-bar {
+  overflow: hidden;
+  white-space: nowrap;
+  padding: 5px 0;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.scroll-text-content {
+  display: inline-block;
+  padding-left: 100%;
+  animation: marquee var(--scroll-duration, 15s) linear infinite;
+}
+@keyframes marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-100%); }
 }
 
 /* 留言板样式 */
@@ -1962,9 +2523,10 @@ watch(messages, () => {
   align-items: center;
   justify-content: space-between;
   padding: 16px 20px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: var(--theme-color, linear-gradient(135deg, #667eea 0%, #764ba2 100%));
   color: #fff;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  flex-shrink: 0;
 
   .header-info {
     display: flex;
@@ -2028,7 +2590,10 @@ watch(messages, () => {
   flex: 1;
   padding: 20px;
   overflow-y: auto;
-  background: #fff;
+  background-color: #fff;
+  background-image: var(--chat-bg-image, none);
+  background-size: cover;
+  background-position: center;
 
   .loading-wrapper, .empty-messages {
     display: flex;
@@ -2074,8 +2639,8 @@ watch(messages, () => {
 
   .message-text {
     padding: 12px 16px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: #fff;
+    background: var(--visitor-bubble-bg, linear-gradient(135deg, #667eea 0%, #764ba2 100%));
+    color: var(--visitor-bubble-color, #fff);
     border-radius: 20px 20px 4px 20px;
     font-size: 14px;
     line-height: 1.6;
@@ -2128,7 +2693,8 @@ watch(messages, () => {
 
   .message-text {
     padding: 12px 16px;
-    background: #f5f5f5;
+    background: var(--agent-bubble-bg, #f5f5f5);
+    color: var(--agent-bubble-color, #333);
     border-radius: 20px 20px 20px 4px;
     font-size: 14px;
     line-height: 1.6;
@@ -2379,11 +2945,94 @@ watch(messages, () => {
 
 .chat-input {
   display: flex;
-  align-items: flex-end;
-  gap: 12px;
-  padding: 16px 20px;
+  flex-direction: column;
+  padding: 8px 16px 12px;
   background: #fff;
   border-top: 1px solid #f0f0f0;
+  flex-shrink: 0;
+
+  .input-toolbar {
+    display: flex;
+    gap: 14px;
+    padding: 4px 4px 6px;
+    font-size: 18px;
+    color: #666;
+  }
+
+  .toolbar-icon {
+    cursor: pointer;
+    transition: color 0.2s;
+    &:hover {
+      color: var(--theme-color, #667eea);
+    }
+  }
+
+  .attachment-preview-bar {
+    display: flex;
+    gap: 8px;
+    padding: 6px 0;
+    overflow-x: auto;
+  }
+
+  .attachment-thumb {
+    position: relative;
+    width: 64px;
+    height: 64px;
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid #eee;
+    flex-shrink: 0;
+
+    .att-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .att-file {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      font-size: 22px;
+      background: #f9f9f9;
+
+      .att-name {
+        font-size: 9px;
+        color: #999;
+        max-width: 56px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+    }
+
+    .att-remove {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 18px;
+      height: 18px;
+      background: rgba(0,0,0,0.5);
+      color: #fff;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      border-radius: 0 6px 0 6px;
+    }
+
+    .att-uploading {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255,255,255,0.7);
+    }
+  }
 
   :deep(.ant-input) {
     flex: 1;
@@ -2393,7 +3042,7 @@ watch(messages, () => {
     border-color: #d9d9d9;
     
     &:focus {
-      border-color: #667eea;
+      border-color: var(--theme-color, #667eea);
       box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
     }
   }
@@ -2402,11 +3051,13 @@ watch(messages, () => {
     border-radius: 20px;
     height: 40px;
     padding: 0 24px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: var(--theme-color, linear-gradient(135deg, #667eea 0%, #764ba2 100%));
     border: none;
+    margin-top: 8px;
+    align-self: flex-end;
     
     &:hover {
-      background: linear-gradient(135deg, #5a6fd6 0%, #6a4190 100%);
+      opacity: 0.9;
     }
     
     &:disabled {

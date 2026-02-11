@@ -3851,6 +3851,9 @@ INSERT INTO `sys_permission` VALUES ('cs_ip_blacklist', 'cs_security', '访客IP
 INSERT INTO `sys_permission` VALUES ('cs_visitor_blacklist', 'cs_security', '访客黑名单', '/security/visitorBlacklist', 'super/airag/cs/security/visitorBlacklist/index', 1, NULL, NULL, 1, NULL, '1', 2.00, 0, 'ant-design:user-delete-outlined', 0, 0, 0, 0, NULL, 'admin', '2026-02-09 00:00:00', NULL, NULL, 0, 0, '1', 0);
 INSERT INTO `sys_permission` VALUES ('cs_agent_ip_whitelist', 'cs_security', '客服IP白名单', '/security/agentIpWhitelist', 'super/airag/cs/security/agentIpWhitelist/index', 1, NULL, NULL, 1, NULL, '1', 3.00, 0, 'ant-design:check-circle-outlined', 0, 0, 0, 0, NULL, 'admin', '2026-02-09 00:00:00', NULL, NULL, 0, 0, '1', 0);
 INSERT INTO `sys_permission` VALUES ('cs_agent_login_log', 'cs_security', '客服登录日志', '/security/loginLog', 'super/airag/cs/security/loginLog/index', 1, NULL, NULL, 1, NULL, '1', 4.00, 0, 'ant-design:file-text-outlined', 0, 0, 0, 0, NULL, 'admin', '2026-02-09 00:00:00', NULL, NULL, 0, 0, '1', 0);
+INSERT INTO `sys_permission` VALUES ('cs_access_settings', '', '接入设置', '/accessSettings', 'layouts/RouteView', 1, NULL, NULL, 0, NULL, '1', 2.40, 0, 'ant-design:setting-outlined', 0, 0, 0, 0, '接入设置', 'admin', '2026-02-11 00:00:00', NULL, NULL, 0, 0, '1', 0);
+INSERT INTO `sys_permission` VALUES ('cs_chat_window_settings', 'cs_access_settings', '聊天窗口设置', '/accessSettings/chatWindowSettings', 'super/airag/cs/chatWindowSettings/index', 1, NULL, NULL, 1, NULL, '1', 1.00, 0, 'ant-design:message-outlined', 0, 0, 0, 0, '聊天窗口设置', 'admin', '2026-02-11 00:00:00', NULL, NULL, 0, 0, '1', 0);
+INSERT INTO `sys_permission` VALUES ('cs_sensitive_words', 'cs_access_settings', '访客敏感词', '/accessSettings/sensitiveWords', 'super/airag/cs/sensitiveWords/index', 1, NULL, NULL, 1, NULL, '1', 2.00, 0, 'ant-design:warning-outlined', 0, 0, 0, 0, '访客敏感词配置', 'admin', '2026-02-11 00:00:00', NULL, NULL, 0, 0, '1', 0);
 INSERT INTO `sys_permission` VALUES ('d7d6e2e4e2934f2c9385a623fd98c6f3', '', '系统管理', '/isystem', 'layouts/RouteView', 1, NULL, NULL, 0, NULL, NULL, 4.00, 0, 'ant-design:setting', 0, 0, 0, 0, NULL, NULL, '2018-12-25 20:34:38', 'admin', '2025-06-25 14:24:07', 0, 0, NULL, 0);
 INSERT INTO `sys_permission` VALUES ('f15543b0263cf6c5fac85afdd3eba3f2', '3f915b2769fc80648e92d04e84ca059d', '用户导入', '', NULL, 0, NULL, NULL, 2, 'system:user:import', '1', 1.00, 0, NULL, 1, 0, 0, 0, NULL, 'admin', '2019-05-13 19:15:27', 'admin', '2022-06-30 15:05:12', 0, 0, '1', 0);
 
@@ -4167,6 +4170,12 @@ INSERT INTO `sys_role_permission` VALUES ('cs_sec_cadmin_ipbl', 'cs_admin_agent_
 INSERT INTO `sys_role_permission` VALUES ('cs_sec_cadmin_vbl', 'cs_admin_agent_role_001', 'cs_visitor_blacklist', NULL, '2026-02-09 00:00:00', '127.0.0.1');
 INSERT INTO `sys_role_permission` VALUES ('cs_sec_cadmin_wl', 'cs_admin_agent_role_001', 'cs_agent_ip_whitelist', NULL, '2026-02-09 00:00:00', '127.0.0.1');
 INSERT INTO `sys_role_permission` VALUES ('cs_sec_cadmin_log', 'cs_admin_agent_role_001', 'cs_agent_login_log', NULL, '2026-02-09 00:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_acc_admin_parent', 'f6817f48af4fb3af11b9e8bf182f618b', 'cs_access_settings', NULL, '2026-02-11 00:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_acc_admin_chatwin', 'f6817f48af4fb3af11b9e8bf182f618b', 'cs_chat_window_settings', NULL, '2026-02-11 00:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_acc_admin_sw', 'f6817f48af4fb3af11b9e8bf182f618b', 'cs_sensitive_words', NULL, '2026-02-11 00:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_acc_cadmin_parent', 'cs_admin_agent_role_001', 'cs_access_settings', NULL, '2026-02-11 00:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_acc_cadmin_chatwin', 'cs_admin_agent_role_001', 'cs_chat_window_settings', NULL, '2026-02-11 00:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_acc_cadmin_sw', 'cs_admin_agent_role_001', 'cs_sensitive_words', NULL, '2026-02-11 00:00:00', '127.0.0.1');
 INSERT INTO `sys_role_permission` VALUES ('cs_sub_perm_parent', 'cs_sub_agent_role_001', 'cs_parent', NULL, '2026-02-06 20:00:00', '127.0.0.1');
 INSERT INTO `sys_role_permission` VALUES ('cs_sub_perm_workbench', 'cs_sub_agent_role_001', 'cs_workbench', NULL, '2026-02-06 20:00:00', '127.0.0.1');
 INSERT INTO `sys_role_permission` VALUES ('cs_sub_perm_conversation', 'cs_sub_agent_role_001', 'cs_conversation', NULL, '2026-02-06 20:00:00', '127.0.0.1');

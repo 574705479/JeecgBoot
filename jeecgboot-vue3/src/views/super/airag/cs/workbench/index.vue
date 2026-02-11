@@ -199,14 +199,13 @@
         >
           全部
         </div> -->
-        <!-- 管理者专属：监控所有进行中的会话 -->
+        <!-- 同事会话：查看所有客服的进行中会话 -->
         <div 
-          v-if="isSupervisor"
           class="filter-tab supervisor-tab" 
           :class="{ active: filter === 'monitor' }"
           @click="filter = 'monitor'"
         >
-          <EyeOutlined /> 监控
+          <TeamOutlined /> 同事会话
         </div>
       </div>
 
@@ -233,7 +232,7 @@
               <span class="conv-name">{{ getDisplayName(conv) }}</span>
               <span class="conv-time">{{ formatTime(conv.lastMessageTime) }}</span>
             </div>
-            <div class="conv-preview">{{ conv.lastMessage || '暂无消息' }}</div>
+            <div class="conv-preview">{{ stripHtmlTags(conv.lastMessage) || '暂无消息' }}</div>
             <!-- 显示当前对话客服 - 从消息列表中获取最后一个发消息的客服 -->
             <div class="conv-agent" v-if="getLastTalkingAgent(conv) && conv.status === 1">
               <span class="agent-label">对话中:</span>
@@ -322,7 +321,7 @@
                   <span class="conv-name">{{ getDisplayName(conv) }}</span>
                   <span class="conv-time">{{ formatTime(conv.lastMessageTime) }}</span>
                 </div>
-                <div class="conv-preview">{{ conv.lastMessage || '暂无消息' }}</div>
+                <div class="conv-preview">{{ stripHtmlTags(conv.lastMessage) || '暂无消息' }}</div>
               </div>
               <div class="conv-badge" v-if="conv.unreadCount > 0">
                 {{ conv.unreadCount > 99 ? '99+' : conv.unreadCount }}
@@ -368,10 +367,10 @@
             <a-select-option :value="0">AI自动</a-select-option>
             <a-select-option :value="1">手动</a-select-option>
           </a-select>
-          <a-button size="small" @click="openTransferModal" v-if="currentConversation.status !== 2">
+          <a-button size="small" @click="openTransferModal" v-if="currentConversation.status !== 2 && !isColleagueReadonly">
             <SwapOutlined /> 转接
           </a-button>
-          <a-button size="small" danger @click="closeConversation" v-if="currentConversation.status !== 2">
+          <a-button size="small" danger @click="closeConversation" v-if="currentConversation.status !== 2 && !isColleagueReadonly">
             结束
           </a-button>
           <a-button size="small" type="text" @click="showDetailPanel = !showDetailPanel">
@@ -538,15 +537,8 @@
             <ThunderboltOutlined class="toolbar-icon" @click="toggleQuickReply" />
           </a-tooltip>
         </div>
-        <div class="emoji-panel" v-if="showEmojiPanel">
-          <span
-            v-for="emoji in emojiList"
-            :key="emoji"
-            class="emoji-item"
-            @click="appendEmoji(emoji)"
-          >
-            {{ emoji }}
-          </span>
+        <div style="position:relative">
+          <EmojiPicker :visible="showEmojiPanel" @select="appendEmoji" @close="showEmojiPanel = false" />
         </div>
         <div class="quick-reply-panel" v-if="showQuickReply">
           <div class="quick-reply-header">
@@ -791,7 +783,7 @@
               <a-switch
                 :checked="ipBlacklisted"
                 :loading="blacklistLoading"
-                :disabled="!currentConversation.userIp"
+                :disabled="!currentConversation.userIp || isColleagueReadonly"
                 checked-children="已拉黑"
                 @change="(checked) => checked ? openBanModal('ip') : removeBlacklist('ip')"
               />
@@ -934,7 +926,7 @@ import { message } from 'ant-design-vue';
 import { 
   StarFilled, StarOutlined, SwapOutlined, MenuUnfoldOutlined, MenuFoldOutlined,
   CloseOutlined, EditOutlined, PlusOutlined, InboxOutlined, MessageOutlined,
-  SmileOutlined, ThunderboltOutlined, RobotOutlined, EyeOutlined, SettingOutlined,
+  SmileOutlined, ThunderboltOutlined, RobotOutlined, SettingOutlined,
   MoreOutlined, DeleteOutlined, PaperClipOutlined, KeyOutlined, EnvironmentOutlined, GlobalOutlined,
   TeamOutlined, CaretRightOutlined, CaretDownOutlined
 } from '@ant-design/icons-vue';
@@ -942,6 +934,7 @@ import { defHttp } from '/@/utils/http/axios';
 import { useGlobSetting } from '/@/hooks/setting';
 import { getFileAccessHttpUrl, getHeaders } from '/@/utils/common/compUtils';
 import { createImgPreview } from '/@/components/Preview';
+import EmojiPicker from '../components/EmojiPicker.vue';
 // ★ 为AI建议保留Markdown渲染能力
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
@@ -970,6 +963,8 @@ const agentStatus = ref(0);
 const isOnline = ref(false);
 const agentRole = ref(0); // 0-普通客服, 1-管理者
 const isSupervisor = computed(() => agentRole.value === 1);
+/** 同事会话模式下非管理者 -> 只读（禁止结束/转接/拉黑IP） */
+const isColleagueReadonly = computed(() => filter.value === 'monitor' && !isSupervisor.value);
 const keepConnectionOnDeactivate = true;
 
 // AI应用选择
@@ -1127,11 +1122,6 @@ const mediaViewerVisible = ref(false);
 const mediaViewerList = ref<any[]>([]);
 const lastNotifyMap = new Map<string, number>();
 const showEmojiPanel = ref(false);
-const emojiList = [
-  '😀','😁','😂','🤣','😊','😍','😘','😗','😙','😚','😋','😜',
-  '🤪','😎','😭','😢','😤','😡','👍','👎','🙏','👏','💪','🔥',
-  '🎉','❤️','⭐','🌟','💯','✅'
-];
 const messagesRef = ref<HTMLElement | null>(null);
 const inputRef = ref();
 const messageAvatarSize = 32;
@@ -1509,8 +1499,8 @@ function toggleQuickReply() {
 }
 
 function getConversationsCacheKey() {
-  const supervisor = filter.value === 'monitor' && isSupervisor.value ? '1' : '0';
-  return `${agentId.value || 'guest'}_${filter.value}_${supervisor}`;
+  const colleague = filter.value === 'monitor' ? '1' : '0';
+  return `${agentId.value || 'guest'}_${filter.value}_${colleague}`;
 }
 
 const canSendMessage = computed(() => {
@@ -1604,7 +1594,6 @@ function toggleEmojiPanel() {
 
 function appendEmoji(emoji: string) {
   inputMessage.value = `${inputMessage.value}${emoji}`;
-  showEmojiPanel.value = false;
   nextTick(() => inputRef.value?.focus());
 }
 
@@ -1719,8 +1708,18 @@ function openMediaViewer(msg: any) {
   mediaViewerVisible.value = true;
 }
 
+// 去除HTML标签，提取纯文本
+function stripHtmlTags(html: string): string {
+  if (!html) return '';
+  return html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
+}
+
 function buildMessagePreview(content: string, attachments: any[]) {
-  if (content) return content;
+  if (content) {
+    // 去除HTML标签，只保留纯文本摘要用于侧边栏预览
+    const plain = stripHtmlTags(content);
+    return plain || content;
+  }
   if (!attachments || attachments.length === 0) return '';
   const labels = new Set<string>();
   attachments.forEach(att => {
@@ -2122,12 +2121,12 @@ async function loadConversations() {
     // 同时加载统计数据（不等待，异步执行）
     loadStatsDebounced();
     
-    // 监控模式：同时加载客服列表
-    if (filter.value === 'monitor' && isSupervisor.value) {
+    // 同事会话模式：同时加载客服列表
+    if (filter.value === 'monitor') {
       loadMonitorAgents();
     }
     
-    // 监控模式：管理者查看所有进行中的会话
+    // 同事会话模式：查看所有进行中的会话
     const params: any = { 
       agentId: agentId.value, 
       filter: filter.value, 
@@ -2135,8 +2134,8 @@ async function loadConversations() {
       pageSize: 50 
     };
     
-    // 如果是监控模式，添加管理者标识
-    if (filter.value === 'monitor' && isSupervisor.value) {
+    // 如果是同事会话模式，添加标识
+    if (filter.value === 'monitor') {
       params.supervisorMode = true;
     }
     
@@ -3183,7 +3182,7 @@ function handleWsMessage(data: any) {
       if (conv) {
         // ★ 问题1修复：更新最后消息和时间（包含客服消息）
         const previewText = buildMessagePreview(data.content || '', getMessageAttachments({ extra: data.extra }));
-        conv.lastMessage = previewText || data.content;
+        conv.lastMessage = previewText || stripHtmlTags(data.content) || data.content;
         conv.lastMessageTime = new Date().toISOString();
         if (data.senderType === 0) {
           conv.userOnline = true;
@@ -3893,25 +3892,37 @@ const md = new MarkdownIt({
   }
 });
 
-// 渲染消息内容（普通消息 - 简单换行转换）
+// 渲染消息内容（支持富文本HTML、Markdown、纯文本）
 function renderMessage(content: string) {
   if (!content) return '';
   const cached = renderCache.get(content);
   if (cached) {
     return cached;
   }
-  const hasHtml = /<([a-z][\s\S]*?)>/i.test(content);
-  const hasMarkdown = /!\[[^\]]*]\([^)]*\)|\*\*[^*]+\*\*|```|^\s*#/m.test(content);
   let rendered = '';
-  if (hasHtml || hasMarkdown) {
-    rendered = md.render(content);
+  // 1. 检测是否为完整HTML（TinyMCE富文本，如FAQ答案）— 直接返回，不经markdown-it二次处理
+  const isRichHtml = /^\s*<(?:p|div|ul|ol|h[1-6]|table|blockquote)\b/i.test(content.trim());
+  if (isRichHtml) {
+    rendered = content;
   } else {
-    // 简单的换行转换，与访客端相同
-    rendered = content
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/\n/g, '<br>');
+    // 2. Markdown 检测
+    const hasMarkdown = /!\[[^\]]*]\([^)]*\)|\*\*[^*]+\*\*|```|^\s*#/m.test(content);
+    if (hasMarkdown) {
+      rendered = md.render(content);
+    } else {
+      // 3. 检测内联HTML（如 <a>、<img>、<br> 等）
+      const hasInlineHtml = /<([a-z][\s\S]*?)>/i.test(content);
+      if (hasInlineHtml) {
+        rendered = md.render(content);
+      } else {
+        // 4. 纯文本：转义并保留换行
+        rendered = content
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/\n/g, '<br>');
+      }
+    }
   }
   if (renderCache.size >= maxRenderCacheSize) {
     renderCache.clear();
@@ -4871,22 +4882,6 @@ function restoreMessageScroll() {
     }
   }
 
-  .emoji-panel {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    padding: 8px;
-    background: #fff;
-    border: 1px solid #f0f0f0;
-    border-radius: 6px;
-    margin-bottom: 8px;
-
-    .emoji-item {
-      font-size: 18px;
-      cursor: pointer;
-      line-height: 1;
-    }
-  }
 }
 
 .msg-attachments {

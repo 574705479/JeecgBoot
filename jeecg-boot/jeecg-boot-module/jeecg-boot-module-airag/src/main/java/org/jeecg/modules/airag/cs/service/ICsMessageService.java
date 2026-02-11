@@ -35,6 +35,24 @@ public interface ICsMessageService {
     CsMessage sendUserMessage(String conversationId, String userId, String userName, String content);
 
     /**
+     * 用户发送消息（带附件支持）
+     */
+    CsMessage sendUserMessage(String conversationId, String userId, String userName, String content,
+                              Integer msgType, String extra);
+
+    /**
+     * 用户发送消息（仅保存+推送，不触发AI回复）
+     * 用于FAQ等场景，由预设答案代替AI回复
+     *
+     * @param conversationId 会话ID
+     * @param userId         用户ID
+     * @param userName       用户名称
+     * @param content        消息内容
+     * @return 用户消息
+     */
+    CsMessage sendUserMessageRaw(String conversationId, String userId, String userName, String content);
+
+    /**
      * 客服发送消息
      * 
      * @param conversationId 会话ID

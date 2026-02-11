@@ -163,7 +163,7 @@ public class JeecgBootExceptionHandler {
     public Result<?> handleMaxUploadSizeExceededException(MaxUploadSizeExceededException e) {
     	log.error(e.getMessage(), e);
 		addSysLog(e);
-        return Result.error("文件大小超出10MB限制, 请压缩或降低文件质量! ");
+        return Result.error("文件大小超出50MB限制, 请压缩或降低文件质量! ");
     }
 
 	/**

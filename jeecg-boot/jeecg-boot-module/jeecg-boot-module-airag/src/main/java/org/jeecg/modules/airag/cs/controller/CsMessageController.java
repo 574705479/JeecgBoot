@@ -15,9 +15,20 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.JSONObject;
+import org.jeecg.common.constant.CommonConstant;
+import org.jeecg.common.util.CommonUtils;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.web.multipart.MultipartFile;
+
 
 /**
  * 消息管理 (重构版)
@@ -40,6 +51,115 @@ public class CsMessageController {
     @Autowired
     private ICsVisitorTokenService visitorTokenService;
 
+    @Autowired
+    private StringRedisTemplate redisTemplate;
+
+    @Value(value = "${jeecg.path.upload}")
+    private String uploadpath;
+
+    @Value(value = "${jeecg.uploadType}")
+    private String uploadType;
+
+    private static final List<String> ALLOWED_EXTENSIONS = Arrays.asList(
+            "jpg", "jpeg", "png", "gif", "webp", "bmp", "svg",
+            "mp4", "webm", "ogg", "mov", "avi", "mkv", "flv", "3gp", "wmv",
+            "pdf"
+    );
+
+    /** 默认文件大小限制 10MB，可在聊天窗口设置中配置（最大50MB） */
+    private static final long DEFAULT_MAX_FILE_SIZE = 10 * 1024 * 1024;
+    private static final long ABSOLUTE_MAX_FILE_SIZE = 50 * 1024 * 1024;
+    private static final String CHAT_WINDOW_REDIS_KEY = "cs:global:chat_window_settings";
+
+    /**
+     * 获取配置的最大文件大小（MB → bytes）
+     */
+    private long getConfiguredMaxFileSize() {
+        try {
+            String json = redisTemplate.opsForValue().get(CHAT_WINDOW_REDIS_KEY);
+            if (json != null && !json.isEmpty()) {
+                JSONObject config = JSON.parseObject(json);
+                Integer maxMb = config.getInteger("maxFileSize");
+                if (maxMb != null && maxMb > 0) {
+                    long maxBytes = (long) maxMb * 1024 * 1024;
+                    return Math.min(maxBytes, ABSOLUTE_MAX_FILE_SIZE);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[CS-Message] 读取聊天窗口文件大小配置失败", e);
+        }
+        return DEFAULT_MAX_FILE_SIZE;
+    }
+
+    /**
+     * 访客文件上传接口
+     */
+    @Operation(summary = "访客文件上传")
+    @org.jeecg.config.shiro.IgnoreAuth
+    @PostMapping("/visitor/upload")
+    public Result<?> visitorUpload(@RequestParam("file") MultipartFile file, HttpServletRequest request) {
+        // 校验访客身份
+        boolean isAdmin = visitorTokenService.isAdminRequest(request);
+        if (!isAdmin) {
+            CsVisitorTokenPayload tokenPayload = resolveVisitorPayload(request);
+            if (tokenPayload == null) {
+                if (visitorTokenService.isTokenRequired()) {
+                    return Result.error("访客凭证无效或已过期");
+                }
+                if (!visitorTokenService.validateAppKey(request)) {
+                    return Result.error("接入密钥无效");
+                }
+                String devId = visitorTokenService.extractDeviceId(request);
+                if (oConvertUtils.isEmpty(devId)) {
+                    return Result.error("缺少设备码");
+                }
+                if (visitorTokenService.isBlacklisted(devId)) {
+                    return Result.error("访客已被拉黑");
+                }
+            } else {
+                if (visitorTokenService.isBlacklisted(tokenPayload.getExternalUserId())) {
+                    return Result.error("访客已被拉黑");
+                }
+            }
+        }
+
+        try {
+            if (file == null || file.isEmpty()) {
+                return Result.error("请选择文件");
+            }
+            // 校验文件大小（从聊天窗口配置读取限制）
+            long maxFileSize = getConfiguredMaxFileSize();
+            if (file.getSize() > maxFileSize) {
+                long maxMb = maxFileSize / (1024 * 1024);
+                return Result.error("文件大小不能超过" + maxMb + "MB");
+            }
+            // 校验文件类型
+            String originalFilename = file.getOriginalFilename();
+            if (originalFilename == null) {
+                return Result.error("文件名无效");
+            }
+            String ext = originalFilename.substring(originalFilename.lastIndexOf('.') + 1).toLowerCase();
+            if (!ALLOWED_EXTENSIONS.contains(ext)) {
+                return Result.error("不支持的文件类型，仅支持图片/视频/PDF");
+            }
+
+            String bizPath = "cs-visitor";
+            String savePath;
+            if (CommonConstant.UPLOAD_TYPE_LOCAL.equals(uploadType)) {
+                savePath = CommonUtils.uploadLocal(file, bizPath, uploadpath);
+            } else {
+                savePath = CommonUtils.upload(file, bizPath, uploadType);
+            }
+            Result<String> result = new Result<>();
+            result.setMessage(savePath);
+            result.setSuccess(true);
+            return result;
+        } catch (Exception e) {
+            log.error("[CS-Message] 访客文件上传失败", e);
+            return Result.error("文件上传失败: " + e.getMessage());
+        }
+    }
+
     /**
      * 发送消息 (通用)
      */
@@ -51,7 +171,7 @@ public class CsMessageController {
         String content = (String) params.get("content");
         String senderId = (String) params.get("senderId");
         String senderName = (String) params.get("senderName");
-        Integer msgType = params.get("msgType") instanceof Integer ? (Integer) params.get("msgType") : null;
+        Integer msgType = params.get("msgType") instanceof Number ? ((Number) params.get("msgType")).intValue() : null;
         String extra = params.get("extra") != null ? String.valueOf(params.get("extra")) : null;
         
         // 兼容处理 senderType，可能是字符串或数字
@@ -106,9 +226,17 @@ public class CsMessageController {
             }
         }
 
+        // 访客消息敏感词校验
+        if ("user".equals(senderType) && oConvertUtils.isNotEmpty(content)) {
+            String hitWord = checkSensitiveWords(content);
+            if (hitWord != null) {
+                return Result.error("消息包含敏感内容，请修改后重试");
+            }
+        }
+
         CsMessage message;
         if ("user".equals(senderType)) {
-            message = messageService.sendUserMessage(conversationId, senderId, senderName, content);
+            message = messageService.sendUserMessage(conversationId, senderId, senderName, content, msgType, extra);
         } else {
             message = messageService.sendAgentMessage(conversationId, senderId, senderName, content, msgType, extra);
         }
@@ -117,16 +245,116 @@ public class CsMessageController {
     }
 
     /**
+     * FAQ自动回复接口（访客触发，以系统客服身份回复预设答案）
+     * 同时发送访客问题（不触发AI回复）+ 预设答案
+     */
+    @Operation(summary = "FAQ自动回复")
+    @org.jeecg.config.shiro.IgnoreAuth
+    @PostMapping("/faq/answer")
+    public Result<CsMessage> faqAnswer(@RequestBody Map<String, Object> params, HttpServletRequest request) {
+        String conversationId = (String) params.get("conversationId");
+        String question = (String) params.get("question");
+        String answer = (String) params.get("answer");
+
+        if (oConvertUtils.isEmpty(conversationId) || oConvertUtils.isEmpty(answer)) {
+            return Result.error("参数不完整");
+        }
+
+        // 校验访客身份
+        boolean isAdmin = visitorTokenService.isAdminRequest(request);
+        if (!isAdmin) {
+            CsVisitorTokenPayload tokenPayload = resolveVisitorPayload(request);
+            if (tokenPayload != null) {
+                if (visitorTokenService.isBlacklisted(tokenPayload.getExternalUserId())) {
+                    return Result.error("访客已被拉黑");
+                }
+                if (!isConversationOwner(conversationId, tokenPayload.getExternalUserId())) {
+                    return Result.error("无权访问该会话");
+                }
+            } else if (!visitorTokenService.isTokenRequired()) {
+                if (!visitorTokenService.validateAppKey(request)) {
+                    return Result.error("接入密钥无效");
+                }
+                String devId = visitorTokenService.extractDeviceId(request);
+                if (oConvertUtils.isEmpty(devId)) {
+                    return Result.error("缺少设备码");
+                }
+                if (visitorTokenService.isBlacklisted(devId)) {
+                    return Result.error("访客已被拉黑");
+                }
+                if (!isConversationOwner(conversationId, devId)) {
+                    return Result.error("无权访问该会话");
+                }
+            } else {
+                return Result.error("访客凭证无效或已过期");
+            }
+        }
+
+        // 校验答案是否为已配置的FAQ答案（防伪造）
+        try {
+            String settingsJson = redisTemplate.opsForValue().get(CHAT_WINDOW_REDIS_KEY);
+            if (oConvertUtils.isNotEmpty(settingsJson)) {
+                JSONObject settings = JSON.parseObject(settingsJson);
+                Boolean faqEnabled = settings.getBoolean("faqEnabled");
+                if (faqEnabled == null || !faqEnabled) {
+                    return Result.error("常见问题功能未启用");
+                }
+                JSONArray faqList = settings.getJSONArray("faqList");
+                boolean found = false;
+                if (faqList != null) {
+                    for (int i = 0; i < faqList.size(); i++) {
+                        JSONObject faq = faqList.getJSONObject(i);
+                        if (faq != null && answer.equals(faq.getString("answer"))) {
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+                if (!found) {
+                    return Result.error("无效的FAQ答案");
+                }
+            } else {
+                return Result.error("常见问题功能未配置");
+            }
+        } catch (Exception e) {
+            log.error("[CS-Message] FAQ答案校验失败", e);
+            return Result.error("FAQ校验失败");
+        }
+
+        try {
+            // 1. 先发送访客问题（不触发AI回复），从会话中获取访客信息
+            if (oConvertUtils.isNotEmpty(question)) {
+                CsConversation conversation = conversationService.getConversation(conversationId);
+                if (conversation != null) {
+                    String userId = conversation.getUserId();
+                    String userName = conversation.getUserName();
+                    messageService.sendUserMessageRaw(conversationId, userId, userName, question);
+                }
+            }
+
+            // 2. 以智能助手身份发送预设答案
+            CsMessage message = messageService.sendAgentMessage(
+                    conversationId, "faq_system", "智能助手", answer, 0, null);
+            return Result.OK(message);
+        } catch (Exception e) {
+            log.error("[CS-Message] FAQ回复发送失败", e);
+            return Result.error("FAQ回复发送失败: " + e.getMessage());
+        }
+    }
+
+    /**
      * 用户发送消息
      */
     @Operation(summary = "用户发送消息")
     @org.jeecg.config.shiro.IgnoreAuth
     @PostMapping("/user/send")
-    public Result<CsMessage> sendUserMessage(@RequestBody Map<String, String> params, HttpServletRequest request) {
-        String conversationId = params.get("conversationId");
-        String userId = params.get("userId");
-        String userName = params.get("userName");
-        String content = params.get("content");
+    public Result<CsMessage> sendUserMessage(@RequestBody Map<String, Object> params, HttpServletRequest request) {
+        String conversationId = params.get("conversationId") != null ? String.valueOf(params.get("conversationId")) : null;
+        String userId = params.get("userId") != null ? String.valueOf(params.get("userId")) : null;
+        String userName = params.get("userName") != null ? String.valueOf(params.get("userName")) : null;
+        String content = params.get("content") != null ? String.valueOf(params.get("content")) : null;
+        Integer msgType = params.get("msgType") instanceof Number ? ((Number) params.get("msgType")).intValue() : null;
+        String extra = params.get("extra") != null ? String.valueOf(params.get("extra")) : null;
         
         boolean isAdmin = visitorTokenService.isAdminRequest(request);
         if (!isAdmin) {
@@ -159,7 +387,15 @@ public class CsMessageController {
             }
         }
 
-        CsMessage message = messageService.sendUserMessage(conversationId, userId, userName, content);
+        // 访客消息敏感词校验
+        if (oConvertUtils.isNotEmpty(content)) {
+            String hitWord = checkSensitiveWords(content);
+            if (hitWord != null) {
+                return Result.error("消息包含敏感内容，请修改后重试");
+            }
+        }
+
+        CsMessage message = messageService.sendUserMessage(conversationId, userId, userName, content, msgType, extra);
         return Result.OK(message);
     }
 
@@ -366,6 +602,41 @@ public class CsMessageController {
         }
         CsConversation conversation = conversationService.getById(conversationId);
         return conversation != null && userId.equals(conversation.getUserId());
+    }
+
+    /**
+     * 检查消息内容是否包含敏感词
+     * @param content 消息内容
+     * @return 命中的敏感词，若未命中返回null
+     */
+    private String checkSensitiveWords(String content) {
+        if (oConvertUtils.isEmpty(content)) {
+            return null;
+        }
+        try {
+            String json = redisTemplate.opsForValue().get("cs:global:sensitive_words");
+            if (oConvertUtils.isEmpty(json)) {
+                return null;
+            }
+            JSONObject config = JSON.parseObject(json);
+            if (config == null || !Boolean.TRUE.equals(config.getBoolean("enabled"))) {
+                return null;
+            }
+            JSONArray words = config.getJSONArray("words");
+            if (words == null || words.isEmpty()) {
+                return null;
+            }
+            String lowerContent = content.toLowerCase();
+            for (int i = 0; i < words.size(); i++) {
+                String word = words.getString(i);
+                if (oConvertUtils.isNotEmpty(word) && lowerContent.contains(word.toLowerCase())) {
+                    return word;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[CS-Message] 敏感词校验异常", e);
+        }
+        return null;
     }
 
     private CsVisitorTokenPayload resolveVisitorPayload(HttpServletRequest request) {

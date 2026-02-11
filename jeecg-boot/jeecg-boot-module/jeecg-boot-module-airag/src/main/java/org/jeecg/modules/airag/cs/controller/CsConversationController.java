@@ -399,14 +399,13 @@ public class CsConversationController extends JeecgController<CsConversation, IC
         
         Page<CsConversation> page = new Page<>(pageNo, pageSize);
         
-        // 管理者监控模式：返回所有进行中的会话
+        // 同事会话模式：返回所有进行中的会话（所有客服均可查看）
         if (Boolean.TRUE.equals(supervisorMode) || "monitor".equals(filter)) {
-            // 验证当前用户是否为管理者（兼容前端未传 supervisorMode 或取不到登录态）
             CsAgent currentAgent = csAgentService.getCurrentAgent();
             if (currentAgent == null && oConvertUtils.isNotEmpty(agentId)) {
                 currentAgent = csAgentService.getById(agentId);
             }
-            if (currentAgent != null && currentAgent.checkSupervisor()) {
+            if (currentAgent != null) {
                 IPage<CsConversation> result = conversationService.getAllActiveConversations(page);
                 return Result.OK(result);
             }

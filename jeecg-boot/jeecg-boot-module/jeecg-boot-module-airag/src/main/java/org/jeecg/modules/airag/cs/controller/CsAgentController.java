@@ -469,6 +469,71 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
         return Result.OK(key);
     }
 
+    // ==================== 聊天窗口设置 ====================
+
+    private static final String CHAT_WINDOW_REDIS_KEY = "cs:global:chat_window_settings";
+    private static final String CHAT_WINDOW_CONFIG_KEY = "chat_window_settings";
+    private static final String SENSITIVE_WORDS_REDIS_KEY = "cs:global:sensitive_words";
+    private static final String SENSITIVE_WORDS_CONFIG_KEY = "sensitive_words";
+
+    /**
+     * 获取聊天窗口设置（全局，访客端也需调用）
+     */
+    @Operation(summary = "获取聊天窗口设置（全局）")
+    @org.jeecg.config.shiro.IgnoreAuth
+    @GetMapping("/global/chat-window-settings")
+    public Result<String> getChatWindowSettings() {
+        String json = redisTemplate.opsForValue().get(CHAT_WINDOW_REDIS_KEY);
+        if (json == null || json.isEmpty()) {
+            json = getGlobalConfigValue(CHAT_WINDOW_CONFIG_KEY);
+            if (json != null && !json.isEmpty()) {
+                redisTemplate.opsForValue().set(CHAT_WINDOW_REDIS_KEY, json);
+            }
+        }
+        return Result.OK(json != null ? json : "{}");
+    }
+
+    /**
+     * 保存聊天窗口设置（全局）
+     */
+    @Operation(summary = "保存聊天窗口设置（全局）")
+    @PutMapping("/global/chat-window-settings")
+    public Result<String> saveChatWindowSettings(@RequestBody String body) {
+        saveGlobalConfigValue(CHAT_WINDOW_CONFIG_KEY, body);
+        redisTemplate.opsForValue().set(CHAT_WINDOW_REDIS_KEY, body);
+        log.info("[CS-Agent] 聊天窗口设置已更新");
+        return Result.OK("保存成功");
+    }
+
+    /**
+     * 获取敏感词配置（全局，访客端也需调用来做前端校验）
+     */
+    @Operation(summary = "获取敏感词配置（全局）")
+    @org.jeecg.config.shiro.IgnoreAuth
+    @GetMapping("/global/sensitive-words")
+    public Result<String> getSensitiveWords() {
+        String json = redisTemplate.opsForValue().get(SENSITIVE_WORDS_REDIS_KEY);
+        if (json == null || json.isEmpty()) {
+            json = getGlobalConfigValue(SENSITIVE_WORDS_CONFIG_KEY);
+            if (json != null && !json.isEmpty()) {
+                redisTemplate.opsForValue().set(SENSITIVE_WORDS_REDIS_KEY, json);
+            }
+        }
+        return Result.OK(json != null ? json : "{\"enabled\":false,\"words\":[]}");
+    }
+
+    /**
+     * 保存敏感词配置（全局）
+     */
+    @Operation(summary = "保存敏感词配置（全局）")
+    @PutMapping("/global/sensitive-words")
+    public Result<String> saveSensitiveWords(@RequestBody String body) {
+        saveGlobalConfigValue(SENSITIVE_WORDS_CONFIG_KEY, body);
+        redisTemplate.opsForValue().set(SENSITIVE_WORDS_REDIS_KEY, body);
+        log.info("[CS-Agent] 敏感词配置已更新");
+        return Result.OK("保存成功");
+    }
+
     // ==================== AI开关 ====================
 
     /**

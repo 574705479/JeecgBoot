@@ -27,8 +27,8 @@ spring:
     clean-disabled: true
   servlet:
     multipart:
-      max-file-size: 10MB
-      max-request-size: 10MB
+      max-file-size: 50MB
+      max-request-size: 50MB
   mail:
     # 定时任务发送邮件
     timeJobSend: false

@@ -345,4 +345,12 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
         return list(queryWrapper);
     }
 
+    @Override
+    public List<CsAgent> getOnlineAgents() {
+        // 查询所有在线客服（不限角色）
+        LambdaQueryWrapper<CsAgent> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(CsAgent::getStatus, CsAgent.STATUS_ONLINE);
+        return list(queryWrapper);
+    }
+
 }

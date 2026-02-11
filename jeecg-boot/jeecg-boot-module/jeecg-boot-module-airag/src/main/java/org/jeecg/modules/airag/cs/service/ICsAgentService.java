@@ -107,4 +107,10 @@ public interface ICsAgentService extends IService<CsAgent> {
      * @return 在线管理者列表
      */
     List<CsAgent> getOnlineSupervisors();
+
+    /**
+     * 获取所有在线客服（不限角色，同事会话功能）
+     * @return 所有在线客服列表
+     */
+    List<CsAgent> getOnlineAgents();
 }

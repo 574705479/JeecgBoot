@@ -235,7 +235,7 @@ public class CsWebSocketHandler implements WebSocketHandler {
 
         if (CsWebSocketInterceptor.USER_TYPE_USER.equals(userType)) {
             // 用户发送消息
-            messageService.sendUserMessage(conversationId, userId, userName, content);
+            messageService.sendUserMessage(conversationId, userId, userName, content, msgType, extra);
         } else {
             // 客服发送消息
             var agent = agentService.getById(userId);

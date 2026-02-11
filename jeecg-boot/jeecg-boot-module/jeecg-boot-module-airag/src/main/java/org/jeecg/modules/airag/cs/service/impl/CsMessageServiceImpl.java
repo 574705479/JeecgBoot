@@ -152,14 +152,66 @@ public class CsMessageServiceImpl implements ICsMessageService {
     }
 
     @Override
+    public CsMessage sendUserMessageRaw(String conversationId, String userId, String userName, String content) {
+        log.info("[CS-Message] 用户发送消息(Raw，不触发AI): conversationId={}, userId={}", conversationId, userId);
+
+        // 确保会话存在
+        CsConversation conversation = conversationService.getOrCreateConversation(
+                conversationId, null, userId, userName);
+
+        // 创建用户消息
+        CsMessage userMessage = CsMessage.createUserMessage(conversationId, userId, userName, content);
+
+        // 保存到MongoDB
+        saveToMongo(userMessage);
+
+        // 更新会话最后消息
+        conversationService.updateLastMessage(conversationId, content);
+
+        // 重置超时提醒标记
+        conversationService.resetTimeoutWarning(conversationId);
+
+        // 推送给访客自己（因为消息是后端代发的，前端需要通过WebSocket接收）
+        pushToUser(conversationId, userMessage);
+
+        // 推送给所有相关客服
+        pushToAgents(conversation, userMessage);
+
+        // 增加客服未读数
+        conversationService.incrementUnread(conversationId);
+
+        // 不触发AI回复，直接返回
+        return userMessage;
+    }
+
+    @Override
+    public CsMessage sendUserMessage(String conversationId, String userId, String userName, String content,
+                                     Integer msgType, String extra) {
+        CsMessage message = sendUserMessage(conversationId, userId, userName, content);
+        // 如果有附件类型或extra，覆盖消息属性
+        if (msgType != null && msgType != CsMessage.MSG_TYPE_TEXT) {
+            message.setMsgType(msgType);
+        }
+        if (oConvertUtils.isNotEmpty(extra)) {
+            message.setExtra(extra);
+        }
+        // 如果修改了，重新保存到MongoDB
+        if ((msgType != null && msgType != CsMessage.MSG_TYPE_TEXT) || oConvertUtils.isNotEmpty(extra)) {
+            saveToMongo(message);
+        }
+        return message;
+    }
+
+    @Override
     public CsMessage sendAgentMessage(String conversationId, String agentId, String agentName, String content,
                                       Integer msgType, String extra) {
         log.info("[CS-Message] 客服发送消息: conversationId={}, agentId={}", conversationId, agentId);
         
         CsConversation conversation = conversationService.getConversation(conversationId);
         
-        // ★ 如果会话是待接入状态，客服发送消息时自动接入该会话
-        if (conversation != null && conversation.getStatus() == CsConversation.STATUS_UNASSIGNED) {
+        // ★ 如果会话是待接入状态，客服发送消息时自动接入该会话（排除FAQ系统）
+        if (conversation != null && conversation.getStatus() == CsConversation.STATUS_UNASSIGNED
+                && !"faq_system".equals(agentId)) {
             boolean assigned = conversationService.assignToAgent(conversationId, agentId);
             if (assigned) {
                 log.info("[CS-Message] 客服发送消息，自动接入会话: conversationId={}, agentId={}", conversationId, agentId);
@@ -168,8 +220,9 @@ public class CsMessageServiceImpl implements ICsMessageService {
             }
         }
         
-        // ★ 客服发送消息时，自动切换到手动模式（终止AI自动回复）
-        if (conversation != null && conversation.getReplyMode() != CsConversation.REPLY_MODE_MANUAL) {
+        // ★ 客服发送消息时，自动切换到手动模式（终止AI自动回复），排除FAQ系统消息
+        if (conversation != null && conversation.getReplyMode() != CsConversation.REPLY_MODE_MANUAL
+                && !"faq_system".equals(agentId)) {
             conversationService.changeReplyMode(conversationId, CsConversation.REPLY_MODE_MANUAL);
             log.info("[CS-Message] 客服发送消息，自动切换为手动模式: conversationId={}", conversationId);
         }
@@ -640,6 +693,11 @@ public class CsMessageServiceImpl implements ICsMessageService {
 
     private String buildMessagePreview(String content, Integer msgType, String extra) {
         if (oConvertUtils.isNotEmpty(content)) {
+            // 去除HTML标签，保留纯文本摘要（避免侧边栏预览显示原始HTML标签）
+            String plain = content.replaceAll("<[^>]*>", "").replaceAll("&nbsp;", " ").trim();
+            if (oConvertUtils.isNotEmpty(plain)) {
+                return plain.length() > 50 ? plain.substring(0, 50) + "..." : plain;
+            }
             return content;
         }
         if (msgType == null) {
@@ -784,39 +842,9 @@ public class CsMessageServiceImpl implements ICsMessageService {
                 .timestamp(message.getCreateTime())
                 .build();
         
-        // 如果会话未分配，广播给所有在线客服
-        if (oConvertUtils.isEmpty(conversation.getOwnerAgentId())) {
-            log.info("[CS-Message] 会话未分配，广播给所有在线客服: conversationId={}", conversation.getId());
-            sessionManager.sendToAllAgents(wsMessage);
-            return;
-        }
-        
-        // 收集所有需要推送的客服ID（去重）
-        Set<String> agentIds = new HashSet<>();
-        
-        // 添加主负责人
-        agentIds.add(conversation.getOwnerAgentId());
-        
-        // 从缓存查询活跃的协作者（leaveTime为空表示仍在协作中）
-        List<CsCollaborator> activeCollaborators = getActiveCollaboratorsCached(conversation.getId());
-        if (activeCollaborators != null) {
-            for (CsCollaborator collab : activeCollaborators) {
-                agentIds.add(collab.getAgentId());
-            }
-        }
-        
-        // ★ 添加所有在线管理者（监控功能）
-        List<CsAgent> supervisors = agentService.getOnlineSupervisors();
-        if (supervisors != null) {
-            for (CsAgent supervisor : supervisors) {
-                agentIds.add(supervisor.getId());
-            }
-        }
-        
-        // 推送给所有相关客服
-        log.info("[CS-Message] 推送消息给相关客服: conversationId={}, agentIds={}", 
-                conversation.getId(), agentIds);
-        agentIds.parallelStream().forEach(targetAgentId -> sessionManager.sendToAgent(targetAgentId, wsMessage));
+        // 广播给所有在线客服（同事会话功能：所有客服都能看到所有会话）
+        log.info("[CS-Message] 广播消息给所有在线客服: conversationId={}", conversation.getId());
+        sessionManager.sendToAllAgents(wsMessage);
     }
 
     /**
@@ -842,27 +870,12 @@ public class CsMessageServiceImpl implements ICsMessageService {
                 .timestamp(message.getCreateTime())
                 .build();
         
-        // 收集所有需要推送的客服ID（去重，排除发送者）
+        // 收集所有在线客服ID（同事会话功能：全员推送，排除发送者）
         Set<String> agentIds = new HashSet<>();
-        
-        // 添加主负责人
-        if (oConvertUtils.isNotEmpty(conversation.getOwnerAgentId())) {
-            agentIds.add(conversation.getOwnerAgentId());
-        }
-        
-        // 从缓存查询活跃的协作者
-        List<CsCollaborator> activeCollaborators = getActiveCollaboratorsCached(conversationId);
-        if (activeCollaborators != null) {
-            for (CsCollaborator collab : activeCollaborators) {
-                agentIds.add(collab.getAgentId());
-            }
-        }
-        
-        // ★ 添加所有在线管理者（监控功能）
-        List<CsAgent> supervisors = agentService.getOnlineSupervisors();
-        if (supervisors != null) {
-            for (CsAgent supervisor : supervisors) {
-                agentIds.add(supervisor.getId());
+        List<CsAgent> onlineAgents = agentService.getOnlineAgents();
+        if (onlineAgents != null) {
+            for (CsAgent agent : onlineAgents) {
+                agentIds.add(agent.getId());
             }
         }
         
