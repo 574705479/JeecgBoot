@@ -4,7 +4,7 @@
       <div class="nav-group">
         <div class="nav-title">Start Here</div>
         <a class="nav-link" href="#start">快速开始</a>
-        <a class="nav-link" href="#token">获取 Token</a>
+        <a class="nav-link" v-if="tokenMode" href="#token">获取 Token</a>
         <a class="nav-link" href="#access">接入方式</a>
         <a class="nav-link" href="#preview">预览效果</a>
       </div>
@@ -18,38 +18,43 @@
       <div class="header">
         <div class="title">第三方接入示例与调试</div>
         <div class="subtitle">独立访客入口、嵌入与挂件效果演示</div>
+        <a-tag v-if="!loadingMode" :color="tokenMode ? 'blue' : 'green'" style="margin-top: 8px; font-size: 13px;">
+          {{ tokenMode ? 'Token模式（需获取Token）' : '免Token模式（设备码自动标识）' }}
+        </a-tag>
       </div>
 
       <section id="start" class="doc-section">
         <div class="section-title">快速开始</div>
-        <div class="section-desc">按步骤填入参数，即可完成接入调试</div>
+        <div class="section-desc">{{ tokenMode ? '按步骤填入参数，即可完成接入调试' : '免Token模式下，访客通过设备码自动标识，以下参数均为可选' }}</div>
         <div class="step">
-          <div class="step-title">1) 填写用户参数</div>
+          <div class="step-title">1) {{ tokenMode ? '填写用户参数' : '填写可选参数' }}</div>
           <div class="step-body">
             <div class="form">
-              <div class="field">
+              <div class="field" v-if="tokenMode">
                 <span class="label">externalUserId（第三方用户唯一标识）</span>
                 <a-input v-model:value="externalUserId" placeholder="第三方用户唯一标识" />
               </div>
               <div class="field">
-                <span class="label">userName（用于显示的用户昵称）</span>
+                <span class="label">userName（用于显示的用户昵称{{ tokenMode ? '' : '，可选'}}）</span>
                 <a-input v-model:value="userName" placeholder="展示昵称" />
               </div>
               <div class="field">
-                <span class="label">source（第三方系统标识，用于避免ID冲突）</span>
+                <span class="label">source（第三方系统标识{{ tokenMode ? '，用于避免ID冲突' : '，可选'}}）</span>
                 <a-input v-model:value="source" placeholder="第三方系统标识" />
               </div>
               <div class="field">
-                <span class="label">X-App-Secret（全局接入密钥，后端保存）</span>
-                <a-input v-model:value="secretKey" placeholder="全局接入密钥（仅本地调试）" />
-                <span class="label">生产环境请放在你自己的后端，不要写进前端页面</span>
+                <span class="label">{{ tokenMode ? 'X-App-Secret（全局接入密钥，后端保存）' : '接入密钥 key（免Token模式下通过 ?key= 传递）' }}</span>
+                <a-input v-model:value="secretKey" :placeholder="tokenMode ? '全局接入密钥（仅本地调试）' : '接入密钥（后台配置后必传）'" />
+                <span class="label" v-if="tokenMode">生产环境请放在你自己的后端，不要写进前端页面</span>
+                <span class="label" v-else>如后台配置了密钥，访客必须携带 ?key=xxx 参数才能访问</span>
               </div>
+              <a-alert v-if="!tokenMode" message="免Token模式下，系统自动使用设备码作为访客唯一标识。如配置了接入密钥，访客需通过 ?key=xxx 参数传递。" type="info" show-icon style="margin-top: 4px;" />
             </div>
           </div>
         </div>
       </section>
 
-      <section id="token" class="doc-section">
+      <section id="token" class="doc-section" v-if="tokenMode">
         <div class="section-title">获取 Token</div>
         <div class="section-desc">本地调试可直接调用，生产环境请通过后端代理</div>
         <div class="step">
@@ -126,25 +131,25 @@ expireAt: {{ expireAt || '' }}</pre>
 
       <section id="preview" class="doc-section">
         <div class="section-title">预览效果</div>
-        <div class="section-desc">根据当前接入类型展示（需要先获取 token）</div>
+        <div class="section-desc">{{ tokenMode ? '根据当前接入类型展示（需要先获取 token）' : '免Token模式可直接预览' }}</div>
         <div class="step-body preview-grid">
           <div class="card" v-if="accessType === 'url'">
             <div class="card-desc">访客页预览</div>
-            <a-alert v-if="!token" message="请先测试获取token后再预览效果" type="warning" show-icon />
+            <a-alert v-if="tokenMode && !token" message="请先测试获取token后再预览效果" type="warning" show-icon />
             <iframe v-else class="preview" :src="accessUrl" />
           </div>
           <div class="card" v-if="accessType === 'iframe'">
             <div class="card-desc">iframe 预览</div>
-            <a-alert v-if="!token" message="请先测试获取token后再预览效果" type="warning" show-icon />
+            <a-alert v-if="tokenMode && !token" message="请先测试获取token后再预览效果" type="warning" show-icon />
             <iframe v-else class="preview" :src="accessUrl" />
           </div>
           <div class="card" v-if="accessType === 'widget'">
             <div class="card-desc">挂件预览（右下角）</div>
             <div class="row">
-              <a-button type="primary" :disabled="!token || widgetLoaded" @click="loadWidget">加载挂件预览</a-button>
+              <a-button type="primary" :disabled="(tokenMode && !token) || widgetLoaded" @click="loadWidget">加载挂件预览</a-button>
               <a-button :disabled="!widgetLoaded" @click="unloadWidget">关闭挂件预览</a-button>
             </div>
-            <a-alert v-if="!token" message="请先测试获取token后再预览效果" type="warning" show-icon />
+            <a-alert v-if="tokenMode && !token" message="请先测试获取token后再预览效果" type="warning" show-icon />
           </div>
         </div>
       </section>
@@ -158,7 +163,7 @@ expireAt: {{ expireAt || '' }}</pre>
     <aside class="toc">
       <div class="toc-title">On this page</div>
       <a class="toc-link" href="#start">快速开始</a>
-      <a class="toc-link" href="#token">获取 Token</a>
+      <a class="toc-link" v-if="tokenMode" href="#token">获取 Token</a>
       <a class="toc-link" href="#access">接入方式</a>
       <a class="toc-link" href="#preview">预览效果</a>
       <a class="toc-link" href="#faq">常见问题</a>
@@ -167,13 +172,15 @@ expireAt: {{ expireAt || '' }}</pre>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { message } from 'ant-design-vue';
 import { defHttp } from '/@/utils/http/axios';
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
 
 const baseUrl = window.location.origin;
+const tokenMode = ref(true); // true=Token模式, false=免Token模式
+const loadingMode = ref(true); // 正在查询模式
 const externalUserId = ref('U1001');
 const userName = ref('Tom');
 const source = ref('partnerA');
@@ -185,6 +192,34 @@ const backendTokenUrl = ref('/your-backend/visitor-token');
 const backendTokenLoading = ref(false);
 const tokenDocTab = ref('curl');
 const accessType = ref('url');
+
+onMounted(async () => {
+  try {
+    const res = await defHttp.get(
+      { url: '/airag/cs/visitor/token/required' },
+      { successMessageMode: 'none', isTransformResponse: false },
+    );
+    if (res?.success && res.result === false) {
+      tokenMode.value = false;
+    }
+  } catch {
+    // 默认Token模式
+  } finally {
+    loadingMode.value = false;
+  }
+  // 自动加载系统已配置的密钥
+  try {
+    const accessRes = await defHttp.get(
+      { url: '/cs/agent/global/visitor-access' },
+      { successMessageMode: 'none', isTransformResponse: false },
+    );
+    if (accessRes?.success && accessRes.result?.secretKey) {
+      secretKey.value = accessRes.result.secretKey;
+    }
+  } catch {
+    // 忽略
+  }
+});
 
 const md = new MarkdownIt({
   html: false,
@@ -205,6 +240,15 @@ let widgetScriptEl: HTMLScriptElement | null = null;
 const widgetLoaded = ref(false);
 
 const accessUrl = computed(() => {
+  if (!tokenMode.value) {
+    // 免Token模式：拼接可选参数 + 接入密钥
+    const params = new URLSearchParams();
+    if (secretKey.value) params.set('key', secretKey.value);
+    if (userName.value) params.set('userName', userName.value);
+    if (source.value) params.set('source', source.value);
+    const qs = params.toString();
+    return `${baseUrl}/cs/userChat${qs ? '?' + qs : ''}`;
+  }
   if (!token.value) {
     return `${baseUrl}/cs/userChat?token=短时token&externalUserId=${externalUserId.value}&userName=${userName.value}&source=${source.value}`;
   }
@@ -316,6 +360,36 @@ const tokenDocNodeHtml = computed(() => md.render(tokenDocNodeMarkdown.value));
 const tokenDocFrontendHtml = computed(() => md.render(tokenDocFrontendMarkdown.value));
 
 const accessDocUrlMarkdown = computed(() => {
+  if (!tokenMode.value) {
+    // 免Token模式
+    const params: string[] = [];
+    if (secretKey.value) params.push(`key=${encodeURIComponent(secretKey.value)}`);
+    if (userName.value) params.push(`userName=${encodeURIComponent(userName.value)}`);
+    if (source.value) params.push(`source=${encodeURIComponent(source.value)}`);
+    const freeUrl = params.length
+      ? `${baseUrl}/cs/userChat?${params.join('&')}`
+      : `${baseUrl}/cs/userChat`;
+    const keyNote = secretKey.value
+      ? '免Token模式下需携带 `key` 参数（接入密钥）。系统自动使用设备码标识用户。'
+      : '免Token模式下，访客直接通过URL访问，无需任何凭证。系统自动使用设备码标识用户。';
+    const jsExample = secretKey.value
+      ? `window.location.href = "${baseUrl}/cs/userChat?key=" + encodeURIComponent("你的接入密钥");`
+      : `window.location.href = "${baseUrl}/cs/userChat";`;
+    return `
+${keyNote}
+
+\`\`\`text
+${freeUrl}
+\`\`\`
+
+${secretKey.value ? '必传参数：`key`（接入密钥）。可选参数' : '可选参数'}：\`userName\`（昵称）、\`source\`（来源标识）。
+
+\`\`\`js
+// 直接跳转即可，无需获取Token
+${jsExample}
+\`\`\`
+`;
+  }
   const previewToken = token.value || '短时token';
   const accessPreviewUrl = `${baseUrl}/cs/userChat?token=${encodeURIComponent(previewToken)}&externalUserId=${encodeURIComponent(externalUserId.value)}&userName=${encodeURIComponent(userName.value)}&source=${encodeURIComponent(source.value)}`;
   return `
@@ -345,6 +419,19 @@ fetch("${backendTokenUrl.value}", {
 });
 
 const accessDocIframeMarkdown = computed(() => {
+  if (!tokenMode.value) {
+    const freeUrl = secretKey.value
+      ? `${baseUrl}/cs/userChat?key=${encodeURIComponent(secretKey.value)}`
+      : `${baseUrl}/cs/userChat`;
+    const note = secretKey.value ? '免Token模式下需携带 `key` 参数：' : '免Token模式下直接嵌入即可：';
+    return `
+${note}
+
+\`\`\`html
+<iframe src="${freeUrl}" style="width:420px;height:640px;border:0;"></iframe>
+\`\`\`
+`;
+  }
   const previewToken = token.value || '短时token';
   const accessPreviewUrl = `${baseUrl}/cs/userChat?token=${encodeURIComponent(previewToken)}&externalUserId=${encodeURIComponent(externalUserId.value)}&userName=${encodeURIComponent(userName.value)}&source=${encodeURIComponent(source.value)}`;
   return `
@@ -375,6 +462,21 @@ fetch("${backendTokenUrl.value}", {
 
 const accessDocWidgetMarkdown = computed(() => {
   const scriptCloseTag = '</scr' + 'ipt>';
+  if (!tokenMode.value) {
+    const keyLine = secretKey.value ? `\n  key: "${secretKey.value}",       // 接入密钥（后台配置后必传）` : '';
+    return `
+免Token模式下，无需传入token相关参数${secretKey.value ? '，但需传入接入密钥' : ''}：
+
+\`\`\`html
+<script src="${baseUrl}/cs-widget.js">${scriptCloseTag}
+JeecgCsWidget.init({
+  baseUrl: "${baseUrl}",${keyLine}
+  userName: "${userName.value}",  // 可选
+  source: "${source.value}",     // 可选
+});
+\`\`\`
+`;
+  }
   return `
 \`\`\`html
 <script src="${baseUrl}/cs-widget.js">${scriptCloseTag}
@@ -416,7 +518,19 @@ const faqDocMarkdown = computed(() => {
 `;
 });
 
-const faqDocHtml = computed(() => md.render(faqDocMarkdown.value));
+const faqTokenModeNote = computed(() => {
+  if (tokenMode.value) return '';
+  return `
+
+### Token模式和免Token模式有什么区别？
+**Token模式**：第三方后端先调用接口获取短时Token，传给前端后才能访问。适合需要严格身份验证的场景。
+
+**免Token模式**：访客通过设备码自动标识，无需获取Token即可直接接入。适合官网客服、公开咨询等场景。注意：用户清除浏览器数据后会被视为新访客。
+
+可在「客服工作台 → 设置 → 访客接入设置」中切换。`;
+});
+
+const faqDocHtml = computed(() => md.render(faqDocMarkdown.value + faqTokenModeNote.value));
 
 async function runTokenTest() {
   loading.value = true;
@@ -505,7 +619,8 @@ async function ensureWidgetScript() {
 }
 
 async function loadWidget() {
-  if (!token.value || widgetLoaded.value) return;
+  if (tokenMode.value && !token.value) return;
+  if (widgetLoaded.value) return;
   try {
     await ensureWidgetScript();
     const w = window as any;
@@ -513,14 +628,19 @@ async function loadWidget() {
       message.error('挂件脚本加载失败');
       return;
     }
-    widgetInstance = w.JeecgCsWidget.init({
+    const opts: any = {
       baseUrl,
-      externalUserId: externalUserId.value,
       userName: userName.value,
       source: source.value,
-      token: token.value,
-      getToken: () => Promise.resolve(token.value),
-    });
+    };
+    if (tokenMode.value) {
+      opts.externalUserId = externalUserId.value;
+      opts.token = token.value;
+      opts.getToken = () => Promise.resolve(token.value);
+    } else if (secretKey.value) {
+      opts.key = secretKey.value;
+    }
+    widgetInstance = w.JeecgCsWidget.init(opts);
     widgetLoaded.value = true;
   } catch {
     message.error('挂件脚本加载失败');

@@ -24,9 +24,10 @@
     return el
   }
 
-  function buildChatUrl(baseUrl, token, externalUserId, userName, source) {
+  function buildChatUrl(baseUrl, token, externalUserId, userName, source, key) {
     var url = baseUrl.replace(/\/$/, '') + '/cs/userChat'
     var params = []
+    if (key) params.push('key=' + encodeURIComponent(key))
     if (token) params.push('token=' + encodeURIComponent(token))
     if (externalUserId) params.push('externalUserId=' + encodeURIComponent(externalUserId))
     if (userName) params.push('userName=' + encodeURIComponent(userName))
@@ -206,7 +207,8 @@
         token,
         _this.options.externalUserId || '',
         _this.options.userName || '',
-        _this.options.source || ''
+        _this.options.source || '',
+        _this.options.key || ''
       )
       _this.iframe.setAttribute('src', url)
     })

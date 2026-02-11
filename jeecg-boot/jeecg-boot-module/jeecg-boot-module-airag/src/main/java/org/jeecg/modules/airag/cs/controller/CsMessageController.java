@@ -69,21 +69,37 @@ public class CsMessageController {
         }
         
         boolean isAdmin = visitorTokenService.isAdminRequest(request);
-        CsVisitorTokenPayload tokenPayload = null;
         if (!isAdmin) {
-            tokenPayload = resolveVisitorPayload(request);
-            if (tokenPayload == null) {
+            CsVisitorTokenPayload tokenPayload = resolveVisitorPayload(request);
+            if (tokenPayload != null) {
+                if (visitorTokenService.isBlacklisted(tokenPayload.getExternalUserId())) {
+                    return Result.error("访客已被拉黑");
+                }
+                if ("agent".equals(senderType)) {
+                    return Result.error("访客无权限发送客服消息");
+                }
+                senderId = tokenPayload.getExternalUserId();
+                if (oConvertUtils.isEmpty(senderName)) {
+                    senderName = tokenPayload.getUserName();
+                }
+            } else if (!visitorTokenService.isTokenRequired()) {
+                // 免Token模式：先校验接入密钥
+                if (!visitorTokenService.validateAppKey(request)) {
+                    return Result.error("接入密钥无效");
+                }
+                String devId = visitorTokenService.extractDeviceId(request);
+                if (oConvertUtils.isEmpty(devId)) {
+                    return Result.error("缺少设备码");
+                }
+                if (visitorTokenService.isBlacklisted(devId)) {
+                    return Result.error("访客已被拉黑");
+                }
+                if ("agent".equals(senderType)) {
+                    return Result.error("访客无权限发送客服消息");
+                }
+                senderId = devId;
+            } else {
                 return Result.error("访客凭证无效或已过期");
-            }
-            if (visitorTokenService.isBlacklisted(tokenPayload.getExternalUserId())) {
-                return Result.error("访客已被拉黑");
-            }
-            if ("agent".equals(senderType)) {
-                return Result.error("访客无权限发送客服消息");
-            }
-            senderId = tokenPayload.getExternalUserId();
-            if (oConvertUtils.isEmpty(senderName)) {
-                senderName = tokenPayload.getUserName();
             }
             if (oConvertUtils.isNotEmpty(conversationId) && !isConversationOwner(conversationId, senderId)) {
                 return Result.error("无权访问该会话");
@@ -115,15 +131,28 @@ public class CsMessageController {
         boolean isAdmin = visitorTokenService.isAdminRequest(request);
         if (!isAdmin) {
             CsVisitorTokenPayload tokenPayload = resolveVisitorPayload(request);
-            if (tokenPayload == null) {
+            if (tokenPayload != null) {
+                if (visitorTokenService.isBlacklisted(tokenPayload.getExternalUserId())) {
+                    return Result.error("访客已被拉黑");
+                }
+                userId = tokenPayload.getExternalUserId();
+                if (oConvertUtils.isEmpty(userName)) {
+                    userName = tokenPayload.getUserName();
+                }
+            } else if (!visitorTokenService.isTokenRequired()) {
+                if (!visitorTokenService.validateAppKey(request)) {
+                    return Result.error("接入密钥无效");
+                }
+                String devId = visitorTokenService.extractDeviceId(request);
+                if (oConvertUtils.isEmpty(devId)) {
+                    return Result.error("缺少设备码");
+                }
+                if (visitorTokenService.isBlacklisted(devId)) {
+                    return Result.error("访客已被拉黑");
+                }
+                userId = devId;
+            } else {
                 return Result.error("访客凭证无效或已过期");
-            }
-            if (visitorTokenService.isBlacklisted(tokenPayload.getExternalUserId())) {
-                return Result.error("访客已被拉黑");
-            }
-            userId = tokenPayload.getExternalUserId();
-            if (oConvertUtils.isEmpty(userName)) {
-                userName = tokenPayload.getUserName();
             }
             if (oConvertUtils.isNotEmpty(conversationId) && !isConversationOwner(conversationId, userId)) {
                 return Result.error("无权访问该会话");
@@ -308,13 +337,27 @@ public class CsMessageController {
             return true;
         }
         CsVisitorTokenPayload payload = resolveVisitorPayload(request);
-        if (payload == null) {
-            return false;
+        if (payload != null) {
+            if (visitorTokenService.isBlacklisted(payload.getExternalUserId())) {
+                return false;
+            }
+            return isConversationOwner(conversationId, payload.getExternalUserId());
         }
-        if (visitorTokenService.isBlacklisted(payload.getExternalUserId())) {
-            return false;
+        // 免Token模式：先校验接入密钥，再通过设备码校验
+        if (!visitorTokenService.isTokenRequired()) {
+            if (!visitorTokenService.validateAppKey(request)) {
+                return false;
+            }
+            String devId = visitorTokenService.extractDeviceId(request);
+            if (oConvertUtils.isEmpty(devId)) {
+                return false;
+            }
+            if (visitorTokenService.isBlacklisted(devId)) {
+                return false;
+            }
+            return isConversationOwner(conversationId, devId);
         }
-        return isConversationOwner(conversationId, payload.getExternalUserId());
+        return false;
     }
 
     private boolean isConversationOwner(String conversationId, String userId) {

@@ -87,6 +87,13 @@ public interface ICsAgentService extends IService<CsAgent> {
     void decrementSessions(String agentId);
 
     /**
+     * 增加客服累计服务数（会话结束时调用）
+     * 
+     * @param agentId 客服ID
+     */
+    void incrementTotalServed(String agentId);
+
+    /**
      * 查找任意一个在线且设置了AI应用的客服
      * 
      * @return 客服信息，如果没有返回null

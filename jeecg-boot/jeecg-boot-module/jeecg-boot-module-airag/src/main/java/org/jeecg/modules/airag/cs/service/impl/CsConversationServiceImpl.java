@@ -103,10 +103,10 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         Map<String, String> uaInfo = CsUserAgentUtil.parse(userAgent);
         Map<String, String> geoInfo = ipGeoService.queryGeoByIp(userIp);
 
-        // 默认用户名逻辑：基于地理位置生成
+        // 默认用户名逻辑：基于地理位置+IP生成
         String finalUserName = userName;
         if (oConvertUtils.isEmpty(finalUserName)) {
-            finalUserName = generateDefaultUserName(geoInfo);
+            finalUserName = generateDefaultUserName(geoInfo, userIp);
         }
 
         CsConversation conversation = new CsConversation();
@@ -195,23 +195,32 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
     }
 
     /**
-     * 根据地理位置信息生成默认用户名
-     * 例如: "中国北京用户"、"中国用户"、"访客"
+     * 根据地理位置信息和IP生成默认用户名
+     * 格式: "省份城市 (IP)"，例如: "广东深圳 (120.24.35.12)"、"北京 (10.0.0.1)"、"访客 (127.0.0.1)"
      */
-    private String generateDefaultUserName(Map<String, String> geoInfo) {
-        if (geoInfo == null || geoInfo.isEmpty()) {
-            return "访客";
+    private String generateDefaultUserName(Map<String, String> geoInfo, String userIp) {
+        StringBuilder sb = new StringBuilder();
+        if (geoInfo != null && !geoInfo.isEmpty()) {
+            String province = geoInfo.get("province");
+            String city = geoInfo.get("city");
+            String country = geoInfo.get("country");
+            if (oConvertUtils.isNotEmpty(province) && oConvertUtils.isNotEmpty(city)) {
+                sb.append(province).append(city);
+            } else if (oConvertUtils.isNotEmpty(province)) {
+                sb.append(province);
+            } else if (oConvertUtils.isNotEmpty(city)) {
+                sb.append(city);
+            } else if (oConvertUtils.isNotEmpty(country)) {
+                sb.append(country);
+            }
         }
-        String country = geoInfo.get("country");
-        String city = geoInfo.get("city");
-
-        if (oConvertUtils.isNotEmpty(country) && oConvertUtils.isNotEmpty(city)) {
-            return country + city + "用户";
+        if (sb.length() == 0) {
+            sb.append("访客");
         }
-        if (oConvertUtils.isNotEmpty(country)) {
-            return country + "用户";
+        if (oConvertUtils.isNotEmpty(userIp)) {
+            sb.append(" (").append(userIp).append(")");
         }
-        return "访客";
+        return sb.toString();
     }
 
     /**
@@ -524,9 +533,10 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         conversation.setUpdateTime(new Date());
         updateById(conversation);
         
-        // 减少客服会话数
+        // 减少客服会话数 & 增加累计服务数
         if (oConvertUtils.isNotEmpty(conversation.getOwnerAgentId())) {
             agentService.decrementSessions(conversation.getOwnerAgentId());
+            agentService.incrementTotalServed(conversation.getOwnerAgentId());
         }
         
         // 通知用户会话已结束（不持久化系统消息，只做WebSocket通知）

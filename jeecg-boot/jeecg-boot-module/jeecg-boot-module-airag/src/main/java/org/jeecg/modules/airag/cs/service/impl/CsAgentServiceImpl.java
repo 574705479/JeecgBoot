@@ -318,6 +318,14 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
     }
 
     @Override
+    public void incrementTotalServed(String agentId) {
+        if (oConvertUtils.isEmpty(agentId)) {
+            return;
+        }
+        baseMapper.incrementTotalServed(agentId);
+    }
+
+    @Override
     public CsAgent findOnlineAgentWithApp() {
         // 查找在线且设置了AI应用的客服
         LambdaQueryWrapper<CsAgent> queryWrapper = new LambdaQueryWrapper<>();

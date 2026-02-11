@@ -63,34 +63,64 @@ public class CsWebSocketInterceptor implements HandshakeInterceptor {
                 userType = oConvertUtils.getString(userType, USER_TYPE_USER);
             }
 
-            // 访客连接需要校验短时token
+            // 访客连接校验
             if (USER_TYPE_USER.equals(userType)) {
+                // IP黑名单始终检查
                 if (visitorTokenService.isIpBlacklisted(clientIp)) {
                     log.warn("[CS-WebSocket] 握手失败：IP已被拉黑");
                     return false;
                 }
-                CsVisitorTokenPayload payload = null;
-                if (oConvertUtils.isNotEmpty(sessionToken)) {
-                    payload = visitorTokenService.parseSessionToken(sessionToken);
-                }
-                if (payload == null) {
-                    payload = visitorTokenService.parseToken(visitorToken);
-                }
-                if (payload == null) {
-                    log.warn("[CS-WebSocket] 握手失败：访客凭证无效或已过期");
-                    return false;
-                }
-                if (visitorTokenService.isBlacklisted(payload.getExternalUserId())) {
-                    log.warn("[CS-WebSocket] 握手失败：访客已被拉黑");
-                    return false;
-                }
-                userId = payload.getExternalUserId();
-                if (oConvertUtils.isEmpty(userName)) {
-                    userName = payload.getUserName();
-                }
-                appId = payload.getAppId();
-                if (payload.getExpireAt() != null) {
-                    attributes.put(ATTR_TOKEN_EXPIRE_AT, payload.getExpireAt());
+
+                if (visitorTokenService.isTokenRequired()) {
+                    // === Token模式：必须有有效凭证 ===
+                    CsVisitorTokenPayload payload = null;
+                    if (oConvertUtils.isNotEmpty(sessionToken)) {
+                        payload = visitorTokenService.parseSessionToken(sessionToken);
+                    }
+                    if (payload == null) {
+                        payload = visitorTokenService.parseToken(visitorToken);
+                    }
+                    if (payload == null) {
+                        log.warn("[CS-WebSocket] 握手失败：访客凭证无效或已过期");
+                        return false;
+                    }
+                    if (visitorTokenService.isBlacklisted(payload.getExternalUserId())) {
+                        log.warn("[CS-WebSocket] 握手失败：访客已被拉黑");
+                        return false;
+                    }
+                    userId = payload.getExternalUserId();
+                    if (oConvertUtils.isEmpty(userName)) {
+                        userName = payload.getUserName();
+                    }
+                    appId = payload.getAppId();
+                    if (payload.getExpireAt() != null) {
+                        attributes.put(ATTR_TOKEN_EXPIRE_AT, payload.getExpireAt());
+                    }
+                } else {
+                    // === 免Token模式：设备码作为身份标识 ===
+                    // 校验接入密钥
+                    if (!visitorTokenService.validateAppKey(servletRequest.getServletRequest())) {
+                        log.warn("[CS-WebSocket] 握手失败：接入密钥无效");
+                        return false;
+                    }
+                    String deviceId = servletRequest.getServletRequest().getParameter("deviceId");
+                    if (oConvertUtils.isNotEmpty(deviceId)) {
+                        userId = deviceId;
+                    }
+                    if (oConvertUtils.isEmpty(userId)) {
+                        log.warn("[CS-WebSocket] 握手失败：免Token模式缺少deviceId/userId");
+                        return false;
+                    }
+                    // 检查设备码/userId是否被拉黑
+                    if (visitorTokenService.isBlacklisted(userId)) {
+                        log.warn("[CS-WebSocket] 握手失败：访客已被拉黑");
+                        return false;
+                    }
+                    // appId从全局配置获取
+                    if (oConvertUtils.isEmpty(appId)) {
+                        appId = visitorTokenService.getGlobalVisitorAppId();
+                    }
+                    // userName可选，后续由createConversation处理默认值
                 }
             }
 

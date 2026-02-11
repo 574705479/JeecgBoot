@@ -14,6 +14,8 @@ import org.jeecg.modules.airag.cs.mapper.CsGlobalConfigMapper;
 import org.jeecg.modules.airag.cs.service.ICsVisitorService;
 import org.jeecg.modules.airag.cs.service.ICsVisitorTokenService;
 import org.jeecg.modules.airag.cs.vo.CsVisitorTokenPayload;
+import org.jeecg.modules.airag.cs.websocket.CsWebSocketMessage;
+import org.jeecg.modules.airag.cs.websocket.CsWebSocketSessionManager;
 import org.jeecg.common.util.oConvertUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -23,6 +25,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.net.URI;
 import java.util.regex.Pattern;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -51,6 +54,9 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
 
     @Autowired
     private RedisTemplate<String, String> redisTemplate;
+
+    @Autowired
+    private CsWebSocketSessionManager sessionManager;
 
     /**
      * 分页查询访客列表
@@ -113,6 +119,30 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
         }
         // 不管是否存在都返回OK，前端根据是否有数据判断
         return Result.OK(visitor);
+    }
+
+    /**
+     * 查询是否需要Token验证（供前端和第三方判断接入模式）
+     */
+    @Operation(summary = "查询是否需要Token验证")
+    @org.jeecg.config.shiro.IgnoreAuth
+    @GetMapping("/token/required")
+    public Result<Boolean> isTokenRequired() {
+        return Result.OK(visitorTokenService.isTokenRequired());
+    }
+
+    /**
+     * 校验接入密钥（免Token模式下前端预校验，避免进入页面后才报错）
+     */
+    @Operation(summary = "校验接入密钥")
+    @org.jeecg.config.shiro.IgnoreAuth
+    @GetMapping("/validate-key")
+    public Result<Boolean> validateKey(HttpServletRequest request) {
+        boolean valid = visitorTokenService.validateAppKey(request);
+        if (!valid) {
+            return Result.error("接入密钥无效");
+        }
+        return Result.OK(true);
     }
 
     /**
@@ -285,6 +315,7 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
         org.jeecg.common.system.vo.LoginUser loginUser = (org.jeecg.common.system.vo.LoginUser) org.apache.shiro.SecurityUtils.getSubject().getPrincipal();
         String operator = loginUser != null ? loginUser.getUsername() : "system";
         visitorTokenService.blacklistWithReason(target, visitorName, reason, operator);
+        notifyBlacklistChanged("user", "block", target, visitorName);
         return Result.OK("已拉黑");
     }
 
@@ -300,6 +331,7 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
             return Result.error("userId不能为空");
         }
         visitorTokenService.unblacklist(target);
+        notifyBlacklistChanged("user", "unblock", target, null);
         return Result.OK("已取消拉黑");
     }
 
@@ -316,25 +348,38 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
     }
 
     /**
-     * 访客端自检拉黑（通过访客token解析用户）
+     * 访客端自检拉黑（通过访客token或设备码解析用户）
      */
     @Operation(summary = "访客端自检拉黑")
     @org.jeecg.config.shiro.IgnoreAuth
     @GetMapping("/blacklist/check-self")
     public Result<Map<String, Object>> checkSelfBlacklist(HttpServletRequest request) {
-        String shortToken = visitorTokenService.extractToken(request);
+        String visitorUserId = null;
+
+        // 优先尝试Token解析
         String sessionToken = visitorTokenService.extractSessionToken(request);
         CsVisitorTokenPayload payload = null;
         if (oConvertUtils.isNotEmpty(sessionToken)) {
             payload = visitorTokenService.parseSessionToken(sessionToken);
         }
-        if (payload == null && oConvertUtils.isNotEmpty(shortToken)) {
-            payload = visitorTokenService.parseToken(shortToken);
-        }
         if (payload == null) {
+            String shortToken = visitorTokenService.extractToken(request);
+            if (oConvertUtils.isNotEmpty(shortToken)) {
+                payload = visitorTokenService.parseToken(shortToken);
+            }
+        }
+        if (payload != null) {
+            visitorUserId = payload.getExternalUserId();
+        } else if (!visitorTokenService.isTokenRequired()) {
+            // 免Token模式：通过设备码
+            visitorUserId = visitorTokenService.extractDeviceId(request);
+        }
+
+        if (oConvertUtils.isEmpty(visitorUserId)) {
             return Result.error("访客凭证无效或已过期");
         }
-        boolean blocked = visitorTokenService.isBlacklisted(payload.getExternalUserId());
+
+        boolean blocked = visitorTokenService.isBlacklisted(visitorUserId);
         java.util.Map<String, Object> result = new java.util.HashMap<>();
         result.put("blacklisted", blocked);
         return Result.OK(result);
@@ -358,6 +403,7 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
         org.jeecg.common.system.vo.LoginUser loginUser = (org.jeecg.common.system.vo.LoginUser) org.apache.shiro.SecurityUtils.getSubject().getPrincipal();
         String operator = loginUser != null ? loginUser.getUsername() : "system";
         visitorTokenService.blacklistIpWithReason(target.trim(), reason, operator);
+        notifyBlacklistChanged("ip", "block", target.trim(), null);
         return Result.OK("已拉黑");
     }
 
@@ -373,6 +419,7 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
             return Result.error("ip不能为空");
         }
         visitorTokenService.unblacklistIp(target);
+        notifyBlacklistChanged("ip", "unblock", target, null);
         return Result.OK("已取消拉黑");
     }
 
@@ -710,5 +757,30 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
             visitorService.removeById(id.trim());
         }
         return Result.OK("删除成功");
+    }
+
+    /**
+     * 发送黑名单变更通知给所有在线客服
+     */
+    private void notifyBlacklistChanged(String blacklistType, String action, String target, String visitorName) {
+        try {
+            Map<String, Object> extra = new HashMap<>();
+            extra.put("blacklistType", blacklistType);
+            extra.put("action", action);
+            extra.put("target", target);
+            if (oConvertUtils.isNotEmpty(visitorName)) {
+                extra.put("visitorName", visitorName);
+            }
+            String desc = "user".equals(blacklistType) ? "访客" : "IP";
+            CsWebSocketMessage msg = CsWebSocketMessage.builder()
+                    .type(CsWebSocketMessage.TYPE_BLACKLIST_CHANGED)
+                    .content("block".equals(action) ? desc + "已拉黑" : desc + "已解封")
+                    .extra(extra)
+                    .timestamp(new Date())
+                    .build();
+            sessionManager.sendToAllAgents(msg);
+        } catch (Exception e) {
+            log.warn("[CS-Visitor] 发送黑名单变更通知失败", e);
+        }
     }
 }

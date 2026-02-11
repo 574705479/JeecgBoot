@@ -14,10 +14,13 @@ import org.jeecg.modules.airag.cs.entity.CsIpBlacklist;
 import org.jeecg.modules.airag.cs.mapper.CsIpBlacklistMapper;
 import org.jeecg.modules.airag.cs.service.ICsVisitorTokenService;
 import org.jeecg.modules.airag.cs.util.CsIpMatchUtil;
+import org.jeecg.modules.airag.cs.websocket.CsWebSocketMessage;
+import org.jeecg.modules.airag.cs.websocket.CsWebSocketSessionManager;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Date;
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -34,6 +37,9 @@ public class CsIpBlacklistController {
 
     @Autowired
     private ICsVisitorTokenService visitorTokenService;
+
+    @Autowired
+    private CsWebSocketSessionManager sessionManager;
 
     @Operation(summary = "分页列表")
     @GetMapping("/list")
@@ -86,6 +92,10 @@ public class CsIpBlacklistController {
         }
 
         log.info("[CS-Security] IP黑名单添加: ip={}, reason={}, operator={}", ipValue, reason, operator);
+
+        // 通知所有在线客服
+        notifyBlacklistChanged("ip", "block", ipValue.trim(), null);
+
         return Result.OK("添加成功");
     }
 
@@ -104,6 +114,31 @@ public class CsIpBlacklistController {
         }
 
         log.info("[CS-Security] IP黑名单解封: ip={}", record.getIp());
+
+        // 通知所有在线客服
+        notifyBlacklistChanged("ip", "unblock", record.getIp(), null);
+
         return Result.OK("解封成功");
+    }
+
+    private void notifyBlacklistChanged(String blacklistType, String action, String target, String visitorName) {
+        try {
+            Map<String, Object> extra = new HashMap<>();
+            extra.put("blacklistType", blacklistType);
+            extra.put("action", action);
+            extra.put("target", target);
+            if (visitorName != null && !visitorName.isEmpty()) {
+                extra.put("visitorName", visitorName);
+            }
+            CsWebSocketMessage msg = CsWebSocketMessage.builder()
+                    .type(CsWebSocketMessage.TYPE_BLACKLIST_CHANGED)
+                    .content(action.equals("block") ? "IP已拉黑" : "IP已解封")
+                    .extra(extra)
+                    .timestamp(new Date())
+                    .build();
+            sessionManager.sendToAllAgents(msg);
+        } catch (Exception e) {
+            log.warn("[CS-Security] 发送黑名单变更通知失败", e);
+        }
     }
 }

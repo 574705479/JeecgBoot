@@ -101,19 +101,22 @@
               <span>访客接入设置</span>
               <a-tag color="orange" size="small">全局</a-tag>
             </div>
-            <div class="setting-desc">用于第三方获取短时token校验；留空则不校验密钥</div>
             <a-space direction="vertical" style="width: 100%">
+              <div style="display: flex; align-items: center; justify-content: space-between;">
+                <span style="font-size: 13px;">启用Token验证</span>
+                <a-switch v-model:checked="visitorTokenRequired" size="small" :loading="tokenSwitchSaving" @change="onTokenSwitchChange" />
+              </div>
+              <div class="setting-desc" style="margin-top: -4px;">
+                {{ visitorTokenRequired ? '第三方接入需先获取短时Token，适合需要身份验证的场景' : '免Token模式：访客通过设备码自动标识，适合官网公开客服等场景' }}
+              </div>
               <a-input
                 v-model:value="visitorSecretKey"
-                placeholder="密钥（留空则不校验）"
+                :placeholder="visitorTokenRequired ? '密钥（留空则不校验）' : '接入密钥（配置后访客需通过 ?key= 传递）'"
                 allowClear
               />
               <a-space>
                 <a-button size="small" @click="generateVisitorSecretKey" :loading="visitorSecretGenerating">
                   {{ visitorSecretKey ? '重新生成' : '生成密钥' }}
-                </a-button>
-                <a-button type="primary" size="small" @click="saveVisitorSecretConfig" :loading="visitorSecretSaving">
-                  保存
                 </a-button>
               </a-space>
               <a-textarea
@@ -122,15 +125,26 @@
                 :rows="3"
               />
               <a-alert
-                message="示例：partner.com,*.example.com,192.168.1.10,!test.example.com"
-                type="info"
-                show-icon
-              />
-              <a-alert
+                v-if="visitorTokenRequired"
                 message="接入示例：/cs/userChat?token=xxx&externalUserId=U1001&userName=Tom&source=partnerA"
                 type="info"
                 show-icon
               />
+              <a-alert
+                v-else-if="visitorSecretKey"
+                message="免Token接入示例：/cs/userChat?key=你的密钥（访客需携带密钥访问）"
+                type="info"
+                show-icon
+              />
+              <a-alert
+                v-else
+                message="免Token接入示例：/cs/userChat（无需任何参数，系统自动使用设备码标识访客）"
+                type="info"
+                show-icon
+              />
+              <a-button type="primary" size="small" @click="saveVisitorSecretConfig" :loading="visitorSecretSaving">
+                保存
+              </a-button>
             </a-space>
           </div>
 
@@ -167,6 +181,8 @@
           待接入 <span class="count">{{ unassignedCount }}</span>
         </div>
         -->
+        <!-- 已结束标签已隐藏：已结束会话可在"会话记录"页面查看 -->
+        <!--
         <div 
           class="filter-tab" 
           :class="{ active: filter === 'closed' }"
@@ -174,6 +190,7 @@
         >
           已结束 <span class="count">{{ closedCount }}</span>
         </div>
+        -->
         <!-- 全部标签暂时隐藏，避免界面拥挤 -->
         <!-- <div 
           class="filter-tab" 
@@ -193,8 +210,8 @@
         </div>
       </div>
 
-      <!-- 会话列表 -->
-      <div class="conversation-list">
+      <!-- 会话列表：普通模式（我的/已结束等） -->
+      <div class="conversation-list" v-if="filter !== 'monitor'">
         <div
           v-for="conv in conversations"
           :key="conv.id"
@@ -232,17 +249,6 @@
           </div>
           <!-- 操作按钮组 -->
           <div class="conv-actions">
-            <!-- 接入按钮已隐藏：会话创建时后端自动分配客服 -->
-            <!--
-            <a-button 
-              v-if="conv.status === 0" 
-              type="primary" 
-              size="small"
-              @click.stop="assignConversation(conv.id)"
-            >
-              接入
-            </a-button>
-            -->
             <a-dropdown v-if="conv.status === 2" :trigger="['click']" @click.stop>
               <a-button size="small" type="text">
                 <MoreOutlined />
@@ -261,6 +267,68 @@
         <div class="empty-state" v-if="conversations.length === 0">
           <InboxOutlined style="font-size: 48px; color: #ccc;" />
           <p>暂无会话</p>
+        </div>
+      </div>
+
+      <!-- 会话列表：监控模式（按客服分组） -->
+      <div class="conversation-list monitor-agent-list" v-else>
+        <div v-if="monitorGroups.length === 0" class="empty-state">
+          <TeamOutlined style="font-size: 48px; color: #ccc;" />
+          <p>暂无客服数据</p>
+        </div>
+        <div 
+          v-for="group in monitorGroups" 
+          :key="group.agent.id" 
+          class="monitor-agent-group"
+          :class="{ expanded: group.expanded }"
+        >
+          <!-- 客服行：点击展开/折叠 -->
+          <div class="monitor-agent-header" @click="toggleAgentExpand(group.agent.id)">
+            <span class="monitor-expand-icon">
+              <CaretDownOutlined v-if="group.expanded" />
+              <CaretRightOutlined v-else />
+            </span>
+            <a-badge :status="getAgentStatusType(group.agent.status)" />
+            <span class="monitor-agent-name">{{ group.agent.nickname || '未知客服' }}</span>
+            <span class="monitor-agent-status" :class="'status-' + group.agent.status">
+              {{ getAgentStatusText(group.agent.status) }}
+            </span>
+            <span class="monitor-agent-sessions">
+              {{ group.conversations.filter(c => c.userOnline).length }}/{{ group.conversations.length }}
+            </span>
+          </div>
+          <!-- 展开的对话列表 -->
+          <div class="monitor-agent-conversations" v-show="group.expanded">
+            <div v-if="group.conversations.length === 0" class="monitor-no-conv">
+              暂无对话
+            </div>
+            <div
+              v-for="conv in group.conversations"
+              :key="conv.id"
+              class="conversation-item monitor-conv-item"
+              :class="{ 
+                active: currentConversation?.id === conv.id,
+                unread: conv.unreadCount > 0
+              }"
+              @click="selectConversation(conv)"
+            >
+              <div class="conv-avatar">
+                <a-badge :status="(conv.userOnline ?? (currentConversation?.id === conv.id ? userOnline : false)) ? 'success' : 'default'" dot>
+                  <a-avatar :size="36" class="visitor-avatar">{{ getDisplayName(conv).charAt(0) }}</a-avatar>
+                </a-badge>
+              </div>
+              <div class="conv-content">
+                <div class="conv-header">
+                  <span class="conv-name">{{ getDisplayName(conv) }}</span>
+                  <span class="conv-time">{{ formatTime(conv.lastMessageTime) }}</span>
+                </div>
+                <div class="conv-preview">{{ conv.lastMessage || '暂无消息' }}</div>
+              </div>
+              <div class="conv-badge" v-if="conv.unreadCount > 0">
+                {{ conv.unreadCount > 99 ? '99+' : conv.unreadCount }}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -630,7 +698,7 @@
             <span class="info-value">{{ currentConversation.userIp || '-' }}</span>
           </div>
           <div class="info-item">
-            <label>地理位置</label>
+            <label>IP归属地</label>
             <span class="info-value">
               <EnvironmentOutlined style="margin-right: 4px; color: #1890ff;" />
               {{ formatGeoLocation(currentConversation) }}
@@ -867,7 +935,8 @@ import {
   StarFilled, StarOutlined, SwapOutlined, MenuUnfoldOutlined, MenuFoldOutlined,
   CloseOutlined, EditOutlined, PlusOutlined, InboxOutlined, MessageOutlined,
   SmileOutlined, ThunderboltOutlined, RobotOutlined, EyeOutlined, SettingOutlined,
-  MoreOutlined, DeleteOutlined, PaperClipOutlined, KeyOutlined, EnvironmentOutlined, GlobalOutlined
+  MoreOutlined, DeleteOutlined, PaperClipOutlined, KeyOutlined, EnvironmentOutlined, GlobalOutlined,
+  TeamOutlined, CaretRightOutlined, CaretDownOutlined
 } from '@ant-design/icons-vue';
 import { defHttp } from '/@/utils/http/axios';
 import { useGlobSetting } from '/@/hooks/setting';
@@ -909,6 +978,8 @@ const visitorAppId = ref<string | undefined>(undefined);   // 访客AI应用
 const aiAppList = ref<any[]>([]);
 const showSettingsDrawer = ref(false);
 const aiEnabled = ref(true);  // AI自动回复开关
+const visitorTokenRequired = ref(true);  // Token验证开关，默认开启
+const tokenSwitchSaving = ref(false);   // Token开关保存中
 const visitorSecretKey = ref('');
 const visitorDomainWhitelist = ref('');
 const visitorSecretSaving = ref(false);
@@ -933,7 +1004,95 @@ const currentReplyMode = ref(0);
 const statsData = ref({ myCount: 0, unassignedCount: 0, closedCount: 0 });
 const myCount = computed(() => statsData.value.myCount);
 const _unassignedCount = computed(() => statsData.value.unassignedCount); // 待接入标签已隐藏
-const closedCount = computed(() => statsData.value.closedCount);
+const _closedCount = computed(() => statsData.value.closedCount); // 已结束标签已隐藏
+
+// ============ 监控模式：按客服分组 ============
+const monitorAgentList = ref<any[]>([]); // 监控模式下的所有客服列表
+const expandedAgents = ref<Set<string>>(new Set()); // 展开的客服ID集合
+
+// 监控模式下按客服分组的对话列表
+const monitorGroups = computed(() => {
+  if (filter.value !== 'monitor') return [];
+  
+  // 按 ownerAgentId 分组对话
+  const convByAgent = new Map<string, any[]>();
+  for (const conv of conversations.value) {
+    const aid = conv.ownerAgentId || '__unassigned__';
+    if (!convByAgent.has(aid)) {
+      convByAgent.set(aid, []);
+    }
+    convByAgent.get(aid)!.push(conv);
+  }
+  
+  // 构建分组列表：有对话的客服 + 无对话的客服都要展示
+  const groups: any[] = [];
+  const agentMap = new Map<string, any>();
+  for (const agent of monitorAgentList.value) {
+    agentMap.set(agent.id, agent);
+  }
+  
+  // 先添加有对话的客服（排除自己，按在线状态排序：在线 > 隐身 > 离线）
+  for (const agent of monitorAgentList.value) {
+    // 监控模式不显示自己
+    if (agent.id === agentId.value) {
+      convByAgent.delete(agent.id);
+      continue;
+    }
+    const convs = convByAgent.get(agent.id) || [];
+    groups.push({
+      agent,
+      conversations: convs,
+      expanded: expandedAgents.value.has(agent.id),
+    });
+    convByAgent.delete(agent.id);
+  }
+  
+  // 处理有对话但不在客服列表中的情况（如已删除客服的残留对话）
+  if (convByAgent.has('__unassigned__')) {
+    groups.push({
+      agent: { id: '__unassigned__', nickname: '未分配', status: -1, currentSessions: 0, maxSessions: 0 },
+      conversations: convByAgent.get('__unassigned__')!,
+      expanded: expandedAgents.value.has('__unassigned__'),
+    });
+  }
+  for (const [aid, convs] of convByAgent) {
+    if (aid === '__unassigned__') continue;
+    groups.push({
+      agent: { id: aid, nickname: agentMap.get(aid)?.nickname || `客服(${aid.substring(0, 6)})`, status: -1, currentSessions: convs.length, maxSessions: 0 },
+      conversations: convs,
+      expanded: expandedAgents.value.has(aid),
+    });
+  }
+  
+  // 排序：在线优先，然后按对话数量降序
+  groups.sort((a, b) => {
+    const statusOrder = (s: number) => s === 1 ? 0 : s === 0 ? 1 : 2;
+    const sa = statusOrder(a.agent.status);
+    const sb = statusOrder(b.agent.status);
+    if (sa !== sb) return sa - sb;
+    return (b.conversations.length) - (a.conversations.length);
+  });
+  
+  return groups;
+});
+
+function toggleAgentExpand(agentId: string) {
+  const newSet = new Set(expandedAgents.value);
+  if (newSet.has(agentId)) {
+    newSet.delete(agentId);
+  } else {
+    newSet.add(agentId);
+  }
+  expandedAgents.value = newSet;
+}
+
+function getAgentStatusText(status: number) {
+  return status === 1 ? '在线' : status === 0 ? '离线' : '隐身';
+}
+
+function getAgentStatusType(status: number): string {
+  return status === 1 ? 'success' : status === 0 ? 'error' : 'default';
+}
 
 // 消息
 const messages = ref<any[]>([]);
@@ -1077,6 +1236,14 @@ const handleNetworkOnline = () => {
   connectWebSocket();
 };
 
+const handleBeforeUnload = () => {
+  // 页面刷新/关闭前优雅关闭 WebSocket，发送正常 close frame 避免 1006
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    wsManuallyClosed = true;
+    ws.close(1000, 'page_refresh');
+  }
+};
+
 function closeWebSocket() {
   wsManuallyClosed = true;
   stopWsHeartbeat();
@@ -1206,24 +1373,24 @@ const filteredQuickReplies = computed(() => {
 
 // 初始化
 onMounted(async () => {
-  await loadAgentInfo();
-  await loadAiAppList();
-  await loadAiEnabled();          // 加载AI开关状态
-  await loadGlobalVisitorApp();  // 加载全局访客AI应用配置
-  await loadVisitorAccessConfig(); // 加载全局访客接入配置
-  await loadAgentTimeoutConfig();  // 加载客服超时未回复配置
-  await loadConversations();
-  startWaitingTimer();             // 启动访客等待时长计时器
-  connectWebSocket();
+  await loadAgentInfo();          // 获取 agentId（WebSocket 连接依赖此值）
+  connectWebSocket();             // 立即连接 WebSocket，不等其他数据加载
   startFallbackPoll();
+  // 其余数据加载并行进行，加快初始化速度
+  await Promise.all([
+    loadAiAppList(),
+    loadAiEnabled(),              // 加载AI开关状态
+    loadGlobalVisitorApp(),       // 加载全局访客AI应用配置
+    loadVisitorAccessConfig(),    // 加载全局访客接入配置
+    loadAgentTimeoutConfig(),     // 加载客服超时未回复配置
+    loadConversations(),
+  ]);
+  startWaitingTimer();             // 启动访客等待时长计时器
   hasMounted.value = true;
   
-  // ★ 移除定时轮询，完全依赖 WebSocket 实时推送
-  // refreshTimer = window.setInterval(() => {
-  //   loadConversations();
-  // }, 10000);
   document.addEventListener('visibilitychange', handleVisibilityChange);
   window.addEventListener('online', handleNetworkOnline);
+  window.addEventListener('beforeunload', handleBeforeUnload);
 });
 
 onUnmounted(() => {
@@ -1236,6 +1403,7 @@ onUnmounted(() => {
   refreshTimer && clearInterval(refreshTimer);
   stopWaitingTimer();
   window.removeEventListener('online', handleNetworkOnline);
+  window.removeEventListener('beforeunload', handleBeforeUnload);
   document.removeEventListener('visibilitychange', handleVisibilityChange);
   if (messagesEl) {
     messagesEl.removeEventListener('scroll', handleMessageScroll);
@@ -1720,6 +1888,7 @@ async function onAiEnabledChange(checked: boolean) {
 }
 
 function resetVisitorAccessConfig() {
+  visitorTokenRequired.value = true;
   visitorSecretKey.value = '';
   visitorDomainWhitelist.value = '';
 }
@@ -1731,6 +1900,7 @@ async function loadVisitorAccessConfig() {
     }, { isTransformResponse: false });
     if (res?.success) {
       const config = res.result || {};
+      visitorTokenRequired.value = config.tokenRequired !== 'false';
       visitorSecretKey.value = config.secretKey || '';
       visitorDomainWhitelist.value = config.whitelist || '';
     } else {
@@ -1760,6 +1930,7 @@ async function saveVisitorSecretConfig() {
   visitorSecretSaving.value = true;
   try {
     const payload = {
+      tokenRequired: visitorTokenRequired.value ? 'true' : 'false',
       secretKey: visitorSecretKey.value || '',
       whitelist: visitorDomainWhitelist.value || '',
     };
@@ -1771,6 +1942,28 @@ async function saveVisitorSecretConfig() {
     message.error('保存失败');
   } finally {
     visitorSecretSaving.value = false;
+  }
+}
+
+/** Token开关切换时立即保存 */
+async function onTokenSwitchChange(checked: boolean) {
+  tokenSwitchSaving.value = true;
+  const prevValue = !checked; // 切换前的值
+  try {
+    const payload = {
+      tokenRequired: checked ? 'true' : 'false',
+      secretKey: visitorSecretKey.value || '',
+      whitelist: visitorDomainWhitelist.value || '',
+    };
+    await httpPut({ url: '/cs/agent/global/visitor-access', data: payload });
+    message.success(checked ? 'Token验证已启用' : 'Token验证已关闭');
+  } catch (e) {
+    console.error('切换Token模式失败', e);
+    message.error('切换失败');
+    // 回滚开关状态
+    visitorTokenRequired.value = prevValue;
+  } finally {
+    tokenSwitchSaving.value = false;
   }
 }
 
@@ -1905,6 +2098,21 @@ function initWaitingTracking() {
   });
 }
 
+// ============ 加载监控模式客服列表 ============
+
+async function loadMonitorAgents() {
+  try {
+    const res = await httpGet({
+      url: '/cs/agent/list',
+      params: { pageNo: 1, pageSize: 200 }
+    });
+    monitorAgentList.value = res?.records || res || [];
+  } catch (e) {
+    console.error('[Monitor] 加载客服列表失败', e);
+    monitorAgentList.value = [];
+  }
+}
+
 // ============ 加载会话列表 ============
 
 async function loadConversations() {
@@ -1913,6 +2121,11 @@ async function loadConversations() {
   try {
     // 同时加载统计数据（不等待，异步执行）
     loadStatsDebounced();
+    
+    // 监控模式：同时加载客服列表
+    if (filter.value === 'monitor' && isSupervisor.value) {
+      loadMonitorAgents();
+    }
     
     // 监控模式：管理者查看所有进行中的会话
     const params: any = { 
@@ -3095,6 +3308,10 @@ function handleWsMessage(data: any) {
         
         // 延迟刷新统计数据（防抖）
         loadStatsDebounced();
+        // 监控模式：刷新整个列表和客服状态
+        if (filter.value === 'monitor') {
+          loadConversations();
+        }
       }
       break;
     case 'new_conversation':
@@ -3112,7 +3329,8 @@ function handleWsMessage(data: any) {
           const shouldAdd = 
             (filter.value === 'mine' && convOwnerAgentId === agentId.value) ||  // 我的：分配给当前客服
             (filter.value === 'unassigned' && convStatus === 0) ||               // 待接入：未分配
-            (filter.value === 'all');                                              // 全部
+            (filter.value === 'all') ||                                           // 全部
+            (filter.value === 'monitor');                                          // 监控：显示所有活跃会话
           
           if (shouldAdd) {
             const newConv: any = {
@@ -3150,6 +3368,10 @@ function handleWsMessage(data: any) {
         
         // ★ 无论在哪个列表，都更新统计数据（防抖）
         loadStatsDebounced();
+        // 监控模式：刷新客服列表以更新 currentSessions
+        if (filter.value === 'monitor') {
+          loadMonitorAgents();
+        }
       }
       break;
     case 'conversation_closed':
@@ -3199,6 +3421,10 @@ function handleWsMessage(data: any) {
         
         // 刷新统计数据
         loadStatsDebounced();
+        // 监控模式：刷新客服列表以更新 currentSessions
+        if (filter.value === 'monitor') {
+          loadMonitorAgents();
+        }
       }
       break;
     case 'conversation_transferred':
@@ -3283,6 +3509,10 @@ function handleWsMessage(data: any) {
 
           // 刷新统计数据
           loadStatsDebounced();
+        }
+        // 监控模式：刷新整个列表和客服状态
+        if (filter.value === 'monitor') {
+          loadConversations();
         }
       }
       break;
@@ -3444,6 +3674,24 @@ function handleWsMessage(data: any) {
           if (visitor.nickname) {
             currentConversation.value.visitorNickname = visitor.nickname;
           }
+        }
+      }
+      break;
+    }
+    case 'blacklist_changed': {
+      const extraInfo = data.extra || data;
+      const blType = extraInfo.blacklistType; // "user" | "ip"
+      const blAction = extraInfo.action;       // "block" | "unblock"
+      const blTarget = extraInfo.target;       // userId 或 IP
+      if (!blTarget) break;
+
+      // 如果当前会话匹配，实时更新拉黑状态
+      if (currentConversation.value) {
+        if (blType === 'user' && currentConversation.value.userId === blTarget) {
+          userIdBlacklisted.value = blAction === 'block';
+        }
+        if (blType === 'ip' && currentConversation.value.userIp === blTarget) {
+          ipBlacklisted.value = blAction === 'block';
         }
       }
       break;
@@ -3930,6 +4178,118 @@ function restoreMessageScroll() {
 .conversation-list {
   flex: 1;
   overflow-y: auto;
+}
+
+// ============ 监控模式：按客服分组样式 ============
+.monitor-agent-list {
+  .empty-state {
+    padding: 40px 0;
+    text-align: center;
+    color: #999;
+  }
+}
+
+.monitor-agent-group {
+  border-bottom: 1px solid #f0f0f0;
+  
+  &.expanded {
+    .monitor-agent-header {
+      background: #fafafa;
+      border-bottom: 1px solid #f0f0f0;
+    }
+  }
+}
+
+.monitor-agent-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: background 0.2s;
+  user-select: none;
+  
+  &:hover {
+    background: #f5f5f5;
+  }
+  
+  .monitor-expand-icon {
+    font-size: 12px;
+    color: #999;
+    width: 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.2s;
+  }
+  
+  .monitor-agent-name {
+    font-weight: 500;
+    font-size: 14px;
+    color: #333;
+    flex-shrink: 0;
+  }
+  
+  .monitor-agent-status {
+    font-size: 12px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    flex-shrink: 0;
+    
+    &.status-1 {
+      color: #52c41a;
+      background: rgba(82, 196, 26, 0.1);
+    }
+    &.status-0 {
+      color: #ff4d4f;
+      background: rgba(255, 77, 79, 0.1);
+    }
+    &.status--1 {
+      color: #999;
+      background: rgba(0, 0, 0, 0.04);
+    }
+  }
+  
+  .monitor-agent-sessions {
+    margin-left: auto;
+    font-size: 12px;
+    color: #888;
+    flex-shrink: 0;
+  }
+}
+
+.monitor-agent-conversations {
+  background: #fafbfc;
+  
+  .monitor-no-conv {
+    padding: 12px 20px 12px 40px;
+    font-size: 12px;
+    color: #bbb;
+    font-style: italic;
+  }
+  
+  .monitor-conv-item {
+    padding-left: 40px;
+    border-bottom-color: #f0f0f0;
+    
+    .conv-avatar {
+      .visitor-avatar {
+        width: 36px !important;
+        height: 36px !important;
+        line-height: 36px !important;
+        font-size: 14px !important;
+      }
+    }
+    
+    .conv-content {
+      .conv-name {
+        font-size: 13px;
+      }
+      .conv-preview {
+        font-size: 12px;
+      }
+    }
+  }
 }
 
 .conversation-item {

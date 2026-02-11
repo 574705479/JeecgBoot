@@ -12,6 +12,10 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.*;
 
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+
 /**
  * WebSocket消息处理器 (重构版)
  * 
@@ -23,6 +27,19 @@ import org.springframework.web.socket.*;
 @Slf4j
 @Component
 public class CsWebSocketHandler implements WebSocketHandler {
+
+    /** 客服断连延迟检查调度器 */
+    private static final ScheduledExecutorService disconnectScheduler =
+        Executors.newScheduledThreadPool(2, r -> {
+            Thread t = new Thread(r, "cs-disconnect-check");
+            t.setDaemon(true);
+            return t;
+        });
+
+    /** 页面刷新等正常关闭的宽限期（秒） */
+    private static final int GRACE_PERIOD_NORMAL = 5;
+    /** 异常断连（1006等）的宽限期（秒） */
+    private static final int GRACE_PERIOD_ABNORMAL = 10;
 
     private final CsWebSocketSessionManager sessionManager;
     private final ICsMessageService messageService;
@@ -338,8 +355,8 @@ public class CsWebSocketHandler implements WebSocketHandler {
         
         try {
             if (CsWebSocketInterceptor.USER_TYPE_AGENT.equals(userType)) {
-                // 客服断开 - 延迟检查是否真的离线
-                handleAgentDisconnect(userId);
+                // 客服断开 - 延迟检查是否真的离线（根据关闭状态决定宽限期）
+                handleAgentDisconnect(userId, closeStatus);
             } else {
                 // 用户断开 - 通知相关客服
                 handleUserDisconnect(conversationId, userId);
@@ -353,24 +370,54 @@ public class CsWebSocketHandler implements WebSocketHandler {
 
     /**
      * 处理客服断开连接
+     * 根据关闭状态区分宽限期：
+     * - 正常关闭 (1000, page_refresh): 5秒宽限期（前端主动刷新）
+     * - 异常断连 (1006等): 10秒宽限期（网络波动、意外断开）
+     * - Token过期 (4001): 立即下线
      */
-    private void handleAgentDisconnect(String agentId) {
-        // 延迟5秒检查，避免页面刷新导致的误判
-        new Thread(() -> {
+    private void handleAgentDisconnect(String agentId, CloseStatus closeStatus) {
+        int code = closeStatus.getCode();
+        
+        // Token过期，立即下线
+        if (code == 4001) {
+            log.info("[CS-WebSocket] Token过期，客服立即下线: agentId={}", agentId);
             try {
-                Thread.sleep(5000);
-                if (!sessionManager.isAgentOnline(agentId)) {
-                    log.info("[CS-WebSocket] 客服确认离线: agentId={}", agentId);
-                    agentService.goOffline(agentId);
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+                agentService.goOffline(agentId);
             } catch (Exception e) {
                 if (!isShutdownError(e)) {
                     log.error("[CS-WebSocket] 处理客服离线失败: {}", e.getMessage());
                 }
             }
-        }).start();
+            return;
+        }
+        
+        // 根据关闭原因选择宽限期
+        int gracePeriod;
+        if (code == CloseStatus.NORMAL.getCode()) {
+            // 正常关闭（如 page_refresh），较短宽限期
+            gracePeriod = GRACE_PERIOD_NORMAL;
+        } else {
+            // 异常断连（1006等），较长宽限期
+            gracePeriod = GRACE_PERIOD_ABNORMAL;
+        }
+        
+        log.info("[CS-WebSocket] 客服断连，{}秒后检查是否真正离线: agentId={}, closeCode={}", 
+                gracePeriod, agentId, code);
+        
+        disconnectScheduler.schedule(() -> {
+            try {
+                if (!sessionManager.isAgentOnline(agentId)) {
+                    log.info("[CS-WebSocket] 客服确认离线: agentId={}", agentId);
+                    agentService.goOffline(agentId);
+                } else {
+                    log.info("[CS-WebSocket] 客服已重连，取消离线: agentId={}", agentId);
+                }
+            } catch (Exception e) {
+                if (!isShutdownError(e)) {
+                    log.error("[CS-WebSocket] 处理客服离线失败: {}", e.getMessage());
+                }
+            }
+        }, gracePeriod, TimeUnit.SECONDS);
     }
 
     /**

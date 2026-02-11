@@ -139,8 +139,8 @@ public class CsMessageServiceImpl implements ICsMessageService {
                 break;
                 
             case CsConversation.REPLY_MODE_AI_ASSIST:
-                // AI辅助模式：生成建议推送给客服
-                generateAiSuggestionAsync(conversationId, content);
+                // AI辅助模式：流式生成建议推送给客服（使用客服AI建议应用，支持知识库）
+                generateAiSuggestionStream(conversation, content, null);
                 break;
                 
             case CsConversation.REPLY_MODE_MANUAL:

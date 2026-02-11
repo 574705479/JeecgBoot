@@ -62,17 +62,40 @@ public class CsConversationController extends JeecgController<CsConversation, IC
 
         boolean isAdmin = visitorTokenService.isAdminRequest(request);
         if (!isAdmin) {
+            // 优先尝试Token方式（即使免Token模式也兼容带Token的请求）
             CsVisitorTokenPayload payload = resolveVisitorPayload(request);
-            if (payload == null) {
+            if (payload != null) {
+                if (visitorTokenService.isBlacklisted(payload.getExternalUserId())) {
+                    return Result.error("访客已被拉黑");
+                }
+                appId = payload.getAppId();
+                userId = payload.getExternalUserId();
+                if (oConvertUtils.isEmpty(userName)) {
+                    userName = payload.getUserName();
+                }
+            } else if (!visitorTokenService.isTokenRequired()) {
+                // 免Token模式：先校验接入密钥
+                if (!visitorTokenService.validateAppKey(request)) {
+                    return Result.error("接入密钥无效");
+                }
+                // 设备码作为访客标识
+                String devId = visitorTokenService.extractDeviceId(request);
+                if (oConvertUtils.isNotEmpty(devId)) {
+                    userId = devId;
+                }
+                if (oConvertUtils.isEmpty(userId)) {
+                    return Result.error("缺少设备码或用户标识");
+                }
+                if (visitorTokenService.isBlacklisted(userId)) {
+                    return Result.error("访客已被拉黑");
+                }
+                // appId从全局配置获取
+                if (oConvertUtils.isEmpty(appId)) {
+                    appId = visitorTokenService.getGlobalVisitorAppId();
+                }
+                // userName可选，后端createConversation会处理默认值
+            } else {
                 return Result.error("访客凭证无效或已过期");
-            }
-            if (visitorTokenService.isBlacklisted(payload.getExternalUserId())) {
-                return Result.error("访客已被拉黑");
-            }
-            appId = payload.getAppId();
-            userId = payload.getExternalUserId();
-            if (oConvertUtils.isEmpty(userName)) {
-                userName = payload.getUserName();
             }
         }
 
@@ -116,16 +139,34 @@ public class CsConversationController extends JeecgController<CsConversation, IC
         boolean isAdmin = visitorTokenService.isAdminRequest(request);
         if (!isAdmin) {
             CsVisitorTokenPayload payload = resolveVisitorPayload(request);
-            if (payload == null) {
+            if (payload != null) {
+                if (visitorTokenService.isBlacklisted(payload.getExternalUserId())) {
+                    return Result.error("访客已被拉黑");
+                }
+                appId = payload.getAppId();
+                userId = payload.getExternalUserId();
+                if (oConvertUtils.isEmpty(userName)) {
+                    userName = payload.getUserName();
+                }
+            } else if (!visitorTokenService.isTokenRequired()) {
+                if (!visitorTokenService.validateAppKey(request)) {
+                    return Result.error("接入密钥无效");
+                }
+                String devId = visitorTokenService.extractDeviceId(request);
+                if (oConvertUtils.isNotEmpty(devId)) {
+                    userId = devId;
+                }
+                if (oConvertUtils.isEmpty(userId)) {
+                    return Result.error("缺少设备码或用户标识");
+                }
+                if (visitorTokenService.isBlacklisted(userId)) {
+                    return Result.error("访客已被拉黑");
+                }
+                if (oConvertUtils.isEmpty(appId)) {
+                    appId = visitorTokenService.getGlobalVisitorAppId();
+                }
+            } else {
                 return Result.error("访客凭证无效或已过期");
-            }
-            if (visitorTokenService.isBlacklisted(payload.getExternalUserId())) {
-                return Result.error("访客已被拉黑");
-            }
-            appId = payload.getAppId();
-            userId = payload.getExternalUserId();
-            if (oConvertUtils.isEmpty(userName)) {
-                userName = payload.getUserName();
             }
         }
         
@@ -147,14 +188,31 @@ public class CsConversationController extends JeecgController<CsConversation, IC
         }
         if (!visitorTokenService.isAdminRequest(request)) {
             CsVisitorTokenPayload payload = resolveVisitorPayload(request);
-            if (payload == null) {
+            if (payload != null) {
+                if (visitorTokenService.isBlacklisted(payload.getExternalUserId())) {
+                    return Result.error("访客已被拉黑");
+                }
+                if (!payload.getExternalUserId().equals(conversation.getUserId())) {
+                    return Result.error("无权访问该会话");
+                }
+            } else if (!visitorTokenService.isTokenRequired()) {
+                // 免Token模式：先校验接入密钥
+                if (!visitorTokenService.validateAppKey(request)) {
+                    return Result.error("接入密钥无效");
+                }
+                // 通过设备码校验归属
+                String devId = visitorTokenService.extractDeviceId(request);
+                if (oConvertUtils.isEmpty(devId)) {
+                    return Result.error("缺少设备码");
+                }
+                if (visitorTokenService.isBlacklisted(devId)) {
+                    return Result.error("访客已被拉黑");
+                }
+                if (!devId.equals(conversation.getUserId())) {
+                    return Result.error("无权访问该会话");
+                }
+            } else {
                 return Result.error("访客凭证无效或已过期");
-            }
-            if (visitorTokenService.isBlacklisted(payload.getExternalUserId())) {
-                return Result.error("访客已被拉黑");
-            }
-            if (!payload.getExternalUserId().equals(conversation.getUserId())) {
-                return Result.error("无权访问该会话");
             }
         }
         return Result.OK(conversation);

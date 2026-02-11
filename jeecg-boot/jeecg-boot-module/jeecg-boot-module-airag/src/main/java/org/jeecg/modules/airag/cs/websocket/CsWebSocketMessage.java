@@ -114,6 +114,8 @@ public class CsWebSocketMessage {
     public static final String TYPE_TRANSFER_TO_AI = "transfer_to_ai";
     /** 用户离线 */
     public static final String TYPE_USER_OFFLINE = "user_offline";
+    /** 黑名单变更（拉黑/解封） */
+    public static final String TYPE_BLACKLIST_CHANGED = "blacklist_changed";
 
     /**
      * 创建消息

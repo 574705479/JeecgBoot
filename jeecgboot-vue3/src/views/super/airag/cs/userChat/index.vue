@@ -277,6 +277,8 @@ const sessionTokenExpiresAt = ref(0);
 const lastSessionTokenKey = 'cs_session_token_last';
 const rawVisitorToken = ref('');
 let tokenValidateTimer: number | null = null;
+const tokenRequired = ref(true); // Token验证开关，默认需要
+const appKey = ref(''); // 接入密钥（免Token模式下从URL ?key= 读取）
 const fatalError = ref(false);
 const fatalErrorMessage = ref('token无效或已过期，请回到第三方应用重新打开');
 function getQueryParam(name: string) {
@@ -303,6 +305,14 @@ function buildAuthHeaders(config: any) {
   }
   if (visitorToken.value) {
     return { ...config?.headers, 'X-Visitor-Token': visitorToken.value };
+  }
+  // 免Token模式：传设备码 + 接入密钥
+  if (!tokenRequired.value && userId.value) {
+    const headers: Record<string, string> = { ...config?.headers, 'X-Device-Id': userId.value };
+    if (appKey.value) {
+      headers['X-App-Secret'] = appKey.value;
+    }
+    return headers;
   }
   return config?.headers || {};
 }
@@ -484,6 +494,25 @@ const connectionStatusText = computed(() => {
 
 // 初始化
 onMounted(async () => {
+  // 首先查询是否需要Token验证
+  try {
+    const tokenRes = await defHttp.get(
+      { url: '/airag/cs/visitor/token/required' },
+      { ...silentRequestOptions, isTransformResponse: false },
+    );
+    if (tokenRes?.success && tokenRes.result === false) {
+      tokenRequired.value = false;
+    }
+  } catch {
+    // 查询失败默认需要Token
+  }
+
+  // 读取接入密钥参数
+  const keyFromUrl = getQueryParam('key');
+  if (keyFromUrl) {
+    appKey.value = keyFromUrl;
+  }
+
   const sessionFromUrl = getQueryParam('sessionToken');
   if (sessionFromUrl) {
     sessionToken.value = sessionFromUrl;
@@ -500,41 +529,56 @@ onMounted(async () => {
   }
   // 生成或获取用户ID
   initUserId();
-  loadSessionToken();
-  if (!canProceedWithToken()) {
-    blockForInvalidToken();
-    return;
-  }
-  await ensureSessionToken();
-  if (fatalError.value) {
-    return;
-  }
-  const sessionValid = await validateSessionToken();
-  if (sessionValid) {
-    // sessionToken 有效时，忽略短时 token 校验
-    rawVisitorToken.value = '';
-    startTokenValidateTimer();
+
+  if (!tokenRequired.value) {
+    // ========= 免Token模式：跳过Token验证流程 =========
+    // 校验接入密钥（密钥无效直接阻断页面）
+    await checkAppKey();
+    if (fatalError.value) {
+      return;
+    }
+    // 检查访客是否被拉黑（通过设备码）
     await checkUserBlocked();
     if (fatalError.value) {
       return;
     }
-  } else if (visitorToken.value) {
-    await checkUserBlocked();
-    if (fatalError.value) {
-      return;
-    }
-    await validateShortTokenIfProvided();
-    if (fatalError.value) {
-      return;
-    }
-    startTokenValidateTimer();
   } else {
-    blockForInvalidToken();
-    return;
-  }
-  if (!canProceedWithToken()) {
-    blockForInvalidToken();
-    return;
+    // ========= Token模式：原有流程 =========
+    loadSessionToken();
+    if (!canProceedWithToken()) {
+      blockForInvalidToken();
+      return;
+    }
+    await ensureSessionToken();
+    if (fatalError.value) {
+      return;
+    }
+    const sessionValid = await validateSessionToken();
+    if (sessionValid) {
+      rawVisitorToken.value = '';
+      startTokenValidateTimer();
+      await checkUserBlocked();
+      if (fatalError.value) {
+        return;
+      }
+    } else if (visitorToken.value) {
+      await checkUserBlocked();
+      if (fatalError.value) {
+        return;
+      }
+      await validateShortTokenIfProvided();
+      if (fatalError.value) {
+        return;
+      }
+      startTokenValidateTimer();
+    } else {
+      blockForInvalidToken();
+      return;
+    }
+    if (!canProceedWithToken()) {
+      blockForInvalidToken();
+      return;
+    }
   }
 
   // 加载访客AI应用信息（头像/开场白/预设问题）
@@ -577,6 +621,19 @@ function initUserId() {
   const queryUserId = getQueryParam('externalUserId') || getQueryParam('uid') || getQueryParam('userId');
   const queryUserName = getQueryParam('userName');
   const querySource = getQueryParam('source') || getQueryParam('appKey');
+
+  if (!tokenRequired.value) {
+    // 免Token模式：设备码作为userId
+    const deviceId = generateDeviceId();
+    userId.value = deviceId;
+    // 允许URL中可选传userName
+    if (queryUserName) {
+      userName.value = queryUserName;
+    }
+    return;
+  }
+
+  // Token模式：原有逻辑
   if (queryUserId) {
     userId.value = querySource ? `${querySource}:${queryUserId}` : queryUserId;
     if (queryUserName) {
@@ -609,6 +666,27 @@ async function checkIpBlocked() {
     }
   } catch {
     // 忽略检测失败，继续后续流程
+  }
+}
+
+/** 免Token模式下校验接入密钥，无效则直接阻断页面 */
+async function checkAppKey() {
+  try {
+    const headers: Record<string, string> = {};
+    if (appKey.value) {
+      headers['X-App-Secret'] = appKey.value;
+    }
+    const res = await defHttp.get(
+      { url: '/airag/cs/visitor/validate-key', headers },
+      { ...silentRequestOptions, isTransformResponse: false, errorMessageMode: 'none' },
+    );
+    if (!res?.success) {
+      fatalError.value = true;
+      fatalErrorMessage.value = '接入密钥无效，无法访问客服';
+    }
+  } catch {
+    fatalError.value = true;
+    fatalErrorMessage.value = '接入密钥无效，无法访问客服';
   }
 }
 
@@ -810,27 +888,39 @@ function selectPresetQuestion(question: string) {
   sendMessage();
 }
 
-// 生成简单设备指纹（screen + timezone + platform + language 的 hash）
+// 生成持久化设备码（UUID + 浏览器指纹哈希后缀）
+const CS_DEVICE_ID_KEY = 'cs_device_id';
 function generateDeviceId(): string {
+  let deviceId = localStorage.getItem(CS_DEVICE_ID_KEY);
+  if (deviceId) return deviceId;
   try {
-    const raw = [
+    // 生成 UUID v4
+    const uuid = typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+          const r = (Math.random() * 16) | 0;
+          return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+        });
+    // 浏览器指纹哈希后缀
+    const fingerprint = [
       navigator.platform,
       screen.width,
       screen.height,
       screen.colorDepth,
-      Intl.DateTimeFormat().resolvedOptions().timeZone,
       navigator.language,
       navigator.hardwareConcurrency,
     ].join('|');
     let hash = 0;
-    for (let i = 0; i < raw.length; i++) {
-      hash = ((hash << 5) - hash) + raw.charCodeAt(i);
+    for (let i = 0; i < fingerprint.length; i++) {
+      hash = ((hash << 5) - hash) + fingerprint.charCodeAt(i);
       hash |= 0;
     }
-    return Math.abs(hash).toString(16);
+    deviceId = `${uuid}_${Math.abs(hash).toString(16)}`;
   } catch {
-    return '';
+    deviceId = 'dev_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
   }
+  localStorage.setItem(CS_DEVICE_ID_KEY, deviceId);
+  return deviceId;
 }
 
 // 初始化会话
@@ -1137,9 +1227,19 @@ function connectWebSocket() {
   wsManuallyClosed = false;
 
   const wsBase = getWsBaseUrl();
-  const sessionParam = sessionToken.value ? `&sessionToken=${encodeURIComponent(sessionToken.value)}` : '';
-  const tokenParam = !sessionToken.value && visitorToken.value ? `&visitorToken=${encodeURIComponent(visitorToken.value)}` : '';
-  const wsUrl = `${wsBase}/ws/cs/user?userId=${userId.value}&conversationId=${conversationId.value}${sessionParam}${tokenParam}`;
+  let authParams = '';
+  if (sessionToken.value) {
+    authParams = `&sessionToken=${encodeURIComponent(sessionToken.value)}`;
+  } else if (visitorToken.value) {
+    authParams = `&visitorToken=${encodeURIComponent(visitorToken.value)}`;
+  } else if (!tokenRequired.value) {
+    // 免Token模式：传递设备码 + 接入密钥
+    authParams = `&deviceId=${encodeURIComponent(userId.value)}`;
+    if (appKey.value) {
+      authParams += `&key=${encodeURIComponent(appKey.value)}`;
+    }
+  }
+  const wsUrl = `${wsBase}/ws/cs/user?userId=${userId.value}&conversationId=${conversationId.value}${authParams}`;
 
   console.log('[UserChat] 连接WebSocket:', wsUrl);
 

@@ -55,4 +55,13 @@ public interface CsAgentMapper extends BaseMapper<CsAgent> {
      */
     @Update("UPDATE cs_agent SET current_sessions = GREATEST(current_sessions - 1, 0) WHERE id = #{agentId}")
     int decrementCurrentSessions(@Param("agentId") String agentId);
+
+    /**
+     * 增加客服累计服务数
+     * 
+     * @param agentId 客服ID
+     * @return 影响行数
+     */
+    @Update("UPDATE cs_agent SET total_served = COALESCE(total_served, 0) + 1 WHERE id = #{agentId}")
+    int incrementTotalServed(@Param("agentId") String agentId);
 }

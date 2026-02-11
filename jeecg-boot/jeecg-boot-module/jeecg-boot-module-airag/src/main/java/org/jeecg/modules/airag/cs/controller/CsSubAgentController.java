@@ -100,13 +100,12 @@ public class CsSubAgentController {
         qw.orderByDesc(CsAgent::getCreateTime);
         Page<CsAgent> page = new Page<>(pageNo, pageSize);
         IPage<CsAgent> pageList = csAgentService.page(page, qw);
-        // 填充用户名
+        // 填充登录账号（从sys_user获取）
         for (CsAgent agent : pageList.getRecords()) {
             if (oConvertUtils.isNotEmpty(agent.getUserId())) {
-                LoginUser sysUser = sysBaseAPI.getUserById(agent.getUserId());
-                if (sysUser != null) {
-                    agent.setNickname(agent.getNickname()); // nickname from cs_agent
-                    // 将用户名存到临时字段(通过JSON序列化附加)
+                String username = csSubAgentMapper.getUsernameByUserId(agent.getUserId());
+                if (username != null) {
+                    agent.setUsername(username);
                 }
             }
         }

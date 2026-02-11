@@ -31,6 +31,7 @@ const [registerModal, { openModal }] = useModal();
 
 const columns = [
   { title: '客服昵称', dataIndex: 'nickname', width: 120 },
+  { title: '登录账号', dataIndex: 'username', width: 120 },
   { title: '最大接待数', dataIndex: 'maxSessions', width: 100 },
   { title: '当前接待数', dataIndex: 'currentSessions', width: 100 },
   { title: '状态', dataIndex: 'status', width: 100, slots: { customRender: 'status' } },

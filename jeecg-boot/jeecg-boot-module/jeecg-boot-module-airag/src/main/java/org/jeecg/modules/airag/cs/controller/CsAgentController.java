@@ -102,6 +102,15 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
         QueryWrapper<CsAgent> queryWrapper = QueryGenerator.initQueryWrapper(csAgent, req.getParameterMap());
         Page<CsAgent> page = new Page<>(pageNo, pageSize);
         IPage<CsAgent> pageList = csAgentService.page(page, queryWrapper);
+        // 填充登录账号（从sys_user获取）
+        for (CsAgent agent : pageList.getRecords()) {
+            if (oConvertUtils.isNotEmpty(agent.getUserId())) {
+                String username = csSubAgentMapper.getUsernameByUserId(agent.getUserId());
+                if (username != null) {
+                    agent.setUsername(username);
+                }
+            }
+        }
         return Result.OK(pageList);
     }
 
@@ -419,9 +428,13 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
                 JSONObject obj = JSONObject.parseObject(json);
                 result.put("secretKey", obj.getString("secretKey"));
                 result.put("whitelist", obj.getString("whitelist"));
+                // tokenRequired 默认 true（兼容旧数据）
+                result.put("tokenRequired", obj.containsKey("tokenRequired") ? obj.getString("tokenRequired") : "true");
             } catch (Exception e) {
                 log.warn("[CS-Agent] 解析访客接入配置失败", e);
             }
+        } else {
+            result.put("tokenRequired", "true");
         }
         return Result.OK(result);
     }
@@ -434,13 +447,15 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     public Result<String> setGlobalVisitorAccess(@RequestBody java.util.Map<String, String> params) {
         String secretKey = params.getOrDefault("secretKey", "");
         String whitelist = params.getOrDefault("whitelist", "");
+        String tokenRequired = params.getOrDefault("tokenRequired", "true");
         JSONObject obj = new JSONObject();
         obj.put("secretKey", secretKey);
         obj.put("whitelist", whitelist);
+        obj.put("tokenRequired", "true".equals(tokenRequired));
         String json = obj.toJSONString();
         saveGlobalConfigValue(VISITOR_ACCESS_CONFIG_KEY, json);
         redisTemplate.opsForValue().set(VISITOR_ACCESS_REDIS_KEY, json);
-        log.info("[CS-Agent] 全局访客接入配置已更新");
+        log.info("[CS-Agent] 全局访客接入配置已更新, tokenRequired={}", tokenRequired);
         return Result.OK("设置成功");
     }
 

@@ -11,8 +11,14 @@ import org.jeecg.common.util.oConvertUtils;
 import org.jeecg.modules.airag.cs.entity.CsVisitorBlacklist;
 import org.jeecg.modules.airag.cs.mapper.CsVisitorBlacklistMapper;
 import org.jeecg.modules.airag.cs.service.ICsVisitorTokenService;
+import org.jeecg.modules.airag.cs.websocket.CsWebSocketMessage;
+import org.jeecg.modules.airag.cs.websocket.CsWebSocketSessionManager;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * 访客黑名单Controller
@@ -28,6 +34,9 @@ public class CsVisitorBlacklistController {
 
     @Autowired
     private ICsVisitorTokenService visitorTokenService;
+
+    @Autowired
+    private CsWebSocketSessionManager sessionManager;
 
     @Operation(summary = "分页列表")
     @GetMapping("/list")
@@ -63,6 +72,31 @@ public class CsVisitorBlacklistController {
         }
 
         log.info("[CS-Security] 访客黑名单解封: visitorId={}", record.getVisitorId());
+
+        // 通知所有在线客服黑名单变更
+        notifyBlacklistChanged("user", "unblock", record.getVisitorId(), record.getVisitorName());
+
         return Result.OK("解封成功");
+    }
+
+    private void notifyBlacklistChanged(String blacklistType, String action, String target, String visitorName) {
+        try {
+            Map<String, Object> extra = new HashMap<>();
+            extra.put("blacklistType", blacklistType);
+            extra.put("action", action);
+            extra.put("target", target);
+            if (oConvertUtils.isNotEmpty(visitorName)) {
+                extra.put("visitorName", visitorName);
+            }
+            CsWebSocketMessage msg = CsWebSocketMessage.builder()
+                    .type(CsWebSocketMessage.TYPE_BLACKLIST_CHANGED)
+                    .content(action.equals("block") ? "访客已拉黑" : "访客已解封")
+                    .extra(extra)
+                    .timestamp(new Date())
+                    .build();
+            sessionManager.sendToAllAgents(msg);
+        } catch (Exception e) {
+            log.warn("[CS-Security] 发送黑名单变更通知失败", e);
+        }
     }
 }

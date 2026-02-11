@@ -206,9 +206,9 @@ jeecg:
     embed-store:
       host: 127.0.0.1
       port: 5432
-      database: postgres
+      database: vector_db
       user: postgres
-      password: postgres
+      password: 92400bda284afba53b21162911f98d00Z
       table: embeddings
   #  Unipush配置 云函数调用 URL 化地址
   unicloud:

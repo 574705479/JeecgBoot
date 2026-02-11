@@ -1,6 +1,7 @@
 package org.jeecg.modules.airag.cs.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.fasterxml.jackson.annotation.JsonFormat;
@@ -101,6 +102,10 @@ public class CsAgent implements Serializable {
     @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     @Schema(description = "更新时间")
     private Date updateTime;
+
+    @TableField(exist = false)
+    @Schema(description = "登录账号(来自sys_user，非持久化字段)")
+    private String username;
 
     // ==================== 客服状态常量 ====================
     

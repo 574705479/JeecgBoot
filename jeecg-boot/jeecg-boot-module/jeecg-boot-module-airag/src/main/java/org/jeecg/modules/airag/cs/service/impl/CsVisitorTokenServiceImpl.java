@@ -418,4 +418,81 @@ public class CsVisitorTokenServiceImpl implements ICsVisitorTokenService {
         }
         return count != null && count <= TOKEN_RATE_LIMIT_PER_MINUTE;
     }
+
+    @Override
+    public boolean isTokenRequired() {
+        // 先查Redis缓存
+        String json = redisTemplate.opsForValue().get(VISITOR_ACCESS_REDIS_KEY);
+        if (oConvertUtils.isEmpty(json)) {
+            // 再查数据库
+            CsGlobalConfig config = csGlobalConfigMapper.selectById(VISITOR_ACCESS_CONFIG_KEY);
+            json = config != null ? config.getConfigValue() : null;
+            if (oConvertUtils.isNotEmpty(json)) {
+                redisTemplate.opsForValue().set(VISITOR_ACCESS_REDIS_KEY, json);
+            }
+        }
+        if (oConvertUtils.isNotEmpty(json)) {
+            try {
+                JSONObject obj = JSONObject.parseObject(json);
+                // 默认 true（兼容现有行为）
+                return obj.getBooleanValue("tokenRequired") || !obj.containsKey("tokenRequired");
+            } catch (Exception e) {
+                log.warn("[CS-Token] 解析visitor_access配置失败", e);
+            }
+        }
+        // 默认需要Token
+        return true;
+    }
+
+    @Override
+    public String extractDeviceId(HttpServletRequest request) {
+        String deviceId = request.getHeader("X-Device-Id");
+        if (oConvertUtils.isEmpty(deviceId)) {
+            deviceId = request.getParameter("deviceId");
+        }
+        return deviceId;
+    }
+
+    @Override
+    public boolean validateAppKey(HttpServletRequest request) {
+        // Token模式下不校验（密钥在获取Token时已校验）
+        if (isTokenRequired()) {
+            return true;
+        }
+        // 读取全局配置中的secretKey
+        String json = redisTemplate.opsForValue().get(VISITOR_ACCESS_REDIS_KEY);
+        if (oConvertUtils.isEmpty(json)) {
+            CsGlobalConfig config = csGlobalConfigMapper.selectById(VISITOR_ACCESS_CONFIG_KEY);
+            json = config != null ? config.getConfigValue() : null;
+            if (oConvertUtils.isNotEmpty(json)) {
+                redisTemplate.opsForValue().set(VISITOR_ACCESS_REDIS_KEY, json);
+            }
+        }
+        if (oConvertUtils.isEmpty(json)) {
+            return true; // 无配置，不校验
+        }
+        try {
+            JSONObject obj = JSONObject.parseObject(json);
+            String configuredKey = obj != null ? obj.getString("secretKey") : null;
+            if (oConvertUtils.isEmpty(configuredKey)) {
+                return true; // 未配置密钥，不校验
+            }
+            // 从请求中提取key
+            String appKey = request.getHeader("X-App-Secret");
+            if (oConvertUtils.isEmpty(appKey)) {
+                appKey = request.getParameter("key");
+            }
+            if (oConvertUtils.isEmpty(appKey)) {
+                log.warn("[CS-Token] 免Token模式缺少接入密钥");
+                return false;
+            }
+            return configuredKey.equals(appKey);
+        } catch (Exception e) {
+            log.warn("[CS-Token] 校验接入密钥时解析配置失败", e);
+            return false;
+        }
+    }
+
+    private static final String VISITOR_ACCESS_REDIS_KEY = "cs:global:visitor_access";
+    private static final String VISITOR_ACCESS_CONFIG_KEY = "visitor_access";
 }

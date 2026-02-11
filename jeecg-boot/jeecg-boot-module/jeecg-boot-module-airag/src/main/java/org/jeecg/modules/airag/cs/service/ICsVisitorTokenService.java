@@ -43,4 +43,21 @@ public interface ICsVisitorTokenService {
     String getGlobalVisitorAppId();
 
     boolean checkRateLimit(String externalUserId, String clientIp);
+
+    /** 判断是否需要Token验证（全局开关） */
+    boolean isTokenRequired();
+
+    /**
+     * 免Token模式下，从请求中提取设备码作为访客标识
+     * @return deviceId，为空表示未传设备码
+     */
+    String extractDeviceId(HttpServletRequest request);
+
+    /**
+     * 校验接入密钥（统一入口，调用方无需判断模式）
+     * - Token模式下直接返回true（密钥在获取Token时已校验）
+     * - 免Token模式 + 未配密钥：直接返回true
+     * - 免Token模式 + 已配密钥：从请求中提取key比对
+     */
+    boolean validateAppKey(HttpServletRequest request);
 }
