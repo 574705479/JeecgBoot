@@ -542,4 +542,32 @@ public class CsConversationController extends JeecgController<CsConversation, IC
         log.info("[CS-Conversation] 推送满意度评价: conversationId={}", id);
         return Result.OK("已推送满意度评价");
     }
+
+    /**
+     * 获取访客历史会话ID列表（已结束的，按时间倒序）
+     * 用于访客端滚动加载历史消息
+     */
+    @Operation(summary = "获取访客历史会话列表")
+    @org.jeecg.config.shiro.IgnoreAuth
+    @GetMapping("/visitor-history")
+    public Result<List<String>> visitorHistory(
+            @RequestParam String userId,
+            @RequestParam(required = false) String excludeId,
+            HttpServletRequest request) {
+        if (oConvertUtils.isEmpty(userId)) {
+            return Result.error("userId不能为空");
+        }
+        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<CsConversation> qw =
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
+        qw.eq(CsConversation::getUserId, userId)
+          .eq(CsConversation::getStatus, CsConversation.STATUS_CLOSED)
+          .orderByDesc(CsConversation::getCreateTime);
+        if (oConvertUtils.isNotEmpty(excludeId)) {
+            qw.ne(CsConversation::getId, excludeId);
+        }
+        qw.select(CsConversation::getId);
+        List<CsConversation> list = conversationService.list(qw);
+        List<String> ids = list.stream().map(CsConversation::getId).collect(java.util.stream.Collectors.toList());
+        return Result.OK(ids);
+    }
 }

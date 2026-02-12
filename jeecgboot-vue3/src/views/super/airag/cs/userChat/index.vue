@@ -125,8 +125,14 @@
         </div>
         <div v-for="msg in displayMessages" :key="msg.id" 
              :class="['message-item', getMessageClass(msg)]">
+          <!-- 历史会话分割线 -->
+          <div v-if="msg._historySeparator" class="history-separator">
+            <span class="history-separator-line"></span>
+            <span class="history-separator-text">以上为历史会话记录</span>
+            <span class="history-separator-line"></span>
+          </div>
           <!-- 系统消息 -->
-          <div v-if="msg.senderType === 3" class="system-message">
+          <div v-else-if="msg.senderType === 3" class="system-message">
             {{ msg.content }}
           </div>
           <!-- 用户消息 (senderType === 0 表示用户) -->
@@ -810,10 +816,22 @@ const historyPageSize = 100;
 const loadingHistory = ref(false);
 const hasMoreHistory = ref(true);
 const historyBeforeId = ref<string | null>(null);
+
+// 跨会话历史记录
+const historyConvIds = ref<string[]>([]); // 历史会话ID列表（已结束，倒序）
+const historyConvIndex = ref(0); // 当前加载到第几个历史会话
+const hasMoreHistoryConv = ref(false); // 是否还有更多历史会话
+const historyConvLoaded = ref(false); // 是否已加载历史会话ID列表
 const displayMessages = computed(() => {
   const list: any[] = [];
   let lastDateKey = '';
   for (const msg of messages.value) {
+    // 历史会话分割线直接放入，不参与日期分组
+    if (msg._historySeparator) {
+      lastDateKey = ''; // 重置日期，让下一条消息重新显示日期
+      list.push(msg);
+      continue;
+    }
     const dateKey = getDateKey(msg?.createTime);
     if (dateKey && dateKey !== lastDateKey) {
       list.push({
@@ -1065,6 +1083,8 @@ onMounted(async () => {
   // 加载历史消息（根据 visitorHistory 开关决定）
   if (chatWindowConfig.visitorHistory !== false) {
     await loadMessages();
+    // 加载历史会话ID列表（为滚动加载准备）
+    await loadHistoryConvIds();
   }
 
   // 连接WebSocket
@@ -1670,14 +1690,83 @@ async function loadMoreMessages() {
   }
 }
 
+// 加载访客历史会话ID列表
+async function loadHistoryConvIds() {
+  if (historyConvLoaded.value || !userId.value) return;
+  historyConvLoaded.value = true;
+  try {
+    const res = await httpGet({
+      url: '/cs/conversation/visitor-history',
+      params: { userId: userId.value, excludeId: conversationId.value },
+    });
+    const ids = Array.isArray(res) ? res : (res?.result || []);
+    historyConvIds.value = ids;
+    historyConvIndex.value = 0;
+    hasMoreHistoryConv.value = ids.length > 0;
+  } catch {
+    hasMoreHistoryConv.value = false;
+  }
+}
+
+// 加载上一个历史会话的全部消息，插入到消息列表最前面
+async function loadHistoryConvMessages() {
+  if (loadingHistory.value || !hasMoreHistoryConv.value) return;
+  if (historyConvIndex.value >= historyConvIds.value.length) {
+    hasMoreHistoryConv.value = false;
+    return;
+  }
+
+  const el = messagesRef.value;
+  const prevScrollHeight = el?.scrollHeight || 0;
+  const prevScrollTop = el?.scrollTop || 0;
+
+  loadingHistory.value = true;
+  try {
+    const histConvId = historyConvIds.value[historyConvIndex.value];
+    const res = await httpGet({
+      url: '/cs/message/list',
+      params: { conversationId: histConvId, limit: 200 },
+    });
+    const histMsgs = Array.isArray(res) ? res : (res?.result || res?.records || []);
+    if (histMsgs.length > 0) {
+      // 添加分割线标记
+      const separator = {
+        id: `__history_sep_${histConvId}`,
+        content: '',
+        senderType: -1, // 特殊类型，用于渲染分割线
+        createTime: histMsgs[histMsgs.length - 1]?.createTime || '',
+        _historySeparator: true,
+        _historyConvId: histConvId,
+      };
+      messages.value = [...histMsgs, separator, ...messages.value];
+    }
+    historyConvIndex.value++;
+    hasMoreHistoryConv.value = historyConvIndex.value < historyConvIds.value.length;
+
+    nextTick(() => {
+      const nextEl = messagesRef.value;
+      if (!nextEl) return;
+      const nextScrollHeight = nextEl.scrollHeight;
+      nextEl.scrollTop = nextScrollHeight - prevScrollHeight + prevScrollTop;
+    });
+  } catch {
+    // 忽略
+  } finally {
+    loadingHistory.value = false;
+  }
+}
+
 function handleMessageScroll(event?: Event) {
   const el = (event?.target as HTMLElement) || messagesRef.value;
   if (!el) return;
-  // 如果访客历史关闭，不加载更多
   if (chatWindowConfig.visitorHistory === false) return;
-  if (loadingHistory.value || !hasMoreHistory.value) return;
+  if (loadingHistory.value) return;
   if (el.scrollTop <= 20) {
-    loadMoreMessages();
+    if (hasMoreHistory.value) {
+      loadMoreMessages();
+    } else if (hasMoreHistoryConv.value) {
+      loadHistoryConvMessages();
+    }
   }
 }
 
@@ -2860,6 +2949,24 @@ watch(messages, () => {
   border-radius: 16px;
   font-size: 12px;
   color: #666;
+}
+
+.history-separator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  width: 100%;
+}
+.history-separator-line {
+  flex: 1;
+  height: 1px;
+  background: #e0e0e0;
+}
+.history-separator-text {
+  font-size: 11px;
+  color: #bbb;
+  white-space: nowrap;
 }
 
 .user-message {

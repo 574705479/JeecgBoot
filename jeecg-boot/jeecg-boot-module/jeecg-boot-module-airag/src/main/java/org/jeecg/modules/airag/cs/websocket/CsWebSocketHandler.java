@@ -443,11 +443,7 @@ public class CsWebSocketHandler implements WebSocketHandler {
                 
                 log.info("[CS-WebSocket] 通知客服用户离线: conversationId={}, userId={}", conversationId, userId);
                 
-                // 只有已分配的会话才发送系统消息
-                if (conversation.getStatus() == CsConversation.STATUS_ASSIGNED) {
-                    // 发送系统消息（不持久化到数据库，只推送通知）
-                    messageService.sendSystemMessage(conversationId, "用户已离开会话", false);
-                }
+                // 用户离开不再发送系统消息提示，仅保留 user_offline 通知
             }
         } catch (Exception e) {
             log.error("[CS-WebSocket] 处理用户离线失败: {}", e.getMessage());
