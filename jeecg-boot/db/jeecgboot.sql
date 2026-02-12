@@ -625,6 +625,30 @@ CREATE TABLE `cs_visitor`  (
 -- ----------------------------
 
 -- ----------------------------
+-- Table structure for cs_domain_config
+-- ----------------------------
+DROP TABLE IF EXISTS `cs_domain_config`;
+CREATE TABLE `cs_domain_config`  (
+  `id` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '主键',
+  `domains` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL COMMENT '域名列表(换行分隔)',
+  `download_url` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '桌面端下载链接',
+  `download_links` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL COMMENT '下载链接列表(JSON)',
+  `remark` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '备注',
+  `status` tinyint(1) NULL DEFAULT 1 COMMENT '状态(1启用0禁用)',
+  `del_flag` tinyint(1) NULL DEFAULT 0 COMMENT '删除标记',
+  `create_by` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '创建人',
+  `create_time` datetime NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '更新人',
+  `update_time` datetime NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '域名配置表' ROW_FORMAT = DYNAMIC;
+
+-- ----------------------------
+-- Records of cs_domain_config
+-- ----------------------------
+INSERT INTO `cs_domain_config` VALUES ('cs_domain_config_default', '', '', NULL, '', 1, 0, 'admin', NOW(), 'admin', NOW());
+
+-- ----------------------------
 -- Table structure for flyway_schema_history
 -- ----------------------------
 DROP TABLE IF EXISTS `flyway_schema_history`;
@@ -3854,6 +3878,9 @@ INSERT INTO `sys_permission` VALUES ('cs_agent_login_log', 'cs_security', '客�
 INSERT INTO `sys_permission` VALUES ('cs_access_settings', '', '接入设置', '/accessSettings', 'layouts/RouteView', 1, NULL, NULL, 0, NULL, '1', 2.40, 0, 'ant-design:setting-outlined', 0, 0, 0, 0, '接入设置', 'admin', '2026-02-11 00:00:00', NULL, NULL, 0, 0, '1', 0);
 INSERT INTO `sys_permission` VALUES ('cs_chat_window_settings', 'cs_access_settings', '聊天窗口设置', '/accessSettings/chatWindowSettings', 'super/airag/cs/chatWindowSettings/index', 1, NULL, NULL, 1, NULL, '1', 1.00, 0, 'ant-design:message-outlined', 0, 0, 0, 0, '聊天窗口设置', 'admin', '2026-02-11 00:00:00', NULL, NULL, 0, 0, '1', 0);
 INSERT INTO `sys_permission` VALUES ('cs_sensitive_words', 'cs_access_settings', '访客敏感词', '/accessSettings/sensitiveWords', 'super/airag/cs/sensitiveWords/index', 1, NULL, NULL, 1, NULL, '1', 2.00, 0, 'ant-design:warning-outlined', 0, 0, 0, 0, '访客敏感词配置', 'admin', '2026-02-11 00:00:00', NULL, NULL, 0, 0, '1', 0);
+INSERT INTO `sys_permission` VALUES ('cs_quick_access', 'cs_access_settings', '快速接入', '/accessSettings/quickAccess', 'super/airag/cs/accessExample/index', 1, NULL, NULL, 1, NULL, '1', 3.00, 0, 'ant-design:rocket-outlined', 0, 0, 0, 0, '快速接入-第三方接入示例', 'admin', NOW(), NULL, NULL, 0, 0, '1', 0);
+INSERT INTO `sys_permission` VALUES ('cs_domain_config', 'd7d6e2e4e2934f2c9385a623fd98c6f3', '域名配置', '/cs/domain', 'super/airag/cs/domainConfig/index', 1, NULL, NULL, 1, NULL, '1', 8.00, 0, 'ant-design:global-outlined', 0, 0, 0, 0, '系统域名配置', 'admin', NOW(), NULL, NULL, 0, 0, '1', 0);
+INSERT INTO `sys_permission` VALUES ('cs_domain_save', 'cs_domain_config', '保存域名配置', NULL, NULL, 0, NULL, NULL, 2, 'cs:domain:save', '1', 1.00, 0, NULL, 1, 0, 0, 0, NULL, 'admin', NOW(), NULL, NULL, 0, 0, '1', 0);
 INSERT INTO `sys_permission` VALUES ('d7d6e2e4e2934f2c9385a623fd98c6f3', '', '系统管理', '/isystem', 'layouts/RouteView', 1, NULL, NULL, 0, NULL, NULL, 4.00, 0, 'ant-design:setting', 0, 0, 0, 0, NULL, NULL, '2018-12-25 20:34:38', 'admin', '2025-06-25 14:24:07', 0, 0, NULL, 0);
 INSERT INTO `sys_permission` VALUES ('f15543b0263cf6c5fac85afdd3eba3f2', '3f915b2769fc80648e92d04e84ca059d', '用户导入', '', NULL, 0, NULL, NULL, 2, 'system:user:import', '1', 1.00, 0, NULL, 1, 0, 0, 0, NULL, 'admin', '2019-05-13 19:15:27', 'admin', '2022-06-30 15:05:12', 0, 0, '1', 0);
 
@@ -4173,6 +4200,10 @@ INSERT INTO `sys_role_permission` VALUES ('cs_sec_cadmin_log', 'cs_admin_agent_r
 INSERT INTO `sys_role_permission` VALUES ('cs_acc_admin_parent', 'f6817f48af4fb3af11b9e8bf182f618b', 'cs_access_settings', NULL, '2026-02-11 00:00:00', '127.0.0.1');
 INSERT INTO `sys_role_permission` VALUES ('cs_acc_admin_chatwin', 'f6817f48af4fb3af11b9e8bf182f618b', 'cs_chat_window_settings', NULL, '2026-02-11 00:00:00', '127.0.0.1');
 INSERT INTO `sys_role_permission` VALUES ('cs_acc_admin_sw', 'f6817f48af4fb3af11b9e8bf182f618b', 'cs_sensitive_words', NULL, '2026-02-11 00:00:00', '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_acc_admin_quick_access', 'f6817f48af4fb3af11b9e8bf182f618b', 'cs_quick_access', NULL, NOW(), '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_domain_admin_config', 'f6817f48af4fb3af11b9e8bf182f618b', 'cs_domain_config', NULL, NOW(), '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_domain_admin_save', 'f6817f48af4fb3af11b9e8bf182f618b', 'cs_domain_save', NULL, NOW(), '127.0.0.1');
+INSERT INTO `sys_role_permission` VALUES ('cs_acc_cadmin_quick_access', 'cs_admin_agent_role_001', 'cs_quick_access', NULL, NOW(), '127.0.0.1');
 INSERT INTO `sys_role_permission` VALUES ('cs_acc_cadmin_parent', 'cs_admin_agent_role_001', 'cs_access_settings', NULL, '2026-02-11 00:00:00', '127.0.0.1');
 INSERT INTO `sys_role_permission` VALUES ('cs_acc_cadmin_chatwin', 'cs_admin_agent_role_001', 'cs_chat_window_settings', NULL, '2026-02-11 00:00:00', '127.0.0.1');
 INSERT INTO `sys_role_permission` VALUES ('cs_acc_cadmin_sw', 'cs_admin_agent_role_001', 'cs_sensitive_words', NULL, '2026-02-11 00:00:00', '127.0.0.1');
