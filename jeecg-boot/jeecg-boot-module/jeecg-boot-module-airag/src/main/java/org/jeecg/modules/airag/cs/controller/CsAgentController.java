@@ -427,7 +427,6 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
             try {
                 JSONObject obj = JSONObject.parseObject(json);
                 result.put("secretKey", obj.getString("secretKey"));
-                result.put("whitelist", obj.getString("whitelist"));
                 // tokenRequired 默认 true（兼容旧数据）
                 result.put("tokenRequired", obj.containsKey("tokenRequired") ? obj.getString("tokenRequired") : "true");
             } catch (Exception e) {
@@ -446,11 +445,9 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     @PutMapping("/global/visitor-access")
     public Result<String> setGlobalVisitorAccess(@RequestBody java.util.Map<String, String> params) {
         String secretKey = params.getOrDefault("secretKey", "");
-        String whitelist = params.getOrDefault("whitelist", "");
         String tokenRequired = params.getOrDefault("tokenRequired", "true");
         JSONObject obj = new JSONObject();
         obj.put("secretKey", secretKey);
-        obj.put("whitelist", whitelist);
         obj.put("tokenRequired", "true".equals(tokenRequired));
         String json = obj.toJSONString();
         saveGlobalConfigValue(VISITOR_ACCESS_CONFIG_KEY, json);

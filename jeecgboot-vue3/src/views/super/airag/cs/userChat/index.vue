@@ -1269,13 +1269,19 @@ function saveSessionToken(token: string, expireAt: number) {
 }
 
 async function ensureSessionToken() {
-  if (sessionToken.value) {
+  // 如果URL带了新的visitor token，强制重新exchange（旧session token可能已失效）
+  if (sessionToken.value && !rawVisitorToken.value) {
     if (sessionTokenExpiresAt.value && sessionTokenExpiresAt.value < Date.now()) {
       sessionToken.value = '';
       sessionTokenExpiresAt.value = 0;
     } else {
       return;
     }
+  }
+  // 有新visitor token时，清除旧session token，重新exchange
+  if (rawVisitorToken.value && sessionToken.value) {
+    sessionToken.value = '';
+    sessionTokenExpiresAt.value = 0;
   }
   if (!visitorToken.value) return;
   try {

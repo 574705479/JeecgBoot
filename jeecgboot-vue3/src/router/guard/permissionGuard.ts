@@ -32,8 +32,8 @@ const whitePathList: PageEnum[] = [LOGIN_PATH, OAUTH2_LOGIN_PAGE_PATH,SYS_FILES_
 export function createPermissionGuard(router: Router) {
   const userStore = useUserStoreWithOut();
   const permissionStore = usePermissionStoreWithOut();
-  const publicRouteNames = new Set(['CsUserChat', 'CsWidgetPreview', 'CsAccessExample']);
-  const publicPathPrefixes = ['/cs/userChat', '/cs/chat', '/cs/widget-preview', '/cs/access-example'];
+  const publicRouteNames = new Set(['CsUserChat', 'CsWidgetPreview']);
+  const publicPathPrefixes = ['/cs/userChat', '/cs/chat', '/cs/widget-preview'];
   const isPublicPath = (to: any) => {
     const path = String(to.path || '');
     const fullPath = String(to.fullPath || '');

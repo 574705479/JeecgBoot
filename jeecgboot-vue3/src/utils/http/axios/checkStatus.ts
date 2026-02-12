@@ -18,7 +18,7 @@ export function checkStatus(status: number, msg: string, errorMessageMode: Error
   const isVisitorPath = () => {
     if (typeof window === 'undefined') return false;
     const href = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-    return href.includes('/cs/userChat') || href.includes('/cs/chat') || href.includes('/cs/widget-preview') || href.includes('/cs/access-example');
+    return href.includes('/cs/userChat') || href.includes('/cs/chat') || href.includes('/cs/widget-preview');
   };
 
   switch (status) {

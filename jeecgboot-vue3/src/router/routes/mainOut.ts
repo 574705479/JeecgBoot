@@ -28,15 +28,6 @@ export const mainOutRoutes: AppRouteModule[] = [
     },
   },
   {
-    path: '/cs/access-example',
-    name: 'CsAccessExample',
-    component: () => import('/@/views/super/airag/cs/accessExample/index.vue'),
-    meta: {
-      title: '第三方接入示例',
-      ignoreAuth: true,
-    },
-  },
-  {
     path: '/main-out',
     name: 'MainOut',
     component: () => import('/@/views/demo/main-out/index.vue'),

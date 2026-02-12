@@ -94,71 +94,6 @@
             </a-select>
           </div>
 
-          <!-- 访客接入密钥与白名单（全局配置） -->
-          <div class="setting-item">
-            <div class="setting-label">
-              <KeyOutlined />
-              <span>访客接入设置</span>
-              <a-tag color="orange" size="small">全局</a-tag>
-            </div>
-            <a-space direction="vertical" style="width: 100%">
-              <div style="display: flex; align-items: center; justify-content: space-between;">
-                <span style="font-size: 13px;">启用Token验证</span>
-                <a-switch v-model:checked="visitorTokenRequired" size="small" :loading="tokenSwitchSaving" @change="onTokenSwitchChange" />
-              </div>
-              <div class="setting-desc" style="margin-top: -4px;">
-                {{ visitorTokenRequired ? '第三方接入需先获取短时Token，适合需要身份验证的场景' : '免Token模式：访客通过设备码自动标识，适合官网公开客服等场景' }}
-              </div>
-              <a-input
-                v-model:value="visitorSecretKey"
-                :placeholder="visitorTokenRequired ? '密钥（留空则不校验）' : '接入密钥（配置后访客需通过 ?key= 传递）'"
-                allowClear
-              />
-              <a-space>
-                <a-button size="small" @click="generateVisitorSecretKey" :loading="visitorSecretGenerating">
-                  {{ visitorSecretKey ? '重新生成' : '生成密钥' }}
-                </a-button>
-              </a-space>
-              <a-textarea
-                v-model:value="visitorDomainWhitelist"
-                placeholder="访问白名单（域名/IP，逗号分隔，支持*.example.com；!开头表示黑名单）"
-                :rows="3"
-              />
-              <a-alert
-                v-if="visitorTokenRequired"
-                message="接入示例：/cs/userChat?token=xxx&externalUserId=U1001&userName=Tom&source=partnerA"
-                type="info"
-                show-icon
-              />
-              <a-alert
-                v-else-if="visitorSecretKey"
-                message="免Token接入示例：/cs/userChat?key=你的密钥（访客需携带密钥访问）"
-                type="info"
-                show-icon
-              />
-              <a-alert
-                v-else
-                message="免Token接入示例：/cs/userChat（无需任何参数，系统自动使用设备码标识访客）"
-                type="info"
-                show-icon
-              />
-              <a-button type="primary" size="small" @click="saveVisitorSecretConfig" :loading="visitorSecretSaving">
-                保存
-              </a-button>
-            </a-space>
-          </div>
-
-          <a-divider />
-
-          <!-- 接入示例 -->
-          <div class="setting-item">
-            <div class="setting-label">
-              <MessageOutlined />
-              <span>第三方接入示例</span>
-            </div>
-            <div class="setting-desc">调试时按此流程获取token并访问访客页</div>
-            <a-button size="small" @click="openAccessExamplePage">打开示例页</a-button>
-          </div>
         </div>
       </a-drawer>
 
@@ -932,7 +867,7 @@ import {
   StarFilled, StarOutlined, SwapOutlined, MenuUnfoldOutlined, MenuFoldOutlined,
   CloseOutlined, EditOutlined, PlusOutlined, InboxOutlined, MessageOutlined,
   SmileOutlined, ThunderboltOutlined, RobotOutlined, SettingOutlined,
-  MoreOutlined, DeleteOutlined, PaperClipOutlined, KeyOutlined, EnvironmentOutlined, GlobalOutlined,
+  MoreOutlined, DeleteOutlined, PaperClipOutlined, EnvironmentOutlined, GlobalOutlined,
   TeamOutlined, CaretRightOutlined, CaretDownOutlined
 } from '@ant-design/icons-vue';
 import { defHttp } from '/@/utils/http/axios';
@@ -978,12 +913,6 @@ const visitorAppId = ref<string | undefined>(undefined);   // 访客AI应用
 const aiAppList = ref<any[]>([]);
 const showSettingsDrawer = ref(false);
 const aiEnabled = ref(true);  // AI自动回复开关
-const visitorTokenRequired = ref(true);  // Token验证开关，默认开启
-const tokenSwitchSaving = ref(false);   // Token开关保存中
-const visitorSecretKey = ref('');
-const visitorDomainWhitelist = ref('');
-const visitorSecretSaving = ref(false);
-const visitorSecretGenerating = ref(false);
 
 // 客服超时未回复配置
 const agentTimeoutConfig = ref({ enabled: false, seconds: 20 });
@@ -1376,7 +1305,6 @@ onMounted(async () => {
     loadAiAppList(),
     loadAiEnabled(),              // 加载AI开关状态
     loadGlobalVisitorApp(),       // 加载全局访客AI应用配置
-    loadVisitorAccessConfig(),    // 加载全局访客接入配置
     loadAgentTimeoutConfig(),     // 加载客服超时未回复配置
     loadConversations(),
   ]);
@@ -1889,91 +1817,6 @@ async function onAiEnabledChange(checked: boolean) {
     // 恢复状态
     aiEnabled.value = !checked;
   }
-}
-
-function resetVisitorAccessConfig() {
-  visitorTokenRequired.value = true;
-  visitorSecretKey.value = '';
-  visitorDomainWhitelist.value = '';
-}
-
-async function loadVisitorAccessConfig() {
-  try {
-    const res = await httpGet({
-      url: '/cs/agent/global/visitor-access'
-    }, { isTransformResponse: false });
-    if (res?.success) {
-      const config = res.result || {};
-      visitorTokenRequired.value = config.tokenRequired !== 'false';
-      visitorSecretKey.value = config.secretKey || '';
-      visitorDomainWhitelist.value = config.whitelist || '';
-    } else {
-      resetVisitorAccessConfig();
-    }
-  } catch (e) {
-    console.error('加载访客接入配置失败', e);
-  }
-}
-
-async function generateVisitorSecretKey() {
-  visitorSecretGenerating.value = true;
-  try {
-    const res = await httpGet({ url: '/cs/agent/global/visitor-access/generate-key' }, { isTransformResponse: false });
-    if (res?.success && res.result) {
-      visitorSecretKey.value = res.result;
-      message.success('密钥已生成');
-    }
-  } catch (e) {
-    message.error('生成密钥失败');
-  } finally {
-    visitorSecretGenerating.value = false;
-  }
-}
-
-async function saveVisitorSecretConfig() {
-  visitorSecretSaving.value = true;
-  try {
-    const payload = {
-      tokenRequired: visitorTokenRequired.value ? 'true' : 'false',
-      secretKey: visitorSecretKey.value || '',
-      whitelist: visitorDomainWhitelist.value || '',
-    };
-    await httpPut({ url: '/cs/agent/global/visitor-access', data: payload });
-    message.success('保存成功');
-    await loadVisitorAccessConfig();
-  } catch (e) {
-    console.error('保存访客接入配置失败', e);
-    message.error('保存失败');
-  } finally {
-    visitorSecretSaving.value = false;
-  }
-}
-
-/** Token开关切换时立即保存 */
-async function onTokenSwitchChange(checked: boolean) {
-  tokenSwitchSaving.value = true;
-  const prevValue = !checked; // 切换前的值
-  try {
-    const payload = {
-      tokenRequired: checked ? 'true' : 'false',
-      secretKey: visitorSecretKey.value || '',
-      whitelist: visitorDomainWhitelist.value || '',
-    };
-    await httpPut({ url: '/cs/agent/global/visitor-access', data: payload });
-    message.success(checked ? 'Token验证已启用' : 'Token验证已关闭');
-  } catch (e) {
-    console.error('切换Token模式失败', e);
-    message.error('切换失败');
-    // 回滚开关状态
-    visitorTokenRequired.value = prevValue;
-  } finally {
-    tokenSwitchSaving.value = false;
-  }
-}
-
-function openAccessExamplePage() {
-  const url = `${window.location.origin}/cs/access-example`;
-  window.open(url, '_blank');
 }
 
 // 切换在线状态

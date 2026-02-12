@@ -22,8 +22,6 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.servlet.http.HttpServletRequest;
-import java.net.URI;
-import java.util.regex.Pattern;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
@@ -187,14 +185,6 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
                 return Result.error("密钥无效");
             }
         }
-        if (accessConfig != null && oConvertUtils.isNotEmpty(accessConfig.whitelist)) {
-            String referer = request.getHeader("Referer");
-            WhitelistCheckResult check = validateSourceWhitelist(accessConfig.whitelist, referer, clientIp);
-            if (!check.allowed) {
-                return Result.error(check.reason);
-            }
-        }
-
         if (!visitorTokenService.checkRateLimit(normalizedUserId, clientIp)) {
             return Result.error("获取token过于频繁");
         }
@@ -466,108 +456,11 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
         return request.getRemoteAddr();
     }
 
-    private static final Pattern IP_PATTERN = Pattern.compile("^\\d{1,3}(\\.\\d{1,3}){3}$");
-
     private static class VisitorAccessConfig {
         private final String secretKey;
-        private final String whitelist;
 
-        private VisitorAccessConfig(String secretKey, String whitelist) {
+        private VisitorAccessConfig(String secretKey) {
             this.secretKey = secretKey;
-            this.whitelist = whitelist;
-        }
-    }
-
-    private static class WhitelistCheckResult {
-        private final boolean allowed;
-        private final String reason;
-
-        private WhitelistCheckResult(boolean allowed, String reason) {
-            this.allowed = allowed;
-            this.reason = reason;
-        }
-    }
-
-    private WhitelistCheckResult validateSourceWhitelist(String rawList, String referer, String clientIp) {
-        if (oConvertUtils.isEmpty(rawList)) {
-            return new WhitelistCheckResult(true, "");
-        }
-        String host = extractHost(referer);
-        String[] rules = rawList.split(",");
-        boolean hasAllow = false;
-        boolean allowMatched = false;
-
-        for (String rule : rules) {
-            if (rule == null) {
-                continue;
-            }
-            String item = rule.trim();
-            if (item.isEmpty()) {
-                continue;
-            }
-            boolean deny = item.startsWith("!");
-            if (deny) {
-                item = item.substring(1).trim();
-            }
-            if (item.isEmpty()) {
-                continue;
-            }
-            boolean matched = matchRule(item, host, clientIp);
-            if (deny && matched) {
-                return new WhitelistCheckResult(false, "来源在黑名单");
-            }
-            if (!deny) {
-                hasAllow = true;
-                if (matched) {
-                    allowMatched = true;
-                }
-            }
-        }
-        if (hasAllow && !allowMatched) {
-            return new WhitelistCheckResult(false, "来源不在白名单");
-        }
-        return new WhitelistCheckResult(true, "");
-    }
-
-    private boolean matchRule(String rule, String host, String clientIp) {
-        if (oConvertUtils.isEmpty(rule)) {
-            return false;
-        }
-        String normalized = rule.trim().toLowerCase();
-        if (IP_PATTERN.matcher(normalized).matches()) {
-            return oConvertUtils.isNotEmpty(clientIp) && clientIp.equals(normalized);
-        }
-        String domain = normalized;
-        if (normalized.contains("://")) {
-            try {
-                URI uri = new URI(normalized);
-                if (uri.getHost() != null) {
-                    domain = uri.getHost().toLowerCase();
-                }
-            } catch (Exception e) {
-                return false;
-            }
-        }
-        if (oConvertUtils.isEmpty(host)) {
-            return false;
-        }
-        String hostLower = host.toLowerCase();
-        if (domain.startsWith("*.")) {
-            String suffix = domain.substring(1);
-            return hostLower.endsWith(suffix) || hostLower.equals(domain.substring(2));
-        }
-        return hostLower.equals(domain);
-    }
-
-    private String extractHost(String referer) {
-        if (oConvertUtils.isEmpty(referer)) {
-            return null;
-        }
-        try {
-            URI uri = new URI(referer);
-            return uri.getHost();
-        } catch (Exception e) {
-            return null;
         }
     }
 
@@ -581,16 +474,15 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
             }
         }
         if (oConvertUtils.isEmpty(json)) {
-            return new VisitorAccessConfig("", "");
+            return new VisitorAccessConfig("");
         }
         try {
             JSONObject obj = JSONObject.parseObject(json);
             String secretKey = obj != null ? obj.getString("secretKey") : "";
-            String whitelist = obj != null ? obj.getString("whitelist") : "";
-            return new VisitorAccessConfig(secretKey, whitelist);
+            return new VisitorAccessConfig(secretKey);
         } catch (Exception e) {
             log.warn("[CS-Visitor] 解析访客接入配置失败", e);
-            return new VisitorAccessConfig("", "");
+            return new VisitorAccessConfig("");
         }
     }
 

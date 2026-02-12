@@ -2,6 +2,10 @@
   <div class="access-layout">
     <aside class="side-nav">
       <div class="nav-group">
+        <div class="nav-title">Settings</div>
+        <a class="nav-link" href="#security">安全配置</a>
+      </div>
+      <div class="nav-group">
         <div class="nav-title">Start Here</div>
         <a class="nav-link" href="#start">快速开始</a>
         <a class="nav-link" v-if="tokenMode" href="#token">获取 Token</a>
@@ -16,12 +20,71 @@
 
     <main class="doc-main">
       <div class="header">
-        <div class="title">第三方接入示例与调试</div>
-        <div class="subtitle">独立访客入口、嵌入与挂件效果演示</div>
-        <a-tag v-if="!loadingMode" :color="tokenMode ? 'blue' : 'green'" style="margin-top: 8px; font-size: 13px;">
-          {{ tokenMode ? 'Token模式（需获取Token）' : '免Token模式（设备码自动标识）' }}
-        </a-tag>
+        <div class="title">第三方接入设置与调试</div>
+        <div class="subtitle">配置访客接入方式、安全策略，并在线调试接入效果</div>
       </div>
+
+      <section id="security" class="doc-section">
+        <div class="section-title">安全配置</div>
+        <div class="section-desc">配置访客接入的认证方式和密钥，修改后实时生效</div>
+        <div class="security-card">
+          <div class="security-row">
+            <div class="security-label">
+              <span>启用 Token 验证</span>
+              <a-tag :color="tokenMode ? 'blue' : 'green'" size="small" style="margin-left: 8px">
+                {{ tokenMode ? 'Token模式' : '免Token模式' }}
+              </a-tag>
+            </div>
+            <a-switch v-model:checked="visitorTokenRequired" :loading="tokenSwitchSaving" @change="onTokenSwitchChange" />
+          </div>
+          <div class="security-desc">
+            {{ tokenMode ? '第三方接入需先通过后端获取短时Token，适合需要身份验证的场景' : '访客通过设备码自动标识，无需获取Token。适合官网公开客服等场景' }}
+          </div>
+
+          <a-alert
+            v-if="!tokenMode && !secretKey"
+            type="error"
+            show-icon
+            style="margin: 12px 0"
+          >
+            <template #message>
+              <span style="font-weight: 600">安全警告：当前为免Token模式且未配置接入密钥，任何人可通过链接直接访问客服！</span>
+            </template>
+            <template #description>
+              建议至少配置一个接入密钥，访客需携带 <code>?key=xxx</code> 参数才能访问。
+            </template>
+          </a-alert>
+
+          <a-alert
+            v-else-if="!tokenMode && secretKey"
+            message="当前为免Token模式，访客需携带 ?key=密钥 参数才能访问客服"
+            type="warning"
+            show-icon
+            style="margin: 12px 0"
+          />
+
+          <div class="security-row" style="margin-top: 12px">
+            <span class="security-label">接入密钥</span>
+          </div>
+          <div style="display: flex; gap: 8px; align-items: center">
+            <a-input
+              v-model:value="secretKey"
+              :placeholder="tokenMode ? '密钥（留空则不校验）' : '接入密钥（配置后访客需通过 ?key= 传递）'"
+              allowClear
+              style="flex: 1"
+            />
+            <a-button size="small" @click="generateVisitorSecretKey" :loading="visitorSecretGenerating">
+              {{ secretKey ? '重新生成' : '生成密钥' }}
+            </a-button>
+            <a-button type="primary" size="small" @click="saveVisitorSecretConfig" :loading="visitorSecretSaving">
+              保存
+            </a-button>
+          </div>
+          <div class="security-desc" style="margin-top: 4px">
+            {{ tokenMode ? '生产环境请将密钥放在你自己的后端，不要写进前端页面' : '配置密钥后，访客必须携带 ?key=xxx 参数才能访问' }}
+          </div>
+        </div>
+      </section>
 
       <section id="start" class="doc-section">
         <div class="section-title">快速开始</div>
@@ -53,13 +116,11 @@
                 <span class="label">agentId（指定客服ID，可选，填写后访客将直接接入该客服）</span>
                 <a-input v-model:value="agentId" placeholder="客服ID（可选）" />
               </div>
-              <div class="field">
-                <span class="label">{{ tokenMode ? 'X-App-Secret（全局接入密钥，后端保存）' : '接入密钥 key（免Token模式下通过 ?key= 传递）' }}</span>
-                <a-input v-model:value="secretKey" :placeholder="tokenMode ? '全局接入密钥（仅本地调试）' : '接入密钥（后台配置后必传）'" />
-                <span class="label" v-if="tokenMode">生产环境请放在你自己的后端，不要写进前端页面</span>
-                <span class="label" v-else>如后台配置了密钥，访客必须携带 ?key=xxx 参数才能访问</span>
+              <div class="field" v-if="secretKey">
+                <span class="label">{{ tokenMode ? '接入密钥（用于本地调试获取Token，生产环境请放后端）' : '接入密钥（已在上方安全配置中设置）' }}</span>
+                <a-input :value="secretKey" disabled />
               </div>
-              <a-alert v-if="!tokenMode" message="免Token模式下，系统自动使用设备码作为访客唯一标识。如配置了接入密钥，访客需通过 ?key=xxx 参数传递。" type="info" show-icon style="margin-top: 4px;" />
+              <a-alert v-if="!tokenMode" message="免Token模式下，系统自动使用设备码作为访客唯一标识。密钥已在上方「安全配置」中管理。" type="info" show-icon style="margin-top: 4px;" />
             </div>
           </div>
         </div>
@@ -299,6 +360,7 @@ expireAt: {{ expireAt || '' }}</pre>
 
     <aside class="toc">
       <div class="toc-title">On this page</div>
+      <a class="toc-link" href="#security">安全配置</a>
       <a class="toc-link" href="#start">快速开始</a>
       <a class="toc-link" v-if="tokenMode" href="#token">获取 Token</a>
       <a class="toc-link" href="#access">接入方式</a>
@@ -318,12 +380,18 @@ import hljs from 'highlight.js';
 
 const baseUrl = ref(window.location.origin);
 const domainOptions = ref<string[]>([]);
-const tokenMode = ref(true); // true=Token模式, false=免Token模式
-const loadingMode = ref(true); // 正在查询模式
+// 安全配置（从后端加载，可编辑）
+const visitorTokenRequired = ref(true); // Token验证开关
+const tokenSwitchSaving = ref(false);
+const secretKey = ref('');
+const visitorSecretSaving = ref(false);
+const visitorSecretGenerating = ref(false);
+const loadingMode = ref(true); // 正在加载配置
+const tokenMode = computed(() => visitorTokenRequired.value);
+// 调试参数
 const externalUserId = ref('U1001');
 const userName = ref('Tom');
 const source = ref('partnerA');
-const secretKey = ref('');
 const agentId = ref('');
 const token = ref('');
 const expireAt = ref(0);
@@ -353,7 +421,15 @@ const wc = reactive({
 });
 
 onMounted(async () => {
-  // 加载域名配置
+  // 并行加载域名配置和访客接入配置
+  await Promise.all([
+    loadDomainOptions(),
+    loadVisitorAccessConfig(),
+  ]);
+  loadingMode.value = false;
+});
+
+async function loadDomainOptions() {
   try {
     const domainRes = await defHttp.get(
       { url: '/cs/domain/get' },
@@ -374,33 +450,81 @@ onMounted(async () => {
   } catch {
     domainOptions.value = [window.location.origin];
   }
+}
 
+async function loadVisitorAccessConfig() {
   try {
     const res = await defHttp.get(
-      { url: '/airag/cs/visitor/token/required' },
-      { successMessageMode: 'none', isTransformResponse: false },
-    );
-    if (res?.success && res.result === false) {
-      tokenMode.value = false;
-    }
-  } catch {
-    // 默认Token模式
-  } finally {
-    loadingMode.value = false;
-  }
-  // 自动加载系统已配置的密钥
-  try {
-    const accessRes = await defHttp.get(
       { url: '/cs/agent/global/visitor-access' },
       { successMessageMode: 'none', isTransformResponse: false },
     );
-    if (accessRes?.success && accessRes.result?.secretKey) {
-      secretKey.value = accessRes.result.secretKey;
+    if (res?.success) {
+      const config = res.result || {};
+      visitorTokenRequired.value = config.tokenRequired !== 'false';
+      secretKey.value = config.secretKey || '';
+    } else {
+      visitorTokenRequired.value = true;
+      secretKey.value = '';
     }
-  } catch {
-    // 忽略
+  } catch (e) {
+    console.error('加载访客接入配置失败', e);
   }
-});
+}
+
+async function generateVisitorSecretKey() {
+  visitorSecretGenerating.value = true;
+  try {
+    const res = await defHttp.get(
+      { url: '/cs/agent/global/visitor-access/generate-key' },
+      { successMessageMode: 'none', isTransformResponse: false },
+    );
+    if (res?.success && res.result) {
+      secretKey.value = res.result;
+      message.success('密钥已生成，请点击保存');
+    }
+  } catch (e) {
+    message.error('生成密钥失败');
+  } finally {
+    visitorSecretGenerating.value = false;
+  }
+}
+
+async function saveVisitorSecretConfig() {
+  visitorSecretSaving.value = true;
+  try {
+    const payload = {
+      tokenRequired: visitorTokenRequired.value ? 'true' : 'false',
+      secretKey: secretKey.value || '',
+    };
+    await defHttp.put({ url: '/cs/agent/global/visitor-access', data: payload });
+    message.success('保存成功');
+    await loadVisitorAccessConfig();
+  } catch (e) {
+    console.error('保存访客接入配置失败', e);
+    message.error('保存失败');
+  } finally {
+    visitorSecretSaving.value = false;
+  }
+}
+
+async function onTokenSwitchChange(checked: boolean) {
+  tokenSwitchSaving.value = true;
+  const prevValue = !checked;
+  try {
+    const payload = {
+      tokenRequired: checked ? 'true' : 'false',
+      secretKey: secretKey.value || '',
+    };
+    await defHttp.put({ url: '/cs/agent/global/visitor-access', data: payload });
+    message.success(checked ? 'Token验证已启用' : 'Token验证已关闭');
+  } catch (e) {
+    console.error('切换Token模式失败', e);
+    message.error('切换失败');
+    visitorTokenRequired.value = prevValue;
+  } finally {
+    tokenSwitchSaving.value = false;
+  }
+}
 
 const md = new MarkdownIt({
   html: false,
@@ -785,7 +909,7 @@ const faqDocMarkdown = computed(() => {
 未配置密钥时可以直接调用 \`/airag/cs/visitor/token\` 获取短时 token。
 
 ### 配了密钥会不会泄露？
-密钥只放后端，前端只拿 token，不接触密钥。建议配合白名单和频控。
+密钥只放后端，前端只拿 token，不接触密钥。建议配合频率控制。
 
 ### 为什么 URL 里都是 token？
 聊天入口只认 token，不需要密钥。密钥只用于“获取 token”这一步。
@@ -801,7 +925,7 @@ const faqTokenModeNote = computed(() => {
 
 **免Token模式**：访客通过设备码自动标识，无需获取Token即可直接接入。适合官网客服、公开咨询等场景。注意：用户清除浏览器数据后会被视为新访客。
 
-可在「客服工作台 → 设置 → 访客接入设置」中切换。`;
+可在本页上方「安全配置」中切换。`;
 });
 
 const faqDocHtml = computed(() => md.render(faqDocMarkdown.value + faqTokenModeNote.value));
@@ -1040,6 +1164,34 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: #8c8c8c;
   margin-bottom: 12px;
+}
+
+.security-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+  border: 1px solid #f0f0f0;
+}
+
+.security-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.security-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #1f2937;
+  display: flex;
+  align-items: center;
+}
+
+.security-desc {
+  font-size: 12px;
+  color: #8c8c8c;
+  margin-top: 4px;
 }
 
 .step {
