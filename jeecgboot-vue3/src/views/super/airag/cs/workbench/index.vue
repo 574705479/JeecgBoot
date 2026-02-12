@@ -29,11 +29,11 @@
         :width="360"
       >
         <div class="settings-content">
-          <!-- 客服AI建议应用 -->
+          <!-- 回复建议应用 -->
           <div class="setting-item">
             <div class="setting-label">
               <ThunderboltOutlined />
-              <span>客服AI建议应用</span>
+              <span>回复建议应用</span>
             </div>
             <div class="setting-desc">AI辅助模式下，为客服生成回复建议</div>
             <a-select 
@@ -374,16 +374,16 @@
                 </div>
                 <div class="msg-meta">
                   {{ formatMessageTime(msg.createTime) }}
-                  <!-- AI辅助按钮 - 手动触发AI建议 -->
+                  <!-- 手动触发回复建议 -->
                   <a-button 
                     type="link" 
                     size="small" 
                     class="ai-assist-btn"
                     :loading="aiSuggestionLoading"
                     @click="requestAiSuggestion(msg.content)"
-                    title="获取AI建议回复"
+                    title="获取回复建议"
                   >
-                    <RobotOutlined /> AI建议
+                    <RobotOutlined /> 回复建议
                   </a-button>
                 </div>
               </div>
@@ -439,18 +439,17 @@
           </div>
         </div>
 
-        <!-- AI建议 -->
-        <!-- AI建议展示区（手动触发） -->
+        <!-- 回复建议展示区 -->
         <div class="ai-suggestion" v-if="aiSuggestion">
           <div class="suggestion-label">
-            <RobotOutlined /> AI建议回复
+            <RobotOutlined /> 回复建议
             <a-tag v-if="aiSuggestionLoading" color="processing" size="small">生成中...</a-tag>
           </div>
           <div class="suggestion-text" v-html="renderMarkdown(aiSuggestion)"></div>
           <div class="suggestion-btns">
             <a-button type="primary" size="small" @click="useSuggestion(true)" :disabled="aiSuggestionLoading">直接发送</a-button>
             <a-button size="small" @click="useSuggestion(false)" :disabled="aiSuggestionLoading">填入编辑</a-button>
-            <a-button size="small" type="text" @click="aiSuggestion = ''">忽略</a-button>
+            <a-button size="small" type="text" @click="dismissSuggestion()">忽略</a-button>
           </div>
         </div>
       </div>
@@ -875,7 +874,7 @@ import { useGlobSetting } from '/@/hooks/setting';
 import { getFileAccessHttpUrl, getHeaders } from '/@/utils/common/compUtils';
 import { createImgPreview } from '/@/components/Preview';
 import EmojiPicker from '../components/EmojiPicker.vue';
-// ★ 为AI建议保留Markdown渲染能力
+// ★ 为回复建议保留Markdown渲染能力
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
 
@@ -908,7 +907,7 @@ const isColleagueReadonly = computed(() => filter.value === 'monitor' && !isSupe
 const keepConnectionOnDeactivate = true;
 
 // AI应用选择
-const selectedAppId = ref<string | undefined>(undefined);  // 客服AI建议应用
+const selectedAppId = ref<string | undefined>(undefined);  // 回复建议应用
 const visitorAppId = ref<string | undefined>(undefined);   // 访客AI应用
 const aiAppList = ref<any[]>([]);
 const showSettingsDrawer = ref(false);
@@ -1106,9 +1105,10 @@ const editModalTitle = computed(() => {
   return titles[editingField.value] || '';
 });
 
-// AI建议
+// 回复建议
 const aiSuggestion = ref('');
 const aiSuggestionLoading = ref(false);
+const aiSuggestionDismissed = ref(false);  // 忽略标记，阻止后续流式消息
 
 // 弹窗
 const showTransferModal = ref(false);
@@ -1401,7 +1401,7 @@ async function loadAgentInfo() {
       isOnline.value = res.status === 1;
       agentRole.value = res.role || 0; // 获取角色：0-普通客服, 1-管理者
       
-      // 加载客服的AI建议应用设置（每个客服独立配置）
+      // 加载回复建议应用设置（每个客服独立配置）
       if (res.defaultAppId) {
         selectedAppId.value = res.defaultAppId;
       }
@@ -1747,7 +1747,7 @@ async function loadAiAppList() {
   }
 }
 
-// AI应用切换（设置客服AI建议应用）
+// AI应用切换（设置回复建议应用）
 async function onAppChange(appId: string | undefined) {
   if (!agentId.value) return;
   
@@ -1757,9 +1757,9 @@ async function onAppChange(appId: string | undefined) {
       data: { appId: appId || '' }
     });
     selectedAppId.value = appId;
-    console.log('[Workbench] 客服AI建议应用已更新');
+    console.log('[Workbench] 回复建议应用已更新');
   } catch (e) {
-    console.error('设置客服AI建议应用失败', e);
+    console.error('设置回复建议应用失败', e);
     message.error('设置失败');
   }
 }
@@ -2125,8 +2125,10 @@ async function selectConversation(conv: any) {
   }
   currentReplyMode.value = conv.replyMode || 0;
   
-  // 切换会话时清除AI建议（AI建议是针对特定会话的）
+  // 切换会话时清除回复建议（回复建议是针对特定会话的）
   aiSuggestion.value = '';
+  aiSuggestionDismissed.value = false;
+  aiSuggestionLoading.value = false;
   
   // AI应用使用客服全局设置，不跟随会话变化
 
@@ -2922,11 +2924,12 @@ async function saveTags() {
   }
 }
 
-// AI建议
-// 手动请求AI建议（流式）
+// 回复建议
+// 手动请求回复建议（流式）
 async function requestAiSuggestion(userMessage: string) {
   if (!currentConversation.value || !userMessage) return;
   
+  aiSuggestionDismissed.value = false; // 重置忽略标记
   aiSuggestionLoading.value = true;
   aiSuggestion.value = ''; // 清空之前的建议，准备接收流式内容
   
@@ -2939,19 +2942,19 @@ async function requestAiSuggestion(userMessage: string) {
     if (res?.streaming) {
       // 流式模式，建议通过WebSocket推送，保持loading状态
       // loading会在收到 ai_suggestion_complete 时关闭
-      console.log('[CS] AI建议正在流式生成...');
+      console.log('[CS] 回复建议正在流式生成...');
     } else if (res?.suggestion) {
       // 非流式模式（兼容旧逻辑）
       aiSuggestion.value = res.suggestion;
-      console.log('[Workbench] AI建议已生成');
+      console.log('[Workbench] 回复建议已生成');
       aiSuggestionLoading.value = false;
     } else {
-      message.warning(res?.message || 'AI暂时无法生成建议');
+      message.warning(res?.message || '暂时无法生成回复建议');
       aiSuggestionLoading.value = false;
     }
   } catch (e) {
-    console.error('获取AI建议失败', e);
-    message.error('获取AI建议失败');
+    console.error('获取回复建议失败', e);
+    message.error('获取回复建议失败');
     aiSuggestionLoading.value = false;
   }
 }
@@ -2965,6 +2968,20 @@ function useSuggestion(direct: boolean) {
     inputRef.value?.focus();
   }
   aiSuggestion.value = '';
+}
+
+/** 忽略/终止回复建议 */
+function dismissSuggestion() {
+  aiSuggestion.value = '';
+  aiSuggestionLoading.value = false;
+  aiSuggestionDismissed.value = true;
+  // 通知后端停止生成
+  if (ws && ws.readyState === WebSocket.OPEN && currentConversation.value?.id) {
+    ws.send(JSON.stringify({
+      type: 'stop_ai_suggestion',
+      conversationId: currentConversation.value.id,
+    }));
+  }
 }
 
 // WebSocket
@@ -3439,30 +3456,33 @@ function handleWsMessage(data: any) {
       }
       break;
     case 'ai_suggestion':
-      if (currentConversation.value?.id === data.conversationId) {
+      if (currentConversation.value?.id === data.conversationId && !aiSuggestionDismissed.value) {
         aiSuggestion.value = data.content;
       }
       break;
     case 'ai_suggestion_stream':
-      // AI建议流式消息
-      if (currentConversation.value?.id === data.conversationId) {
-        // 累积流式内容
+      // 回复建议流式消息 — dismissed 时丢弃
+      if (currentConversation.value?.id === data.conversationId && !aiSuggestionDismissed.value) {
         aiSuggestion.value = (aiSuggestion.value || '') + data.content;
       }
       break;
     case 'ai_suggestion_complete':
-      // AI建议生成完成
-      if (currentConversation.value?.id === data.conversationId) {
+      // 回复建议生成完成 — dismissed 时丢弃
+      if (currentConversation.value?.id === data.conversationId && !aiSuggestionDismissed.value) {
         aiSuggestion.value = data.content;
         aiSuggestionLoading.value = false;
-        console.log('[Workbench] AI建议已生成');
+        console.log('[Workbench] 回复建议已生成');
+      } else if (aiSuggestionDismissed.value) {
+        aiSuggestionLoading.value = false;
       }
       break;
     case 'ai_suggestion_error':
-      // AI建议生成失败
+      // 回复建议生成失败
       if (currentConversation.value?.id === data.conversationId) {
         aiSuggestionLoading.value = false;
-        message.error(data.error || 'AI建议生成失败');
+        if (!aiSuggestionDismissed.value) {
+          message.error(data.error || '回复建议生成失败');
+        }
       }
       break;
     case 'ai_typing':
@@ -3758,7 +3778,7 @@ function getMessageClass(msg: any) {
 }
 
 // 渲染消息内容（与访客端保持一致：简单HTML转义 + 换行转换）
-// ★ 初始化Markdown渲染器（仅用于AI建议）
+// ★ 初始化Markdown渲染器（仅用于回复建议）
 const md = new MarkdownIt({
   html: true,
   linkify: true,
@@ -3812,7 +3832,7 @@ function renderMessage(content: string) {
   return rendered;
 }
 
-// ★ 渲染AI建议内容（保留Markdown渲染）
+// ★ 渲染回复建议内容（保留Markdown渲染）
 function renderMarkdown(content: string) {
   if (!content) return '';
   const cached = renderCache.get(content);
@@ -4551,7 +4571,7 @@ function restoreMessageScroll() {
   }
 }
 
-// AI建议
+// 回复建议
 .ai-suggestion {
   margin: 0 20px 12px;
   padding: 12px;

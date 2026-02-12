@@ -34,8 +34,11 @@ public class CsDomainConfig implements Serializable {
     @Schema(description = "域名列表(换行分隔)")
     private String domains;
 
-    @Schema(description = "桌面端下载链接")
+    @Schema(description = "桌面端下载链接(旧，兼容)")
     private String downloadUrl;
+
+    @Schema(description = "下载链接列表(JSON数组)")
+    private String downloadLinks;
 
     @Schema(description = "备注")
     private String remark;

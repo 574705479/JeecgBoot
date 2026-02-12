@@ -90,8 +90,36 @@ public class CsMessageServiceImpl implements ICsMessageService {
     // AI建议缓存 (conversationId -> suggestion)
     private final Map<String, String> aiSuggestionCache = new ConcurrentHashMap<>();
 
+    // AI流式回复取消标记 (conversationId -> cancelled flag)
+    private final ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicBoolean> activeAiStreams = new ConcurrentHashMap<>();
+
     private static final long COLLABORATOR_CACHE_TTL_MS = 30000L;
     private final Map<String, CollaboratorCacheEntry> collaboratorCache = new ConcurrentHashMap<>();
+
+    // ==================== AI流式取消 ====================
+
+    @Override
+    public void cancelAiStream(String conversationId) {
+        java.util.concurrent.atomic.AtomicBoolean cancelled = activeAiStreams.get(conversationId);
+        if (cancelled != null) {
+            cancelled.set(true);
+            log.info("[CS-Message] AI流式回复已标记取消: conversationId={}", conversationId);
+        } else {
+            log.debug("[CS-Message] 取消AI流式回复: 无活跃流 conversationId={}", conversationId);
+        }
+    }
+
+    @Override
+    public void cancelAiSuggestionStream(String conversationId) {
+        String key = "suggestion:" + conversationId;
+        java.util.concurrent.atomic.AtomicBoolean cancelled = activeAiStreams.get(key);
+        if (cancelled != null) {
+            cancelled.set(true);
+            log.info("[CS-Message] AI建议流式已标记取消: conversationId={}", conversationId);
+        } else {
+            log.debug("[CS-Message] 取消AI建议流式: 无活跃流 conversationId={}", conversationId);
+        }
+    }
 
     // ==================== 消息发送 ====================
 
@@ -500,6 +528,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
     
     /**
      * 流式生成AI建议，通过WebSocket推送给客服
+     * 支持通过 cancelAiSuggestionStream() 取消正在进行的流式建议
      */
     @Async
     public void generateAiSuggestionStream(CsConversation conversation, String userMessage, String fallbackAgentId) {
@@ -511,6 +540,11 @@ public class CsMessageServiceImpl implements ICsMessageService {
             log.warn("[CS-Message] 会话没有分配客服且未指定请求客服，无法推送AI建议");
             return;
         }
+
+        // 注册取消标记
+        String cancelKey = "suggestion:" + conversationId;
+        java.util.concurrent.atomic.AtomicBoolean cancelled = new java.util.concurrent.atomic.AtomicBoolean(false);
+        activeAiStreams.put(cancelKey, cancelled);
         
         try {
             StringBuilder fullSuggestion = new StringBuilder();
@@ -520,6 +554,13 @@ public class CsMessageServiceImpl implements ICsMessageService {
                 @Override
                 public void onToken(String token, boolean isComplete) {
                     try {
+                        // 检查取消标记
+                        if (cancelled.get()) {
+                            log.info("[CS-Message] AI建议流式已被取消，停止处理: conversationId={}", conversationId);
+                            activeAiStreams.remove(cancelKey);
+                            return;
+                        }
+
                         if (token != null && !token.isEmpty()) {
                             fullSuggestion.append(token);
                             
@@ -552,6 +593,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
                                     .build();
                             
                             sessionManager.sendToAgent(targetAgentId, completeMsg);
+                            activeAiStreams.remove(cancelKey);
                         }
                     } catch (Exception e) {
                         log.error("[CS-Message] 处理AI建议流式token失败", e);
@@ -561,6 +603,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
             
         } catch (Exception e) {
             log.error("[CS-Message] 流式AI建议生成失败: conversationId={}", conversationId, e);
+            activeAiStreams.remove(cancelKey);
             
             // 发送错误消息
             CsWebSocketMessage errorMsg = CsWebSocketMessage.builder()
@@ -920,12 +963,17 @@ public class CsMessageServiceImpl implements ICsMessageService {
     /**
      * 生成并发送AI回复 (AI自动模式) - 流式版本
      * 通过WebSocket逐步发送AI回复，实现实时打字效果
+     * 支持通过 cancelAiStream() 取消正在进行的流式回复
      */
     @Async
     public void generateAndSendAiReply(CsConversation conversation, String userMessage) {
         String conversationId = conversation.getId();
         String userId = conversation.getUserId();
         String ownerAgentId = conversation.getOwnerAgentId();
+        
+        // 注册取消标记
+        java.util.concurrent.atomic.AtomicBoolean cancelled = new java.util.concurrent.atomic.AtomicBoolean(false);
+        activeAiStreams.put(conversationId, cancelled);
         
         try {
             log.info("[CS-Message] 开始流式AI回复: conversationId={}", conversationId);
@@ -938,12 +986,23 @@ public class CsMessageServiceImpl implements ICsMessageService {
             
             // 创建一个StringBuilder来累积完整的AI回复
             StringBuilder fullResponse = new StringBuilder();
+            // 标记是否已经发送过完成消息（防止重复发送）
+            java.util.concurrent.atomic.AtomicBoolean completeSent = new java.util.concurrent.atomic.AtomicBoolean(false);
             
             // 调用流式AI服务 (forVisitor=true: 使用访客AI应用)
             callAiServiceStream(conversationId, userMessage, new AiStreamCallback() {
                 @Override
                 public void onToken(String token, boolean isComplete) {
                     try {
+                        // ★ 检查取消标记：被取消后不再推送新token，直接完成
+                        if (cancelled.get()) {
+                            if (completeSent.compareAndSet(false, true)) {
+                                finalizeAiReply(conversationId, userId, ownerAgentId, messageId, fullResponse.toString());
+                                activeAiStreams.remove(conversationId);
+                            }
+                            return;
+                        }
+                        
                         if (token != null && !token.isEmpty()) {
                             fullResponse.append(token);
                             
@@ -964,37 +1023,10 @@ public class CsMessageServiceImpl implements ICsMessageService {
                         }
                         
                         if (isComplete) {
-                            String aiReply = fullResponse.toString();
-                            log.info("[CS-Message] AI流式回复完成: conversationId={}, length={}", 
-                                    conversationId, aiReply.length());
-                            
-                            if (oConvertUtils.isNotEmpty(aiReply)) {
-                                // 创建AI消息并保存
-                                CsMessage aiMessage = CsMessage.createAiMessage(
-                                        conversationId, "智能客服", aiReply);
-                                aiMessage.setId(messageId);
-                                
-                                // 保存到MongoDB
-                                saveToMongo(aiMessage);
-                                
-                                // 更新会话
-                                conversationService.updateLastMessage(conversationId, aiReply);
-                                
-                                // 发送完成消息
-                                CsWebSocketMessage completeMsg = CsWebSocketMessage.builder()
-                                        .type("ai_stream_complete")
-                                        .conversationId(conversationId)
-                                        .messageId(messageId)
-                                        .content(aiReply)
-                                        .build();
-                                
-                                sessionManager.sendToUser(userId, completeMsg);
-                                // 推送给客服（负责人 + 协作者 + 管理者；未分配则广播所有在线客服）
-                                sendAiStreamToAgents(conversationId, ownerAgentId, completeMsg);
+                            if (completeSent.compareAndSet(false, true)) {
+                                finalizeAiReply(conversationId, userId, ownerAgentId, messageId, fullResponse.toString());
+                                activeAiStreams.remove(conversationId);
                             }
-                            
-                            // 取消"AI正在输入"状态
-                            sendAiTypingStatus(conversationId, userId, false);
                         }
                     } catch (Exception e) {
                         log.error("[CS-Message] 处理AI流式token失败", e);
@@ -1004,6 +1036,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
             
         } catch (Exception e) {
             log.error("[CS-Message] AI流式回复失败: conversationId={}", conversationId, e);
+            activeAiStreams.remove(conversationId);
             sendAiTypingStatus(conversationId, userId, false);
             
             // 发送错误消息
@@ -1014,6 +1047,42 @@ public class CsMessageServiceImpl implements ICsMessageService {
         }
     }
     
+    /**
+     * 完成AI回复（正常完成或被取消时统一调用）
+     * 保存已累积的内容到MongoDB，发送 ai_stream_complete，关闭 typing 状态
+     */
+    private void finalizeAiReply(String conversationId, String userId, String ownerAgentId,
+                                  String messageId, String aiReply) {
+        log.info("[CS-Message] AI流式回复完成/中止: conversationId={}, length={}", 
+                conversationId, aiReply != null ? aiReply.length() : 0);
+        
+        if (oConvertUtils.isNotEmpty(aiReply)) {
+            // 创建AI消息并保存
+            CsMessage aiMessage = CsMessage.createAiMessage(conversationId, "智能客服", aiReply);
+            aiMessage.setId(messageId);
+            
+            // 保存到MongoDB
+            saveToMongo(aiMessage);
+            
+            // 更新会话
+            conversationService.updateLastMessage(conversationId, aiReply);
+            
+            // 发送完成消息
+            CsWebSocketMessage completeMsg = CsWebSocketMessage.builder()
+                    .type("ai_stream_complete")
+                    .conversationId(conversationId)
+                    .messageId(messageId)
+                    .content(aiReply)
+                    .build();
+            
+            sessionManager.sendToUser(userId, completeMsg);
+            sendAiStreamToAgents(conversationId, ownerAgentId, completeMsg);
+        }
+        
+        // 取消"AI正在输入"状态
+        sendAiTypingStatus(conversationId, userId, false);
+    }
+
     /**
      * 发送AI正在输入状态
      */

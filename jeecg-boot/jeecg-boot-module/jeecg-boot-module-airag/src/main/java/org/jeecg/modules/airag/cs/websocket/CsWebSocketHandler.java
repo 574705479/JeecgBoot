@@ -195,6 +195,14 @@ public class CsWebSocketHandler implements WebSocketHandler {
                 case "confirm_ai":
                     handleConfirmAi(json, userId, userType);
                     break;
+
+                case "stop_ai":
+                    handleStopAi(json, userId);
+                    break;
+
+                case "stop_ai_suggestion":
+                    handleStopAiSuggestion(json, userId);
+                    break;
                     
                 default:
                     log.debug("[CS-WebSocket] 未处理的消息类型: {}", type);
@@ -242,6 +250,30 @@ public class CsWebSocketHandler implements WebSocketHandler {
             String agentName = agent != null ? agent.getNickname() : "客服";
             messageService.sendAgentMessage(conversationId, userId, agentName, content, msgType, extra);
         }
+    }
+
+    /**
+     * 处理终止AI回复请求
+     */
+    private void handleStopAi(JSONObject json, String userId) {
+        String conversationId = json.getString("conversationId");
+        if (oConvertUtils.isEmpty(conversationId)) {
+            return;
+        }
+        log.info("[CS-WebSocket] 收到终止AI请求: conversationId={}, userId={}", conversationId, userId);
+        messageService.cancelAiStream(conversationId);
+    }
+
+    /**
+     * 处理终止AI建议请求（客服端忽略回复建议时调用）
+     */
+    private void handleStopAiSuggestion(JSONObject json, String userId) {
+        String conversationId = json.getString("conversationId");
+        if (oConvertUtils.isEmpty(conversationId)) {
+            return;
+        }
+        log.info("[CS-WebSocket] 收到终止AI建议请求: conversationId={}, userId={}", conversationId, userId);
+        messageService.cancelAiSuggestionStream(conversationId);
     }
 
     private void sendExpiredAndClose(WebSocketSession session) {

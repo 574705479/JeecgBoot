@@ -138,7 +138,7 @@
           <!-- 用户消息 (senderType === 0 表示用户) -->
           <div v-else-if="isUserMessage(msg)" class="user-message">
             <div class="message-content">
-              <div v-if="msg.content" class="message-text">{{ msg.content }}</div>
+              <div v-if="msg.content" class="message-text" v-html="renderUserMessage(msg.content)"></div>
               <div
                 v-if="getMediaGridData(msg).items.length"
                 class="message-media-grid"
@@ -291,19 +291,30 @@
       </div>
       <a-textarea
         v-model:value="inputMessage"
-        :placeholder="aiResponding ? 'AI正在回复中，请稍候...' : '请输入您要咨询的问题...'"
+        :placeholder="aiResponding ? 'AI正在回复，可随时终止...' : '请输入您要咨询的问题...'"
         :auto-size="{ minRows: 1, maxRows: 4 }"
-        :disabled="aiResponding"
         @keydown="handleKeydown"
       />
+      <!-- AI回复中: 终止按钮 -->
       <a-button 
+        v-if="aiResponding"
+        danger
+        @click="stopAiReply"
+        class="stop-ai-btn"
+      >
+        <span class="stop-icon">■</span>
+        终止
+      </a-button>
+      <!-- 正常状态: 发送按钮 -->
+      <a-button 
+        v-else
         type="primary" 
         @click="sendMessage" 
-        :loading="sending || aiResponding" 
-        :disabled="(!inputMessage.trim() && !attachmentList.length) || aiResponding"
+        :loading="sending" 
+        :disabled="!inputMessage.trim() && !attachmentList.length"
       >
         <SendOutlined />
-        {{ aiResponding ? 'AI回复中...' : '发送' }}
+        发送
       </a-button>
     </div>
     <!-- 会话已结束时显示重新开始按钮 -->
@@ -879,6 +890,30 @@ function stopAiResponding(reason?: string) {
     });
     scrollToBottom();
   }
+}
+
+/** 用户主动终止AI回复 */
+function stopAiReply() {
+  // 1. 通知后端停止推送
+  if (ws && ws.readyState === WebSocket.OPEN && conversationId.value) {
+    ws.send(JSON.stringify({
+      type: 'stop_ai',
+      conversationId: conversationId.value,
+    }));
+  }
+
+  // 2. 将所有正在流式输出的消息标记为完成
+  for (const [msgId] of streamingMessages.value) {
+    const msg = messages.value.find(m => m.id === msgId);
+    if (msg) {
+      msg.isStreaming = false;
+    }
+  }
+  streamingMessages.value.clear();
+
+  // 3. 重置状态
+  stopAiResponding();
+  agentTyping.value = false;
 }
 
 // 流式AI消息临时存储 (messageId -> 累积内容)
@@ -2112,12 +2147,6 @@ async function sendMessage() {
     return;
   }
 
-  // AI自动模式下，AI回复中时不允许发送新消息
-  if (replyMode.value === 0 && aiResponding.value) {
-    message.warning('请等待AI回复完成');
-    return;
-  }
-
   // 消息接通模式：第一次发送时才创建正式会话
   if (messageConnectMode.value && !conversationId.value) {
     try {
@@ -2219,9 +2248,10 @@ async function sendMessage() {
 
 // 处理键盘事件
 function handleKeydown(e: KeyboardEvent) {
-  // 只在按下 Enter 且不带 Shift 时发送
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
+    // AI回复中时不发送消息，允许用户预输入
+    if (aiResponding.value) return;
     sendMessage();
   }
   // Shift+Enter 允许默认换行行为
@@ -2456,6 +2486,22 @@ const md = new MarkdownIt({
 function openMediaViewer(msg: any) {
   mediaViewerList.value = getMediaAttachments(msg);
   mediaViewerVisible.value = true;
+}
+
+// Unicode emoji 正则（覆盖绝大部分 emoji 字符范围）
+const emojiRegex = /([\u{1F300}-\u{1F9FF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{200D}\u{20E3}\u{E0020}-\u{E007F}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{2702}-\u{27B0}\u{1F1E0}-\u{1F1FF}]+)/gu;
+
+/** 渲染用户消息（纯文本，表情字符用 span.emoji 包裹以避免被 color 覆盖） */
+function renderUserMessage(content: string) {
+  if (!content) return '';
+  // 先转义 HTML
+  const escaped = content
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br>');
+  // 把 emoji 字符包裹在 <span class="emoji"> 中
+  return escaped.replace(emojiRegex, '<span class="emoji">$1</span>');
 }
 
 // 渲染消息内容（支持富文本HTML、Markdown、纯文本）
@@ -2993,6 +3039,11 @@ watch(messages, () => {
     font-size: 14px;
     line-height: 1.6;
     word-break: break-word;
+
+    :deep(.emoji) {
+      color: initial;
+      font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', 'Twemoji Mozilla', sans-serif;
+    }
   }
 
   .message-time {
@@ -3410,6 +3461,23 @@ watch(messages, () => {
     
     &:disabled {
       background: #d9d9d9;
+    }
+  }
+
+  .stop-ai-btn {
+    border-radius: 20px;
+    height: 40px;
+    padding: 0 24px;
+    margin-top: 8px;
+    align-self: flex-end;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 500;
+
+    .stop-icon {
+      font-size: 10px;
+      line-height: 1;
     }
   }
 }

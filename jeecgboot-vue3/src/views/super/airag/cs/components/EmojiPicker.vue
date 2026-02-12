@@ -181,11 +181,12 @@ onBeforeUnmount(() => {
 .emoji-tab {
   flex: 1;
   text-align: center;
-  font-size: 18px;
+  font-size: 20px;
   cursor: pointer;
   padding: 4px 0;
   border-radius: 6px;
   transition: background 0.2s;
+  filter: saturate(1.3) contrast(1.05);
 }
 .emoji-tab:hover {
   background: #e6f4ff;
@@ -197,22 +198,30 @@ onBeforeUnmount(() => {
   display: flex;
   flex-wrap: wrap;
   padding: 8px;
-  height: 240px;
+  height: 260px;
   overflow-y: auto;
   gap: 2px;
 }
 .emoji-item {
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 22px;
+  font-size: 24px;
   cursor: pointer;
   border-radius: 6px;
-  transition: background 0.15s;
+  transition: background 0.15s, transform 0.1s;
+  color: initial;
+  font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
+  font-style: normal;
+  -webkit-text-stroke: 0;
+  text-rendering: optimizeLegibility;
+  filter: saturate(1.3) contrast(1.05);
 }
 .emoji-item:hover {
-  background: #f0f0f0;
+  background: #e8f0fe;
+  transform: scale(1.15);
+  filter: saturate(1.5) contrast(1.1);
 }
 </style>

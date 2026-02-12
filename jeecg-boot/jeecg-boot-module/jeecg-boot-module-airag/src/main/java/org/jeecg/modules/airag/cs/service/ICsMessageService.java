@@ -112,6 +112,21 @@ public interface ICsMessageService {
     // ==================== AI相关 ====================
 
     /**
+     * 取消正在进行的AI流式回复
+     * 设置取消标记，后续token将不再推送，已生成的部分内容会被保存
+     *
+     * @param conversationId 会话ID
+     */
+    void cancelAiStream(String conversationId);
+
+    /**
+     * 取消正在进行的AI建议流式推送
+     *
+     * @param conversationId 会话ID
+     */
+    void cancelAiSuggestionStream(String conversationId);
+
+    /**
      * 生成AI建议回复 (AI辅助模式)
      * 
      * @param conversationId 会话ID

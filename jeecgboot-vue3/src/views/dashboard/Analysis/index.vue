@@ -39,14 +39,21 @@
                   <div class="qr-tip">扫码打开对话</div>
                 </div>
               </a-col>
-              <a-col :span="16" v-if="domainConfig.downloadUrl">
-                <div class="section-title">桌面端下载</div>
+              <a-col :span="16" v-if="parsedDownloadLinks.length > 0">
+                <div class="section-title">客户端下载</div>
                 <div class="download-area">
-                  <a-button type="primary" :href="domainConfig.downloadUrl" target="_blank">
-                    <template #icon><DesktopOutlined /></template>
-                    下载PC客户端
-                  </a-button>
-                  <div class="download-url">{{ domainConfig.downloadUrl }}</div>
+                  <div class="download-buttons">
+                    <a-button
+                      v-for="(dl, dlIdx) in parsedDownloadLinks"
+                      :key="dlIdx"
+                      type="primary"
+                      :href="dl.url"
+                      target="_blank"
+                    >
+                      <template #icon><DesktopOutlined /></template>
+                      {{ dl.label || '下载' }}
+                    </a-button>
+                  </div>
                 </div>
               </a-col>
             </a-row>
@@ -153,6 +160,7 @@ async function fetchStats() {
 const domainConfig = reactive({
   domains: '',
   downloadUrl: '',
+  downloadLinks: '',
 });
 const secretKey = ref('');
 
@@ -166,12 +174,34 @@ const accessLinks = computed(() => {
   });
 });
 
+/** 解析下载链接列表，兼容旧 downloadUrl 字段 */
+const parsedDownloadLinks = computed(() => {
+  if (domainConfig.downloadLinks) {
+    try {
+      const parsed = typeof domainConfig.downloadLinks === 'string'
+        ? JSON.parse(domainConfig.downloadLinks)
+        : domainConfig.downloadLinks;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.filter((item: any) => item.url);
+      }
+    } catch (e) {
+      console.warn('[Dashboard] 解析 downloadLinks 失败', e);
+    }
+  }
+  // 兼容旧字段
+  if (domainConfig.downloadUrl) {
+    return [{ label: 'PC客户端', url: domainConfig.downloadUrl }];
+  }
+  return [];
+});
+
 async function fetchDomainConfig() {
   try {
     const res = await defHttp.get({ url: '/cs/domain/get' }, { isTransformResponse: false });
     const data = res?.result || res || {};
     domainConfig.domains = data.domains || '';
     domainConfig.downloadUrl = data.downloadUrl || '';
+    domainConfig.downloadLinks = data.downloadLinks || '';
   } catch (e) {
     console.error('[Dashboard] 获取域名配置失败', e);
   }
@@ -325,11 +355,10 @@ onUnmounted(() => {
 }
 
 .download-area {
-  .download-url {
-    margin-top: 8px;
-    font-size: 12px;
-    color: #8c8c8c;
-    word-break: break-all;
+  .download-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
   }
 }
 
