@@ -34,11 +34,13 @@ public interface ICsConversationService extends IService<CsConversation> {
      * @param userIp    用户IP地址
      * @param userAgent User-Agent 字符串
      * @param deviceId  设备指纹
-     * @param userLang  浏览器语言
+     * @param userLang          浏览器语言
+     * @param preferredAgentId  指定客服ID（可选，为null时自动分配）
      * @return 会话
      */
     CsConversation createConversation(String appId, String userId, String userName, String source,
-                                      String userIp, String userAgent, String deviceId, String userLang);
+                                      String userIp, String userAgent, String deviceId, String userLang,
+                                      String preferredAgentId);
 
     /**
      * 获取或创建会话 (用户发消息时调用)

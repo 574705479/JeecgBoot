@@ -119,8 +119,9 @@ public class CsConversationController extends JeecgController<CsConversation, IC
             }
         }
 
+        String agentId = params.get("agentId");
         CsConversation conversation = conversationService.createConversation(
-                appId, userId, userName, source, userIp, userAgent, deviceId, userLang);
+                appId, userId, userName, source, userIp, userAgent, deviceId, userLang, agentId);
         return Result.OK(conversation);
     }
 
@@ -503,9 +504,10 @@ public class CsConversationController extends JeecgController<CsConversation, IC
     // ==================== 评价 ====================
 
     /**
-     * 评价会话
+     * 评价会话（用户端调用，免登录）
      */
     @Operation(summary = "评价会话")
+    @org.jeecg.config.shiro.IgnoreAuth
     @PostMapping("/{id}/rate")
     public Result<String> rate(@PathVariable String id, @RequestBody Map<String, Object> params) {
         Integer satisfaction = (Integer) params.get("satisfaction");
@@ -513,5 +515,31 @@ public class CsConversationController extends JeecgController<CsConversation, IC
         
         conversationService.rateConversation(id, satisfaction, comment);
         return Result.OK("评价成功");
+    }
+
+    /**
+     * 推送满意度评价给用户
+     */
+    @Operation(summary = "推送满意度评价给用户")
+    @PostMapping("/{id}/push-satisfaction")
+    public Result<String> pushSatisfaction(@PathVariable String id) {
+        CsConversation conversation = conversationService.getById(id);
+        if (conversation == null) {
+            return Result.error("会话不存在");
+        }
+        if (conversation.getStatus() == CsConversation.STATUS_CLOSED) {
+            return Result.error("会话已结束，无法推送评价");
+        }
+        if (conversation.getSatisfaction() != null && conversation.getSatisfaction() > 0) {
+            return Result.error("该会话已有评价");
+        }
+
+        // 通过 WebSocket 推送满意度评价给用户
+        Map<String, Object> extra = new HashMap<>();
+        extra.put("conversationId", id);
+        conversationService.notifyUser(id, "satisfaction_survey", "请对本次服务进行评价", extra);
+
+        log.info("[CS-Conversation] 推送满意度评价: conversationId={}", id);
+        return Result.OK("已推送满意度评价");
     }
 }

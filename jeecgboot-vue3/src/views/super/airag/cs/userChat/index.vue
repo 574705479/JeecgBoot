@@ -7,11 +7,23 @@
     <template v-else>
       <!-- 留言板模式（无在线客服时显示） -->
       <div v-if="showLeaveMessageBoard" class="leave-message-board">
-        <div class="board-header">
-          <img class="app-avatar" :src="appInfo.avatar || defaultAvatar" />
-          <div class="board-title">
-            <span class="app-name">{{ appInfo.name || '在线客服' }}</span>
-            <span class="board-subtitle">{{ messageBoardConfig.subtitle || '客服不在线，请留言' }}</span>
+        <div class="board-header" :style="headerStyle">
+          <div class="header-info">
+            <img class="app-avatar" :src="chatWindowConfig.logo ? resolveFileUrl(chatWindowConfig.logo) : (appInfo.avatar || defaultAvatar)" />
+            <div class="app-info">
+              <span class="app-name">{{ chatWindowConfig.pageTitle || appInfo.name || '在线客服' }}</span>
+              <span class="board-subtitle">{{ messageBoardConfig.subtitle || '客服不在线，请留言' }}</span>
+            </div>
+          </div>
+          <div class="header-icons" v-if="chatWindowConfig.headerIcons?.length">
+            <a v-for="(item, idx) in chatWindowConfig.headerIcons" :key="idx"
+               :href="item.link || '#'" target="_blank" rel="noopener" class="header-icon-item">
+              <img v-if="item.icon" :src="resolveFileUrl(item.icon)"
+                   :class="['header-icon-img', { 'header-icon-transparent': item.transparent }]"
+                   :style="{ width: (item.size || 32) + 'px', height: (item.size || 32) + 'px' }" />
+              <span class="header-icon-name"
+                    :style="{ fontSize: Math.max(10, Math.round((item.size || 32) * 0.35)) + 'px', maxWidth: Math.max(40, (item.size || 32) * 1.8) + 'px' }">{{ item.name }}</span>
+            </a>
           </div>
         </div>
         <div class="board-body">
@@ -52,22 +64,9 @@
 
       <!-- 正常聊天模式 -->
       <template v-else>
-      <div class="chat-main-layout" :style="dynamicCssVars">
-      <div class="chat-main-column">
-      <!-- 留言回复提醒卡片 -->
-      <div v-if="unreadReplies.length > 0" class="leave-message-replies">
-        <div v-for="reply in unreadReplies" :key="reply.id" class="reply-card">
-          <div class="reply-header">
-            <span class="reply-label">留言回复</span>
-            <a-button type="link" size="small" @click="dismissReply(reply.id)">关闭</a-button>
-          </div>
-          <div class="reply-original">您的留言：{{ reply.content || '-' }}</div>
-          <div class="reply-content">客服回复：{{ reply.reply }}</div>
-          <div class="reply-time">{{ reply.replyTime }}</div>
-        </div>
-      </div>
-      <!-- 头部 -->
-      <div class="chat-header" v-if="chatWindowConfig.headerVisible !== false" :style="{ background: chatWindowConfig.themeColor || '#667eea' }">
+      <div class="chat-outer-layout" :style="dynamicCssVars">
+      <!-- 全宽头部（在 chat-main-layout 之上） -->
+      <div class="chat-header" v-if="chatWindowConfig.headerVisible !== false" :style="headerStyle">
         <div class="header-info">
           <img class="app-avatar" :src="chatWindowConfig.logo ? resolveFileUrl(chatWindowConfig.logo) : (appInfo.avatar || defaultAvatar)" />
           <div class="app-info">
@@ -80,14 +79,37 @@
             </span>
           </div>
         </div>
-        <div class="header-actions">
+        <div class="header-icons" v-if="chatWindowConfig.headerIcons?.length">
+          <a v-for="(item, idx) in chatWindowConfig.headerIcons" :key="idx"
+             :href="item.link || '#'" target="_blank" rel="noopener" class="header-icon-item">
+            <img v-if="item.icon" :src="resolveFileUrl(item.icon)"
+                 :class="['header-icon-img', { 'header-icon-transparent': item.transparent }]"
+                 :style="{ width: (item.size || 32) + 'px', height: (item.size || 32) + 'px' }" />
+            <span class="header-icon-name"
+                  :style="{ fontSize: Math.max(10, Math.round((item.size || 32) * 0.35)) + 'px', maxWidth: Math.max(40, (item.size || 32) * 1.8) + 'px' }">{{ item.name }}</span>
+          </a>
         </div>
       </div>
+      <!-- 主内容区域 -->
+      <div class="chat-main-layout">
+      <div class="chat-main-column">
       <!-- 滚动文字（跑马灯） -->
       <div v-if="chatWindowConfig.scrollText" class="scroll-text-bar"
            :style="{ background: chatWindowConfig.scrollTextBgColor || '#1890ff', color: chatWindowConfig.scrollTextColor || '#fff' }">
         <div class="scroll-text-content" :style="{ animationDuration: (chatWindowConfig.scrollDuration || 15) + 's' }">
           {{ chatWindowConfig.scrollText }}
+        </div>
+      </div>
+      <!-- 留言回复提醒卡片 -->
+      <div v-if="unreadReplies.length > 0" class="leave-message-replies">
+        <div v-for="reply in unreadReplies" :key="reply.id" class="reply-card">
+          <div class="reply-header">
+            <span class="reply-label">留言回复</span>
+            <a-button type="link" size="small" @click="dismissReply(reply.id)">关闭</a-button>
+          </div>
+          <div class="reply-original">您的留言：{{ reply.content || '-' }}</div>
+          <div class="reply-content">客服回复：{{ reply.reply }}</div>
+          <div class="reply-time">{{ reply.replyTime }}</div>
         </div>
       </div>
 
@@ -319,8 +341,50 @@
         </div>
       </div>
       </div><!-- chat-main-layout end -->
+      </div><!-- chat-outer-layout end -->
       </template><!-- 正常聊天模式 end -->
     </template>
+
+    <!-- 满意度评价弹窗 -->
+    <div v-if="showSatisfactionModal" class="satisfaction-overlay" @click.self="showSatisfactionModal = false">
+      <div class="satisfaction-modal">
+        <div class="satisfaction-header">
+          <span>服务评价</span>
+          <span class="satisfaction-close" @click="showSatisfactionModal = false">&times;</span>
+        </div>
+        <div class="satisfaction-body">
+          <div class="satisfaction-tip">请对本次服务进行评价</div>
+          <div class="satisfaction-stars">
+            <span
+              v-for="star in 5"
+              :key="star"
+              class="star-item"
+              :class="{ active: star <= satisfactionRating }"
+              @click="satisfactionRating = star"
+            >★</span>
+          </div>
+          <div class="satisfaction-labels">
+            <span v-if="satisfactionRating === 1">非常不满意</span>
+            <span v-else-if="satisfactionRating === 2">不满意</span>
+            <span v-else-if="satisfactionRating === 3">一般</span>
+            <span v-else-if="satisfactionRating === 4">满意</span>
+            <span v-else-if="satisfactionRating === 5">非常满意</span>
+            <span v-else>请点击星星评分</span>
+          </div>
+          <textarea
+            v-model="satisfactionComment"
+            class="satisfaction-textarea"
+            placeholder="请输入您的评价（选填）"
+            rows="3"
+          ></textarea>
+        </div>
+        <div class="satisfaction-footer">
+          <button class="satisfaction-btn-submit" @click="submitSatisfaction" :disabled="satisfactionSubmitting || satisfactionRating === 0">
+            {{ satisfactionSubmitting ? '提交中...' : '提交评价' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -349,6 +413,7 @@ const rawVisitorToken = ref('');
 let tokenValidateTimer: number | null = null;
 const tokenRequired = ref(true); // Token验证开关，默认需要
 const appKey = ref(''); // 接入密钥（免Token模式下从URL ?key= 读取）
+const preferredAgentId = ref(''); // 指定客服ID（可选，URL ?agentId= 读取）
 const fatalError = ref(false);
 const fatalErrorMessage = ref('token无效或已过期，请回到第三方应用重新打开');
 function getQueryParam(name: string) {
@@ -440,6 +505,8 @@ const chatWindowConfig = reactive({
   scrollTextColor: '#ffffff',
   scrollTextBgColor: '#1890ff',
   backgroundImage: '',
+  headerBgImage: '',
+  headerIcons: [] as Array<{ icon: string; name: string; link: string; size: number; transparent: boolean }>,
   pcAdLink: '',
   pcAdImage: '',
   faqEnabled: false,
@@ -448,6 +515,17 @@ const chatWindowConfig = reactive({
 
 // FAQ展开状态（手机端）
 const faqMobileExpanded = ref(false);
+
+// 头部样式（支持背景图）
+const headerStyle = computed(() => {
+  const s: any = { background: chatWindowConfig.themeColor || '#667eea' };
+  if (chatWindowConfig.headerBgImage) {
+    s.backgroundImage = `url(${resolveFileUrl(chatWindowConfig.headerBgImage)})`;
+    s.backgroundSize = 'cover';
+    s.backgroundPosition = 'center';
+  }
+  return s;
+});
 
 // CSS变量
 const dynamicCssVars = computed(() => ({
@@ -487,6 +565,13 @@ async function loadChatWindowConfig() {
         (chatWindowConfig as any)[k] = parsed[k];
       }
     });
+    // 确保数组字段
+    if (!Array.isArray(chatWindowConfig.headerIcons)) {
+      chatWindowConfig.headerIcons = [];
+    }
+    if (!Array.isArray(chatWindowConfig.faqList)) {
+      chatWindowConfig.faqList = [];
+    }
     // 设置页面标题
     if (chatWindowConfig.pageTitle) {
       document.title = chatWindowConfig.pageTitle;
@@ -789,6 +874,47 @@ const conversationClosed = ref(false);  // 会话是否已结束
 const replyMode = ref(0);  // 回复模式: 0=AI自动, 1=手动
 const hasAgent = ref(false);  // 是否有客服接入
 
+// ==================== 满意度评价 ====================
+const showSatisfactionModal = ref(false);
+const satisfactionRating = ref(0);
+const satisfactionComment = ref('');
+const satisfactionSubmitting = ref(false);
+const satisfactionConversationId = ref('');
+
+async function submitSatisfaction() {
+  if (satisfactionRating.value === 0) return;
+  satisfactionSubmitting.value = true;
+  try {
+    const cid = satisfactionConversationId.value || conversationId.value;
+    await defHttp.post(
+      {
+        url: `/cs/conversation/${cid}/rate`,
+        headers: buildAuthHeaders({}),
+        data: {
+          satisfaction: satisfactionRating.value,
+          comment: satisfactionComment.value,
+        },
+      },
+      { ...silentRequestOptions, isTransformResponse: false },
+    );
+    showSatisfactionModal.value = false;
+    satisfactionRating.value = 0;
+    satisfactionComment.value = '';
+    messages.value.push({
+      id: Date.now().toString(),
+      content: '感谢您的评价！',
+      senderType: 3,
+      createTime: new Date().toISOString(),
+    });
+    scrollToBottom();
+  } catch (e: any) {
+    console.error('[UserChat] 提交评价失败', e);
+    message.error(e?.message || '提交评价失败，请重试');
+  } finally {
+    satisfactionSubmitting.value = false;
+  }
+}
+
 // 留言板相关
 const showLeaveMessageBoard = ref(false);  // 是否显示留言板
 const messageBoardConfig = ref<any>({ subtitle: '客服不在线，请留言', fields: {} });
@@ -832,6 +958,12 @@ onMounted(async () => {
     }
   } catch {
     // 查询失败默认需要Token
+  }
+
+  // 读取指定客服ID参数
+  const agentIdFromUrl = getQueryParam('agentId');
+  if (agentIdFromUrl) {
+    preferredAgentId.value = agentIdFromUrl;
   }
 
   // 读取接入密钥参数
@@ -1311,14 +1443,18 @@ async function initConversation() {
     }
 
     // 创建新会话（后端会自动分配客服），附带设备指纹
+    const createData: any = {
+      userId: userId.value,
+      userName: userName.value,
+      deviceId: generateDeviceId(),
+      lang: navigator.language || navigator.userLanguage || 'en',
+    };
+    if (preferredAgentId.value) {
+      createData.agentId = preferredAgentId.value;
+    }
     const res = await httpPost({
       url: '/cs/conversation/create',
-      data: {
-        userId: userId.value,
-        userName: userName.value,
-        deviceId: generateDeviceId(),
-        lang: navigator.language || navigator.userLanguage || 'en',
-      },
+      data: createData,
     });
     if (res) {
       const conv = res.result || res;
@@ -1844,6 +1980,13 @@ function handleWsMessage(data: any) {
       scrollToBottom();
       break;
 
+    case 'satisfaction_survey':
+      // 客服推送满意度评价
+      console.log('[UserChat] 收到满意度评价推送');
+      showSatisfactionModal.value = true;
+      satisfactionConversationId.value = data.extra?.conversationId || data.conversationId || conversationId.value;
+      break;
+
     case 'pong':
       // 心跳响应
       break;
@@ -2093,39 +2236,43 @@ function isMessagesAtBottom() {
   return el.scrollHeight - (el.scrollTop + el.clientHeight) <= threshold;
 }
 
+function getTimezoneOption(): string | undefined {
+  return chatWindowConfig.visitorTimezone === 'Asia/Shanghai' ? 'Asia/Shanghai' : undefined;
+}
+
 function getDateKey(time: string | Date) {
   if (!time) return '';
   const date = new Date(time);
   if (Number.isNaN(date.getTime())) return '';
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  const tz = getTimezoneOption();
+  // 使用配置的时区获取年月日，避免浏览器本地时区导致日期错误
+  const parts = date.toLocaleDateString('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: tz });
+  return parts; // 格式: YYYY-MM-DD
 }
 
 function formatDateSeparator(time: string | Date) {
   if (!time) return '';
   const date = new Date(time);
   if (Number.isNaN(date.getTime())) return '';
-  const today = new Date();
+  const tz = getTimezoneOption();
   const dateKey = getDateKey(date);
-  const todayKey = getDateKey(today);
+  const todayKey = getDateKey(new Date());
   if (dateKey === todayKey) return '今天';
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
   if (dateKey === getDateKey(yesterday)) return '昨天';
-  return date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+  return date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: tz });
 }
 
-// 格式化时间（根据聊天窗口配置的时区）
+// 格式化时间（根据聊天窗口配置的时区，带年月日）
 function formatTime(time: string | Date) {
   if (!time) return '';
   const date = new Date(time);
-  if (chatWindowConfig.visitorTimezone === 'Asia/Shanghai') {
-    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Shanghai' });
-  }
-  // 自动跟随访客时区
-  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  if (Number.isNaN(date.getTime())) return '';
+  const tz = getTimezoneOption();
+  const datePart = date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: tz });
+  const timePart = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', timeZone: tz });
+  return `${datePart} ${timePart}`;
 }
 
 // 判断是否是用户消息
@@ -2255,9 +2402,16 @@ watch(messages, () => {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  max-width: 1100px;
-  margin: 0 auto;
+  width: 100%;
   background: #f5f5f5;
+}
+
+.chat-outer-layout {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .chat-main-layout {
@@ -2290,14 +2444,12 @@ watch(messages, () => {
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding: 8px;
 }
 .ad-sidebar-img {
   width: 100%;
-  max-height: 300px;
-  object-fit: contain;
-  border-radius: 4px;
+  object-fit: cover;
   cursor: pointer;
+  display: block;
 }
 .sidebar-faq {
   flex: 1;
@@ -2391,6 +2543,9 @@ watch(messages, () => {
   .faq-mobile-section {
     display: block;
   }
+  .chat-header .header-icons {
+    display: none;
+  }
 }
 
 /* 滚动文字跑马灯 */
@@ -2421,33 +2576,78 @@ watch(messages, () => {
   .board-header {
     display: flex;
     align-items: center;
-    padding: 16px 20px;
-    border-bottom: 1px solid #f0f0f0;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: #667eea;
+    background-size: cover;
+    background-position: center;
     color: #fff;
+    min-height: 56px;
     
-    .app-avatar {
-      width: 48px;
-      height: 48px;
-      border-radius: 50%;
-      margin-right: 12px;
-      object-fit: cover;
+    .header-info {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex: 1;
+      min-width: 0;
     }
     
-    .board-title {
+    .app-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      object-fit: cover;
+      flex-shrink: 0;
+    }
+    
+    .app-info {
       display: flex;
       flex-direction: column;
-      
-      .app-name {
-        font-size: 16px;
-        font-weight: 600;
-      }
-      
-      .board-subtitle {
-        font-size: 13px;
-        opacity: 0.9;
-        margin-top: 2px;
-      }
+      min-width: 0;
+    }
+    
+    .app-name {
+      font-size: 15px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    
+    .board-subtitle {
+      font-size: 12px;
+      opacity: 0.85;
+      margin-top: 2px;
+    }
+    
+    .header-icons {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+    
+    .header-icon-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-decoration: none;
+      color: #fff;
+    }
+    
+    .header-icon-img {
+      object-fit: contain;
+    }
+    
+    .header-icon-transparent {
+      background: transparent;
+    }
+    
+    .header-icon-name {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-align: center;
     }
   }
   
@@ -2575,14 +2775,49 @@ watch(messages, () => {
     }
   }
 
-  .header-actions {
-    font-size: 18px;
-    cursor: pointer;
-    opacity: 0.8;
-    
+  .header-icons {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+  }
+
+  .header-icon-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-decoration: none;
+    color: #fff;
+    gap: 4px;
+    transition: opacity 0.2s;
+
     &:hover {
-      opacity: 1;
+      opacity: 0.85;
     }
+  }
+
+  .header-icon-img {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1.5px solid rgba(255, 255, 255, 0.4);
+
+    &.header-icon-transparent {
+      border: none;
+      border-radius: 0;
+      background: transparent;
+    }
+  }
+
+  .header-icon-name {
+    font-size: 11px;
+    opacity: 0.9;
+    max-width: 56px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: center;
   }
 }
 
@@ -3110,6 +3345,148 @@ watch(messages, () => {
     padding: 0 32px;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     border: none;
+  }
+}
+
+/* ==================== 满意度评价弹窗 ==================== */
+.satisfaction-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.satisfaction-modal {
+  background: #fff;
+  border-radius: 12px;
+  width: 340px;
+  max-width: 90vw;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+  animation: slideUp 0.25s ease;
+}
+
+@keyframes slideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.satisfaction-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  font-size: 16px;
+  font-weight: 600;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.satisfaction-close {
+  cursor: pointer;
+  font-size: 20px;
+  color: #999;
+  line-height: 1;
+  
+  &:hover {
+    color: #333;
+  }
+}
+
+.satisfaction-body {
+  padding: 20px;
+  text-align: center;
+}
+
+.satisfaction-tip {
+  font-size: 14px;
+  color: #666;
+  margin-bottom: 16px;
+}
+
+.satisfaction-stars {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.star-item {
+  font-size: 32px;
+  cursor: pointer;
+  color: #d9d9d9;
+  transition: color 0.2s, transform 0.15s;
+  
+  &:hover {
+    transform: scale(1.15);
+  }
+  
+  &.active {
+    color: #faad14;
+  }
+}
+
+.satisfaction-labels {
+  font-size: 13px;
+  color: #999;
+  margin-bottom: 14px;
+  height: 20px;
+}
+
+.satisfaction-textarea {
+  width: 100%;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  resize: none;
+  outline: none;
+  transition: border-color 0.2s;
+  
+  &:focus {
+    border-color: #667eea;
+  }
+  
+  &::placeholder {
+    color: #bfbfbf;
+  }
+}
+
+.satisfaction-footer {
+  padding: 12px 20px 20px;
+  text-align: center;
+}
+
+.satisfaction-btn-submit {
+  width: 100%;
+  height: 40px;
+  border: none;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.2s;
+  
+  &:hover {
+    opacity: 0.9;
+  }
+  
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 }
 </style>

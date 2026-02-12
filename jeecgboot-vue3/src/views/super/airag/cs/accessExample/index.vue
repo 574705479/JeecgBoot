@@ -30,6 +30,13 @@
           <div class="step-title">1) {{ tokenMode ? '填写用户参数' : '填写可选参数' }}</div>
           <div class="step-body">
             <div class="form">
+              <div class="field">
+                <span class="label">访问地址（baseUrl）</span>
+                <div style="display:flex;gap:8px">
+                  <a-select v-model:value="baseUrl" style="flex:1" :options="domainOptions.map(d => ({ label: d, value: d }))" />
+                  <a-input v-model:value="baseUrl" placeholder="或手动输入" style="width:200px" />
+                </div>
+              </div>
               <div class="field" v-if="tokenMode">
                 <span class="label">externalUserId（第三方用户唯一标识）</span>
                 <a-input v-model:value="externalUserId" placeholder="第三方用户唯一标识" />
@@ -41,6 +48,10 @@
               <div class="field">
                 <span class="label">source（第三方系统标识{{ tokenMode ? '，用于避免ID冲突' : '，可选'}}）</span>
                 <a-input v-model:value="source" placeholder="第三方系统标识" />
+              </div>
+              <div class="field">
+                <span class="label">agentId（指定客服ID，可选，填写后访客将直接接入该客服）</span>
+                <a-input v-model:value="agentId" placeholder="客服ID（可选）" />
               </div>
               <div class="field">
                 <span class="label">{{ tokenMode ? 'X-App-Secret（全局接入密钥，后端保存）' : '接入密钥 key（免Token模式下通过 ?key= 传递）' }}</span>
@@ -124,7 +135,133 @@ expireAt: {{ expireAt || '' }}</pre>
             <div class="doc-viewer markdown-body" v-html="accessDocIframeHtml"></div>
           </a-tab-pane>
           <a-tab-pane key="widget" tab="右下角挂件">
-            <div class="doc-viewer markdown-body" v-html="accessDocWidgetHtml"></div>
+            <div class="widget-configurator">
+              <!-- 挂件配置器 -->
+              <div class="wc-section">
+                <div class="wc-title">挂件外观配置</div>
+                <div class="wc-grid">
+                  <div class="wc-field">
+                    <span class="wc-label">按钮尺寸</span>
+                    <a-input-number v-model:value="wc.buttonSize" :min="32" :max="120" size="small" /> <span class="wc-unit">px</span>
+                  </div>
+                  <div class="wc-field">
+                    <span class="wc-label">按钮颜色</span>
+                    <input type="color" v-model="wc.buttonColor" class="wc-color" />
+                  </div>
+                  <div class="wc-field">
+                    <span class="wc-label">按钮圆角</span>
+                    <a-input-number v-model:value="wc.buttonBorderRadius" :min="0" :max="100" size="small" /> <span class="wc-unit">px</span>
+                  </div>
+                  <div class="wc-field" style="flex-wrap:wrap">
+                    <span class="wc-label">自定义图标</span>
+                    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                      <a-input v-model:value="wc.buttonIcon" placeholder="图标URL地址" size="small" style="width:180px" />
+                      <a-upload
+                        :showUploadList="false"
+                        :customRequest="customIconUpload"
+                        accept="image/png,image/jpeg,image/gif,image/svg+xml,image/x-icon,image/webp"
+                      >
+                        <a-button size="small" :loading="iconUploading">上传图标</a-button>
+                      </a-upload>
+                      <img v-if="wc.buttonIcon" :src="resolveUrl(wc.buttonIcon)" style="width:26px;height:26px;object-fit:contain;border:1px solid #eee;border-radius:4px" />
+                      <a-button v-if="wc.buttonIcon" size="small" danger @click="wc.buttonIcon = ''">清除</a-button>
+                    </div>
+                  </div>
+                  <div class="wc-field">
+                    <span class="wc-label">按钮文字</span>
+                    <a-input v-model:value="wc.buttonText" placeholder="无图标时显示" size="small" style="width:120px" />
+                  </div>
+                  <div class="wc-field">
+                    <span class="wc-label">定位位置</span>
+                    <a-radio-group v-model:value="wc.positionMode" size="small">
+                      <a-radio-button value="rightBottom">右下</a-radio-button>
+                      <a-radio-button value="leftBottom">左下</a-radio-button>
+                      <a-radio-button value="rightTop">右上</a-radio-button>
+                      <a-radio-button value="leftTop">左上</a-radio-button>
+                    </a-radio-group>
+                  </div>
+                  <div class="wc-field" v-if="wc.positionMode.includes('right')">
+                    <span class="wc-label">距右</span>
+                    <a-input-number v-model:value="wc.positionRight" :min="0" :max="500" size="small" /> <span class="wc-unit">px</span>
+                  </div>
+                  <div class="wc-field" v-if="wc.positionMode.includes('left')">
+                    <span class="wc-label">距左</span>
+                    <a-input-number v-model:value="wc.positionLeft" :min="0" :max="500" size="small" /> <span class="wc-unit">px</span>
+                  </div>
+                  <div class="wc-field" v-if="wc.positionMode.includes('Bottom')">
+                    <span class="wc-label">距下</span>
+                    <a-input-number v-model:value="wc.positionBottom" :min="0" :max="500" size="small" /> <span class="wc-unit">px</span>
+                  </div>
+                  <div class="wc-field" v-if="wc.positionMode.includes('Top')">
+                    <span class="wc-label">距上</span>
+                    <a-input-number v-model:value="wc.positionTop" :min="0" :max="500" size="small" /> <span class="wc-unit">px</span>
+                  </div>
+                  <div class="wc-field">
+                    <span class="wc-label">弹窗标题</span>
+                    <a-input v-model:value="wc.panelTitle" size="small" style="width:140px" />
+                  </div>
+                  <div class="wc-field">
+                    <span class="wc-label">弹窗主题色</span>
+                    <input type="color" v-model="wc.panelColor" class="wc-color" />
+                  </div>
+                  <div class="wc-field">
+                    <span class="wc-label">弹窗宽度</span>
+                    <a-input-number v-model:value="wc.panelWidth" :min="300" :max="800" size="small" /> <span class="wc-unit">px</span>
+                  </div>
+                  <div class="wc-field">
+                    <span class="wc-label">弹窗高度</span>
+                    <a-input-number v-model:value="wc.panelHeight" :min="400" :max="900" size="small" /> <span class="wc-unit">px</span>
+                  </div>
+                  <div class="wc-field">
+                    <span class="wc-label">z-index</span>
+                    <a-input-number v-model:value="wc.zIndex" :min="1" :max="99999" size="small" />
+                  </div>
+                </div>
+              </div>
+              <!-- 实时预览 -->
+              <div class="wc-section">
+                <div class="wc-title">实时预览</div>
+                <div class="wc-preview-window">
+                  <div class="wc-preview-titlebar">
+                    <span class="wc-dot" style="background:#ff5f57"></span>
+                    <span class="wc-dot" style="background:#febc2e"></span>
+                    <span class="wc-dot" style="background:#28c840"></span>
+                    <span style="margin-left:8px;font-size:11px;color:#999">example.com</span>
+                  </div>
+                  <div class="wc-preview-content">
+                    <div class="wc-preview-text">第三方网站页面</div>
+                    <div
+                      class="wc-preview-btn"
+                      :style="{
+                        width: Math.min(wc.buttonSize, 56) + 'px',
+                        height: Math.min(wc.buttonSize, 56) + 'px',
+                        borderRadius: Math.min(wc.buttonBorderRadius, 28) + 'px',
+                        background: wc.buttonColor,
+                        right: wc.positionMode.includes('right') ? Math.round(wc.positionRight / 10) + 'px' : 'auto',
+                        left: wc.positionMode.includes('left') ? Math.round(wc.positionLeft / 10) + 'px' : 'auto',
+                        bottom: wc.positionMode.includes('Bottom') ? Math.round(wc.positionBottom / 10) + 'px' : 'auto',
+                        top: wc.positionMode.includes('Top') ? Math.round(wc.positionTop / 10) + 'px' : 'auto',
+                      }"
+                    >
+                      <img v-if="wc.buttonIcon" :src="resolveUrl(wc.buttonIcon)" style="width:60%;height:60%;object-fit:contain" />
+                      <span v-else-if="wc.buttonText" style="font-size:10px;color:#fff">{{ wc.buttonText }}</span>
+                      <svg v-else xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:50%;height:50%;color:#fff">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke-linecap="round" stroke-linejoin="round"/>
+                      </svg>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <!-- 生成的嵌入代码 -->
+              <div class="wc-section">
+                <div class="wc-title">嵌入代码</div>
+                <pre class="wc-code">{{ widgetEmbedCode }}</pre>
+                <div class="row" style="margin-top:8px">
+                  <a-button type="primary" size="small" @click="copyWidgetCode">复制代码</a-button>
+                  <a-button size="small" @click="downloadWidgetHtml">下载演示HTML</a-button>
+                </div>
+              </div>
+            </div>
           </a-tab-pane>
         </a-tabs>
       </section>
@@ -172,19 +309,22 @@ expireAt: {{ expireAt || '' }}</pre>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { message } from 'ant-design-vue';
 import { defHttp } from '/@/utils/http/axios';
+import { uploadImg } from '/@/api/sys/upload';
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
 
-const baseUrl = window.location.origin;
+const baseUrl = ref(window.location.origin);
+const domainOptions = ref<string[]>([]);
 const tokenMode = ref(true); // true=Token模式, false=免Token模式
 const loadingMode = ref(true); // 正在查询模式
 const externalUserId = ref('U1001');
 const userName = ref('Tom');
 const source = ref('partnerA');
 const secretKey = ref('');
+const agentId = ref('');
 const token = ref('');
 const expireAt = ref(0);
 const loading = ref(false);
@@ -193,7 +333,48 @@ const backendTokenLoading = ref(false);
 const tokenDocTab = ref('curl');
 const accessType = ref('url');
 
+// 挂件可视化配置（纯前端状态）
+const wc = reactive({
+  buttonSize: 56,
+  buttonColor: '#4c6ef5',
+  buttonIcon: '',
+  buttonText: '',
+  buttonBorderRadius: 28,
+  positionMode: 'rightBottom' as 'rightBottom' | 'leftBottom' | 'rightTop' | 'leftTop',
+  positionRight: 24,
+  positionBottom: 24,
+  positionLeft: 24,
+  positionTop: 24,
+  panelWidth: 420,
+  panelHeight: 640,
+  panelTitle: '在线客服',
+  panelColor: '#4c6ef5',
+  zIndex: 9999,
+});
+
 onMounted(async () => {
+  // 加载域名配置
+  try {
+    const domainRes = await defHttp.get(
+      { url: '/cs/domain/get' },
+      { successMessageMode: 'none', isTransformResponse: false },
+    );
+    const domainData = domainRes?.result || domainRes;
+    if (domainData?.domains) {
+      const lines = domainData.domains.split('\n').map((s: string) => s.trim()).filter((s: string) => s);
+      const normalized = lines.map((d: string) => {
+        if (!/^https?:\/\//i.test(d)) return 'https://' + d;
+        return d;
+      });
+      const allOptions = [window.location.origin, ...normalized];
+      domainOptions.value = [...new Set(allOptions)];
+    } else {
+      domainOptions.value = [window.location.origin];
+    }
+  } catch {
+    domainOptions.value = [window.location.origin];
+  }
+
   try {
     const res = await defHttp.get(
       { url: '/airag/cs/visitor/token/required' },
@@ -238,19 +419,54 @@ const md = new MarkdownIt({
 let widgetInstance: any = null;
 let widgetScriptEl: HTMLScriptElement | null = null;
 const widgetLoaded = ref(false);
+const iconUploading = ref(false);
+
+function resolveUrl(url: string) {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return url;
+  const base = (window as any)._JEECG_API_BASE_URL || import.meta.env.VITE_GLOB_DOMAIN_URL || '';
+  return base + '/' + url.replace(/^\//, '');
+}
+
+async function customIconUpload({ file, onSuccess, onError }: any) {
+  iconUploading.value = true;
+  try {
+    const res: any = await uploadImg({ file }, () => {});
+    // uploadImg 返回 axios response（isReturnResponse: true），真实数据在 res.data
+    const body = res?.data || res;
+    const data = body?.result || body;
+    const url = data?.url || data?.fileUrl || data?.path || data?.message;
+    if (url) {
+      wc.buttonIcon = url;
+      message.success('图标上传成功');
+      onSuccess?.(res);
+    } else {
+      message.error('图标上传失败：未获取到文件地址');
+      onError?.(new Error('no url'));
+    }
+  } catch (e) {
+    message.error('图标上传失败');
+    onError?.(e);
+  } finally {
+    iconUploading.value = false;
+  }
+}
 
 const accessUrl = computed(() => {
+  const base = baseUrl.value.replace(/\/$/, '');
   if (!tokenMode.value) {
-    // 免Token模式：拼接可选参数 + 接入密钥
     const params = new URLSearchParams();
     if (secretKey.value) params.set('key', secretKey.value);
     if (userName.value) params.set('userName', userName.value);
     if (source.value) params.set('source', source.value);
+    if (agentId.value) params.set('agentId', agentId.value);
     const qs = params.toString();
-    return `${baseUrl}/cs/userChat${qs ? '?' + qs : ''}`;
+    return `${base}/cs/userChat${qs ? '?' + qs : ''}`;
   }
   if (!token.value) {
-    return `${baseUrl}/cs/userChat?token=短时token&externalUserId=${externalUserId.value}&userName=${userName.value}&source=${source.value}`;
+    let url = `${base}/cs/userChat?token=短时token&externalUserId=${externalUserId.value}&userName=${userName.value}&source=${source.value}`;
+    if (agentId.value) url += `&agentId=${agentId.value}`;
+    return url;
   }
   const params = new URLSearchParams({
     token: token.value,
@@ -258,13 +474,14 @@ const accessUrl = computed(() => {
     userName: userName.value,
     source: source.value,
   });
-  return `${baseUrl}/cs/userChat?${params.toString()}`;
+  if (agentId.value) params.set('agentId', agentId.value);
+  return `${base}/cs/userChat?${params.toString()}`;
 });
 
 const tokenDocCurlMarkdown = computed(() => {
   return `
 \`\`\`bash
-curl -X POST "${baseUrl}/jeecgboot/airag/cs/visitor/token" \\
+curl -X POST "${baseUrl.value}/jeecgboot/airag/cs/visitor/token" \\
   -H "Content-Type: application/json" \\
   -H "X-App-Secret: YOUR_KEY" \\
   -d '{"externalUserId":"${externalUserId.value}","userName":"${userName.value}","source":"${source.value}"}'
@@ -287,7 +504,7 @@ public class CsTokenProxyController {
     headers.setContentType(MediaType.APPLICATION_JSON);
     headers.set("X-App-Secret", secret);
     HttpEntity<Map<String, Object>> req = new HttpEntity<>(body, headers);
-    String url = "${baseUrl}/jeecgboot/airag/cs/visitor/token";
+    String url = "${baseUrl.value}/jeecgboot/airag/cs/visitor/token";
     return rest.postForObject(url, req, Object.class);
   }
 }
@@ -300,7 +517,7 @@ const tokenDocPhpMarkdown = computed(() => {
 \`\`\`php
 $data = json_decode(file_get_contents("php://input"), true);
 $secret = getenv("JEECG_CS_SECRET") ?: "";
-$ch = curl_init("${baseUrl}/jeecgboot/airag/cs/visitor/token");
+$ch = curl_init("${baseUrl.value}/jeecgboot/airag/cs/visitor/token");
 curl_setopt_array($ch, [
   CURLOPT_RETURNTRANSFER => true,
   CURLOPT_POST => true,
@@ -322,7 +539,7 @@ const tokenDocNodeMarkdown = computed(() => {
   return `
 \`\`\`js
 app.post("/your-backend/visitor-token", async (req, res) => {
-  const resp = await fetch("${baseUrl}/jeecgboot/airag/cs/visitor/token", {
+  const resp = await fetch("${baseUrl.value}/jeecgboot/airag/cs/visitor/token", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -360,29 +577,30 @@ const tokenDocNodeHtml = computed(() => md.render(tokenDocNodeMarkdown.value));
 const tokenDocFrontendHtml = computed(() => md.render(tokenDocFrontendMarkdown.value));
 
 const accessDocUrlMarkdown = computed(() => {
+  const agentParam = agentId.value ? `&agentId=${encodeURIComponent(agentId.value)}` : '';
   if (!tokenMode.value) {
-    // 免Token模式
     const params: string[] = [];
     if (secretKey.value) params.push(`key=${encodeURIComponent(secretKey.value)}`);
     if (userName.value) params.push(`userName=${encodeURIComponent(userName.value)}`);
     if (source.value) params.push(`source=${encodeURIComponent(source.value)}`);
+    if (agentId.value) params.push(`agentId=${encodeURIComponent(agentId.value)}`);
     const freeUrl = params.length
-      ? `${baseUrl}/cs/userChat?${params.join('&')}`
-      : `${baseUrl}/cs/userChat`;
+      ? `${baseUrl.value}/cs/userChat?${params.join('&')}`
+      : `${baseUrl.value}/cs/userChat`;
     const keyNote = secretKey.value
       ? '免Token模式下需携带 `key` 参数（接入密钥）。系统自动使用设备码标识用户。'
       : '免Token模式下，访客直接通过URL访问，无需任何凭证。系统自动使用设备码标识用户。';
     const jsExample = secretKey.value
-      ? `window.location.href = "${baseUrl}/cs/userChat?key=" + encodeURIComponent("你的接入密钥");`
-      : `window.location.href = "${baseUrl}/cs/userChat";`;
+      ? `window.location.href = "${baseUrl.value}/cs/userChat?key=" + encodeURIComponent("你的接入密钥");`
+      : `window.location.href = "${baseUrl.value}/cs/userChat";`;
     return `
-${keyNote}
+${keyNote}${agentId.value ? ' 填写了 `agentId` 参数，访客将直接接入指定客服。' : ''}
 
 \`\`\`text
 ${freeUrl}
 \`\`\`
 
-${secretKey.value ? '必传参数：`key`（接入密钥）。可选参数' : '可选参数'}：\`userName\`（昵称）、\`source\`（来源标识）。
+${secretKey.value ? '必传参数：`key`（接入密钥）。可选参数' : '可选参数'}：\`userName\`（昵称）、\`source\`（来源标识）、\`agentId\`（指定客服）。
 
 \`\`\`js
 // 直接跳转即可，无需获取Token
@@ -391,7 +609,7 @@ ${jsExample}
 `;
   }
   const previewToken = token.value || '短时token';
-  const accessPreviewUrl = `${baseUrl}/cs/userChat?token=${encodeURIComponent(previewToken)}&externalUserId=${encodeURIComponent(externalUserId.value)}&userName=${encodeURIComponent(userName.value)}&source=${encodeURIComponent(source.value)}`;
+  const accessPreviewUrl = `${baseUrl.value}/cs/userChat?token=${encodeURIComponent(previewToken)}&externalUserId=${encodeURIComponent(externalUserId.value)}&userName=${encodeURIComponent(userName.value)}&source=${encodeURIComponent(source.value)}${agentParam}`;
   return `
 \`\`\`text
 ${accessPreviewUrl}
@@ -410,8 +628,8 @@ fetch("${backendTokenUrl.value}", {
   .then(r => r.json())
   .then(d => {
     const t = d.token || d.result?.token || "";
-    const url = "${baseUrl}/cs/userChat?token=" + encodeURIComponent(t)
-      + "&externalUserId=${externalUserId.value}&userName=${userName.value}&source=${source.value}";
+    const url = "${baseUrl.value}/cs/userChat?token=" + encodeURIComponent(t)
+      + "&externalUserId=${externalUserId.value}&userName=${userName.value}&source=${source.value}${agentParam}";
     window.location.href = url;
   });
 \`\`\`
@@ -419,10 +637,14 @@ fetch("${backendTokenUrl.value}", {
 });
 
 const accessDocIframeMarkdown = computed(() => {
+  const agentParam = agentId.value ? `&agentId=${encodeURIComponent(agentId.value)}` : '';
   if (!tokenMode.value) {
-    const freeUrl = secretKey.value
-      ? `${baseUrl}/cs/userChat?key=${encodeURIComponent(secretKey.value)}`
-      : `${baseUrl}/cs/userChat`;
+    const params: string[] = [];
+    if (secretKey.value) params.push(`key=${encodeURIComponent(secretKey.value)}`);
+    if (agentId.value) params.push(`agentId=${encodeURIComponent(agentId.value)}`);
+    const freeUrl = params.length
+      ? `${baseUrl.value}/cs/userChat?${params.join('&')}`
+      : `${baseUrl.value}/cs/userChat`;
     const note = secretKey.value ? '免Token模式下需携带 `key` 参数：' : '免Token模式下直接嵌入即可：';
     return `
 ${note}
@@ -433,7 +655,7 @@ ${note}
 `;
   }
   const previewToken = token.value || '短时token';
-  const accessPreviewUrl = `${baseUrl}/cs/userChat?token=${encodeURIComponent(previewToken)}&externalUserId=${encodeURIComponent(externalUserId.value)}&userName=${encodeURIComponent(userName.value)}&source=${encodeURIComponent(source.value)}`;
+  const accessPreviewUrl = `${baseUrl.value}/cs/userChat?token=${encodeURIComponent(previewToken)}&externalUserId=${encodeURIComponent(externalUserId.value)}&userName=${encodeURIComponent(userName.value)}&source=${encodeURIComponent(source.value)}${agentParam}`;
   return `
 \`\`\`html
 <iframe src="${accessPreviewUrl}" style="width:420px;height:640px;border:0;"></iframe>
@@ -452,58 +674,110 @@ fetch("${backendTokenUrl.value}", {
   .then(r => r.json())
   .then(d => {
     const t = d.token || d.result?.token || "";
-    const url = "${baseUrl}/cs/userChat?token=" + encodeURIComponent(t)
-      + "&externalUserId=${externalUserId.value}&userName=${userName.value}&source=${source.value}";
+    const url = "${baseUrl.value}/cs/userChat?token=" + encodeURIComponent(t)
+      + "&externalUserId=${externalUserId.value}&userName=${userName.value}&source=${source.value}${agentParam}";
     document.getElementById("cs-iframe").src = url;
   });
 \`\`\`
 `;
 });
 
-const accessDocWidgetMarkdown = computed(() => {
-  const scriptCloseTag = '</scr' + 'ipt>';
-  if (!tokenMode.value) {
-    const keyLine = secretKey.value ? `\n  key: "${secretKey.value}",       // 接入密钥（后台配置后必传）` : '';
-    return `
-免Token模式下，无需传入token相关参数${secretKey.value ? '，但需传入接入密钥' : ''}：
+// ============ 挂件嵌入代码生成 ============
+function buildWidgetOptionsCode() {
+  const lines: string[] = [];
+  if (wc.buttonSize !== 56) lines.push(`  buttonSize: ${wc.buttonSize},`);
+  if (wc.buttonColor !== '#4c6ef5') lines.push(`  buttonColor: "${wc.buttonColor}",`);
+  if (wc.buttonIcon) lines.push(`  buttonIcon: "${resolveUrl(wc.buttonIcon)}",`);
+  if (wc.buttonText) lines.push(`  buttonText: "${wc.buttonText}",`);
+  if (wc.buttonBorderRadius !== 28) lines.push(`  buttonBorderRadius: ${wc.buttonBorderRadius},`);
+  if (wc.panelWidth !== 420) lines.push(`  width: ${wc.panelWidth},`);
+  if (wc.panelHeight !== 640) lines.push(`  height: ${wc.panelHeight},`);
+  if (wc.panelTitle !== '在线客服') lines.push(`  title: "${wc.panelTitle}",`);
+  if (wc.panelColor !== '#4c6ef5') lines.push(`  panelColor: "${wc.panelColor}",`);
+  if (wc.zIndex !== 9999) lines.push(`  zIndex: ${wc.zIndex},`);
+  // 位置
+  const pos: string[] = [];
+  if (wc.positionMode.includes('right') && wc.positionRight !== 24) pos.push(`right: ${wc.positionRight}`);
+  if (wc.positionMode.includes('Bottom') && wc.positionBottom !== 24) pos.push(`bottom: ${wc.positionBottom}`);
+  if (wc.positionMode.includes('left')) pos.push(`left: ${wc.positionLeft}`);
+  if (wc.positionMode.includes('Top')) pos.push(`top: ${wc.positionTop}`);
+  if (pos.length) lines.push(`  position: { ${pos.join(', ')} },`);
+  return lines.length ? '\n' + lines.join('\n') : '';
+}
 
-\`\`\`html
-<script src="${baseUrl}/cs-widget.js">${scriptCloseTag}
+const widgetEmbedCode = computed(() => {
+  const scriptCloseTag = '</' + 'script>';
+  const opts = buildWidgetOptionsCode();
+  const agentLine = agentId.value ? `\n  agentId: "${agentId.value}",` : '';
+  if (!tokenMode.value) {
+    const keyLine = secretKey.value ? `\n  key: "${secretKey.value}",` : '';
+    return `<script src="${baseUrl.value}/cs-widget.js">${scriptCloseTag}
+<script>
 JeecgCsWidget.init({
-  baseUrl: "${baseUrl}",${keyLine}
-  userName: "${userName.value}",  // 可选
-  source: "${source.value}",     // 可选
+  baseUrl: "${baseUrl.value}",${keyLine}${agentLine}
+  userName: "${userName.value}",
+  source: "${source.value}",${opts}
 });
-\`\`\`
-`;
+${scriptCloseTag}`;
   }
-  return `
-\`\`\`html
-<script src="${baseUrl}/cs-widget.js">${scriptCloseTag}
+  return `<script src="${baseUrl.value}/cs-widget.js">${scriptCloseTag}
+<script>
 JeecgCsWidget.init({
-  baseUrl: "${baseUrl}",
+  baseUrl: "${baseUrl.value}",
   externalUserId: "${externalUserId.value}",
   userName: "${userName.value}",
-  source: "${source.value}",
-  getToken: () => fetch("/your-backend/visitor-token", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      externalUserId: "${externalUserId.value}",
-      userName: "${userName.value}",
-      source: "${source.value}"
-    })
-  })
-    .then(r => r.json())
-    .then(d => d.token || d.result?.token || "")
+  source: "${source.value}",${agentLine}${opts}
+  getToken: function() {
+    return fetch("/your-backend/visitor-token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        externalUserId: "${externalUserId.value}",
+        userName: "${userName.value}",
+        source: "${source.value}"
+      })
+    }).then(function(r){ return r.json(); })
+      .then(function(d){ return d.token || (d.result && d.result.token) || ""; });
+  }
 });
-\`\`\`
-`;
+${scriptCloseTag}`;
 });
+
+function copyWidgetCode() {
+  navigator.clipboard.writeText(widgetEmbedCode.value).then(() => {
+    message.success('挂件代码已复制到剪贴板');
+  }).catch(() => {
+    message.error('复制失败，请手动复制');
+  });
+}
+
+function downloadWidgetHtml() {
+  const html = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>客服挂件演示</title>
+  <style>
+    body { margin: 0; min-height: 100vh; background: #f7f8fa; display: flex; align-items: center; justify-content: center; font-family: sans-serif; color: #666; }
+  </style>
+</head>
+<body>
+  <h2>右下角会出现客服聊天挂件</h2>
+  ${widgetEmbedCode.value}
+</body>
+</html>`;
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'cs-widget-demo.html';
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 const accessDocUrlHtml = computed(() => md.render(accessDocUrlMarkdown.value));
 const accessDocIframeHtml = computed(() => md.render(accessDocIframeMarkdown.value));
-const accessDocWidgetHtml = computed(() => md.render(accessDocWidgetMarkdown.value));
 
 const faqDocMarkdown = computed(() => {
   return `
@@ -629,7 +903,7 @@ async function loadWidget() {
       return;
     }
     const opts: any = {
-      baseUrl,
+      baseUrl: baseUrl.value,
       userName: userName.value,
       source: source.value,
     };
@@ -640,6 +914,25 @@ async function loadWidget() {
     } else if (secretKey.value) {
       opts.key = secretKey.value;
     }
+    if (agentId.value) opts.agentId = agentId.value;
+    // 应用当前挂件配置
+    if (wc.buttonSize !== 56) opts.buttonSize = wc.buttonSize;
+    if (wc.buttonColor !== '#4c6ef5') opts.buttonColor = wc.buttonColor;
+    if (wc.buttonIcon) opts.buttonIcon = resolveUrl(wc.buttonIcon);
+    if (wc.buttonText) opts.buttonText = wc.buttonText;
+    if (wc.buttonBorderRadius !== 28) opts.buttonBorderRadius = wc.buttonBorderRadius;
+    if (wc.panelWidth !== 420) opts.width = wc.panelWidth;
+    if (wc.panelHeight !== 640) opts.height = wc.panelHeight;
+    if (wc.panelTitle !== '在线客服') opts.title = wc.panelTitle;
+    if (wc.panelColor !== '#4c6ef5') opts.panelColor = wc.panelColor;
+    if (wc.zIndex !== 9999) opts.zIndex = wc.zIndex;
+    const position: any = {};
+    if (wc.positionMode.includes('right') && wc.positionRight !== 24) position.right = wc.positionRight;
+    if (wc.positionMode.includes('Bottom') && wc.positionBottom !== 24) position.bottom = wc.positionBottom;
+    if (wc.positionMode.includes('left')) position.left = wc.positionLeft;
+    if (wc.positionMode.includes('Top')) position.top = wc.positionTop;
+    if (Object.keys(position).length) opts.position = position;
+
     widgetInstance = w.JeecgCsWidget.init(opts);
     widgetLoaded.value = true;
   } catch {
@@ -934,5 +1227,106 @@ onBeforeUnmount(() => {
   .preview-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* 挂件配置器 */
+.widget-configurator {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.wc-section {
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  padding: 12px 16px;
+  background: #fafafa;
+}
+.wc-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 10px;
+}
+.wc-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+.wc-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.wc-label {
+  font-size: 12px;
+  color: #666;
+  white-space: nowrap;
+  min-width: 70px;
+}
+.wc-unit {
+  font-size: 11px;
+  color: #999;
+}
+.wc-color {
+  width: 36px;
+  height: 26px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0;
+}
+.wc-preview-window {
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #f5f5f5;
+}
+.wc-preview-titlebar {
+  display: flex;
+  align-items: center;
+  padding: 6px 10px;
+  background: #e8e8e8;
+  gap: 4px;
+}
+.wc-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.wc-preview-content {
+  position: relative;
+  height: 200px;
+  background: #fafafa;
+  overflow: hidden;
+}
+.wc-preview-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 12px;
+  color: #ccc;
+}
+.wc-preview-btn {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0,0,0,.15);
+  transition: all .3s;
+  overflow: hidden;
+}
+.wc-code {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 12px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 </style>

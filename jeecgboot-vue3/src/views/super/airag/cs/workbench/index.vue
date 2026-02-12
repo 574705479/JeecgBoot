@@ -367,6 +367,11 @@
             <a-select-option :value="0">AI自动</a-select-option>
             <a-select-option :value="1">手动</a-select-option>
           </a-select>
+          <a-tooltip title="推送满意度评价">
+            <a-button size="small" @click="pushSatisfaction" v-if="currentConversation.status !== 2 && !isColleagueReadonly" :loading="satisfactionPushing" :disabled="satisfactionPushed">
+              <SmileOutlined /> {{ satisfactionPushed ? '已推送' : '评价' }}
+            </a-button>
+          </a-tooltip>
           <a-button size="small" @click="openTransferModal" v-if="currentConversation.status !== 2 && !isColleagueReadonly">
             <SwapOutlined /> 转接
           </a-button>
@@ -2815,6 +2820,36 @@ async function changeMode(mode: number) {
   }
 }
 
+// ==================== 满意度评价推送 ====================
+const satisfactionPushing = ref(false);
+const satisfactionPushed = ref(false);
+const satisfactionPushMap = ref<Record<string, boolean>>({});
+
+async function pushSatisfaction() {
+  if (!currentConversation.value) return;
+  const convId = currentConversation.value.id;
+  satisfactionPushing.value = true;
+  try {
+    await defHttp.post({ url: `/cs/conversation/${convId}/push-satisfaction` });
+    message.success('已推送满意度评价');
+    satisfactionPushed.value = true;
+    satisfactionPushMap.value[convId] = true;
+  } catch (e: any) {
+    message.error(e?.message || '推送失败');
+  } finally {
+    satisfactionPushing.value = false;
+  }
+}
+
+// 切换会话时重置推送状态
+watch(() => currentConversation.value?.id, (newId) => {
+  if (newId) {
+    satisfactionPushed.value = !!satisfactionPushMap.value[newId];
+  } else {
+    satisfactionPushed.value = false;
+  }
+});
+
 // 结束会话
 async function closeConversation() {
   if (!currentConversation.value) return;
@@ -3775,7 +3810,10 @@ function formatTime(time: string) {
 
 function formatMessageTime(time: string) {
   if (!time) return '';
-  return new Date(time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  const date = new Date(time);
+  const datePart = date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+  const timePart = date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  return `${datePart} ${timePart}`;
 }
 
 function formatDateTime(time: string) {

@@ -7,7 +7,7 @@ const dashboard: AppRouteModule = {
   path: '/dashboard',
   name: 'Dashboard',
   component: LAYOUT,
-  redirect: PageEnum.BASE_HOME,
+  redirect: '/dashboard/analysis',
   meta: {
     orderNo: 10,
     icon: 'ion:grid-outline',

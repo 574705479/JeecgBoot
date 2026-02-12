@@ -1,0 +1,201 @@
+package org.jeecg.modules.airag.cs.controller;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.extern.slf4j.Slf4j;
+import org.jeecg.common.api.vo.Result;
+import org.jeecg.modules.airag.cs.entity.CsAgent;
+import org.jeecg.modules.airag.cs.entity.CsConversation;
+import org.jeecg.modules.airag.cs.entity.CsLeaveMessage;
+import org.jeecg.modules.airag.cs.entity.CsVisitor;
+import org.jeecg.modules.airag.cs.service.ICsAgentService;
+import org.jeecg.modules.airag.cs.service.ICsConversationService;
+import org.jeecg.modules.airag.cs.service.ICsLeaveMessageService;
+import org.jeecg.modules.airag.cs.service.ICsVisitorService;
+import org.jeecg.modules.airag.cs.websocket.CsWebSocketSessionManager;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.*;
+import java.util.stream.Collectors;
+
+/**
+ * 首页仪表盘
+ *
+ * @author jeecg
+ * @date 2026-02-11
+ */
+@Slf4j
+@Tag(name = "首页仪表盘")
+@RestController
+@RequestMapping("/cs/dashboard")
+public class CsDashboardController {
+
+    @Autowired
+    private ICsConversationService conversationService;
+
+    @Autowired
+    private ICsAgentService agentService;
+
+    @Autowired
+    private ICsVisitorService visitorService;
+
+    @Autowired
+    private ICsLeaveMessageService leaveMessageService;
+
+    @Autowired
+    private CsWebSocketSessionManager sessionManager;
+
+    /**
+     * 首页综合统计数据
+     */
+    @Operation(summary = "首页综合统计数据")
+    @GetMapping("/stats")
+    public Result<Map<String, Object>> getStats() {
+        Map<String, Object> stats = new HashMap<>();
+
+        Date todayStart = getTodayStart();
+        Date todayEnd = getTodayEnd();
+
+        // 1. 实时对话量（进行中的对话）
+        long activeConversations = conversationService.count(
+                new LambdaQueryWrapper<CsConversation>()
+                        .ne(CsConversation::getStatus, CsConversation.STATUS_CLOSED));
+        stats.put("activeConversations", activeConversations);
+
+        // 2. 平均响应时长（秒）：今日 assignTime - createTime 的平均值
+        List<CsConversation> todayAssigned = conversationService.list(
+                new LambdaQueryWrapper<CsConversation>()
+                        .isNotNull(CsConversation::getAssignTime)
+                        .ge(CsConversation::getCreateTime, todayStart)
+                        .lt(CsConversation::getCreateTime, todayEnd));
+        double avgResponseTime = 0;
+        if (!todayAssigned.isEmpty()) {
+            long totalSeconds = 0;
+            int validCount = 0;
+            for (CsConversation c : todayAssigned) {
+                if (c.getAssignTime() != null && c.getCreateTime() != null) {
+                    long diff = (c.getAssignTime().getTime() - c.getCreateTime().getTime()) / 1000;
+                    if (diff >= 0) {
+                        totalSeconds += diff;
+                        validCount++;
+                    }
+                }
+            }
+            avgResponseTime = validCount > 0 ? (double) totalSeconds / validCount : 0;
+        }
+        stats.put("avgResponseTime", Math.round(avgResponseTime * 10) / 10.0);
+
+        // 3. 今日有效对话量（有消息交互的，messageCount > 0）
+        long todayEffective = conversationService.count(
+                new LambdaQueryWrapper<CsConversation>()
+                        .ge(CsConversation::getCreateTime, todayStart)
+                        .lt(CsConversation::getCreateTime, todayEnd)
+                        .gt(CsConversation::getMessageCount, 0));
+        stats.put("todayEffectiveConversations", todayEffective);
+
+        // 4. 今日访客量
+        long todayVisitors = visitorService.count(
+                new LambdaQueryWrapper<CsVisitor>()
+                        .ge(CsVisitor::getCreateTime, todayStart)
+                        .lt(CsVisitor::getCreateTime, todayEnd));
+        stats.put("todayVisitors", todayVisitors);
+
+        // 5. 今日对话量
+        long todayConversations = conversationService.count(
+                new LambdaQueryWrapper<CsConversation>()
+                        .ge(CsConversation::getCreateTime, todayStart)
+                        .lt(CsConversation::getCreateTime, todayEnd));
+        stats.put("todayConversations", todayConversations);
+
+        // 6. 今日留言量
+        long todayLeaveMessages = leaveMessageService.count(
+                new LambdaQueryWrapper<CsLeaveMessage>()
+                        .ge(CsLeaveMessage::getCreateTime, todayStart)
+                        .lt(CsLeaveMessage::getCreateTime, todayEnd));
+        stats.put("todayLeaveMessages", todayLeaveMessages);
+
+        // 7. 在线客服数 / 总客服数
+        int onlineAgents = sessionManager.getOnlineAgentCount();
+        long totalAgents = agentService.count(new LambdaQueryWrapper<CsAgent>()
+                .isNull(CsAgent::getParentAgentId).or().eq(CsAgent::getParentAgentId, ""));
+        stats.put("onlineAgents", onlineAgents);
+        stats.put("totalAgents", totalAgents);
+
+        return Result.OK(stats);
+    }
+
+    /**
+     * 坐席实时状态列表
+     */
+    @Operation(summary = "坐席实时状态列表")
+    @GetMapping("/agent-status")
+    public Result<List<Map<String, Object>>> getAgentStatus() {
+        // 查询所有客服（排除子客服，如果需要也可以包含）
+        List<CsAgent> agents = agentService.list(
+                new LambdaQueryWrapper<CsAgent>()
+                        .and(w -> w.isNull(CsAgent::getParentAgentId).or().eq(CsAgent::getParentAgentId, "")));
+
+        Date todayStart = getTodayStart();
+        Date todayEnd = getTodayEnd();
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (CsAgent agent : agents) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("agentId", agent.getId());
+            row.put("userId", agent.getUserId());
+            row.put("nickname", agent.getNickname());
+            row.put("currentSessions", agent.getCurrentSessions() != null ? agent.getCurrentSessions() : 0);
+
+            // 查询该客服今日好评量和好评率
+            List<CsConversation> agentConversations = conversationService.list(
+                    new LambdaQueryWrapper<CsConversation>()
+                            .eq(CsConversation::getOwnerAgentId, agent.getId())
+                            .ge(CsConversation::getCreateTime, todayStart)
+                            .lt(CsConversation::getCreateTime, todayEnd)
+                            .isNotNull(CsConversation::getSatisfaction));
+
+            long goodCount = agentConversations.stream()
+                    .filter(c -> c.getSatisfaction() != null && c.getSatisfaction() >= 4)
+                    .count();
+            long ratedCount = agentConversations.size();
+            double goodRate = ratedCount > 0 ? (double) goodCount / ratedCount * 100 : 0;
+
+            row.put("goodCount", goodCount);
+            row.put("goodRate", Math.round(goodRate * 10) / 10.0);
+
+            // 在线时长：在线客服 = now - lastOnlineTime，离线 = "-"
+            int status = agent.getStatus() != null ? agent.getStatus() : 0;
+            row.put("status", status);
+            if (status == CsAgent.STATUS_ONLINE || status == CsAgent.STATUS_BUSY) {
+                if (agent.getLastOnlineTime() != null) {
+                    long onlineSeconds = (System.currentTimeMillis() - agent.getLastOnlineTime().getTime()) / 1000;
+                    long hours = onlineSeconds / 3600;
+                    long minutes = (onlineSeconds % 3600) / 60;
+                    row.put("onlineDuration", hours + "h" + String.format("%02d", minutes) + "m");
+                } else {
+                    row.put("onlineDuration", "-");
+                }
+            } else {
+                row.put("onlineDuration", "-");
+            }
+
+            result.add(row);
+        }
+
+        return Result.OK(result);
+    }
+
+    private Date getTodayStart() {
+        return Date.from(LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant());
+    }
+
+    private Date getTodayEnd() {
+        return Date.from(LocalDate.now().plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant());
+    }
+}

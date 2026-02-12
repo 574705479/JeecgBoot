@@ -81,23 +81,37 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
     @Override
     @Transactional(rollbackFor = Exception.class)
     public CsConversation createConversation(String appId, String userId, String userName, String source,
-                                             String userIp, String userAgent, String deviceId, String userLang) {
+                                             String userIp, String userAgent, String deviceId, String userLang,
+                                             String preferredAgentId) {
         // 读取AI开关和对话分配配置
         boolean aiEnabled = isAiEnabled();
         JSONObject assignConfig = getConversationAssignConfig();
 
-        // 尝试自动分配客服
-        String lastAgentId = null;
-        // 继承上一次客服逻辑
-        if (assignConfig != null) {
-            JSONObject inherit = assignConfig.getJSONObject("inheritLastAgent");
-            if (inherit != null && inherit.getBooleanValue("enabled")) {
-                int expireMinutes = inherit.getIntValue("expireMinutes");
-                lastAgentId = findLastAgentForUser(userId, expireMinutes);
+        CsAgent assignedAgent = null;
+
+        // 优先使用指定客服
+        if (oConvertUtils.isNotEmpty(preferredAgentId)) {
+            CsAgent preferred = agentService.getById(preferredAgentId);
+            if (preferred != null && preferred.getStatus() != null && preferred.getStatus() == 1) {
+                assignedAgent = preferred;
+                log.info("[CS-Conversation] 使用指定客服: agentId={}", preferredAgentId);
+            } else {
+                log.info("[CS-Conversation] 指定客服不可用(不存在或不在线), agentId={}, 回退自动分配", preferredAgentId);
             }
         }
 
-        CsAgent assignedAgent = agentService.assignAgent(lastAgentId);
+        // 指定客服不可用时，走自动分配
+        if (assignedAgent == null) {
+            String lastAgentId = null;
+            if (assignConfig != null) {
+                JSONObject inherit = assignConfig.getJSONObject("inheritLastAgent");
+                if (inherit != null && inherit.getBooleanValue("enabled")) {
+                    int expireMinutes = inherit.getIntValue("expireMinutes");
+                    lastAgentId = findLastAgentForUser(userId, expireMinutes);
+                }
+            }
+            assignedAgent = agentService.assignAgent(lastAgentId);
+        }
 
         // ====== 解析设备信息和IP地理位置 ======
         Map<String, String> uaInfo = CsUserAgentUtil.parse(userAgent);
@@ -369,7 +383,7 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             
             // 不存在则通过createConversation创建（自动分配）
             // 注意：指定ID的场景已不常见，走统一创建逻辑
-            return createConversation(appId, userId, userName, null, null, null, null, null);
+            return createConversation(appId, userId, userName, null, null, null, null, null, null);
         }
         
         // 没有指定ID，查找用户的活跃会话
@@ -379,7 +393,7 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         }
         
         // 创建新会话 (createConversation内部会广播)
-        return createConversation(appId, userId, userName, null, null, null, null, null);
+        return createConversation(appId, userId, userName, null, null, null, null, null, null);
     }
 
     @Override

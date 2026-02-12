@@ -60,6 +60,21 @@
                   <span class="switch-hint">关闭后访客端不显示头部</span>
                 </a-form-item>
               </a-col>
+              <a-col :span="12">
+                <a-form-item label="头部背景图">
+                  <a-space>
+                    <a-upload :showUploadList="false" :customRequest="(info) => handleUpload(info, 'headerBgImage')">
+                      <a-button size="small">上传背景图</a-button>
+                    </a-upload>
+                    <a-input v-model:value="config.headerBgImage" placeholder="图片URL" size="small" style="width:160px" />
+                  </a-space>
+                  <div class="upload-hint">上传后头部将使用背景图替代纯色</div>
+                  <div v-if="config.headerBgImage" class="preview-thumb preview-thumb--wide">
+                    <img :src="resolveUrl(config.headerBgImage)" alt="header bg" />
+                    <DeleteOutlined class="thumb-delete" @click="config.headerBgImage = ''" title="删除" />
+                  </div>
+                </a-form-item>
+              </a-col>
               <a-col :span="24">
                 <a-form-item label="滚动文字（跑马灯）">
                   <a-input v-model:value="config.scrollText" placeholder="填入后头部下方展示滚动文字" />
@@ -87,6 +102,56 @@
                 </a-form-item>
               </a-col>
             </a-row>
+
+            <!-- 头部图标（PC端显示在头部右侧） -->
+            <a-divider orientation="left">头部图标（PC端）</a-divider>
+            <div class="upload-hint" style="margin-bottom:12px">PC端头部右侧显示的图标链接，点击可跳转。最多配置5个。</div>
+            <div class="header-icons-section">
+              <div v-if="config.headerIcons.length === 0" class="header-icons-empty">
+                <span style="color:#bbb">暂无图标，点击下方按钮添加</span>
+              </div>
+              <div v-for="(item, idx) in config.headerIcons" :key="idx" class="header-icon-row">
+                <div class="header-icon-row-num">{{ idx + 1 }}</div>
+                <div class="header-icon-row-fields">
+                  <div class="header-icon-field">
+                    <span class="header-icon-label">图标</span>
+                    <a-space>
+                      <a-upload :showUploadList="false" :customRequest="(info) => handleIconUpload(info, idx)">
+                        <a-button size="small">上传</a-button>
+                      </a-upload>
+                      <a-input v-model:value="item.icon" placeholder="图标URL" size="small" style="width:140px" />
+                    </a-space>
+                    <div v-if="item.icon" class="preview-thumb" style="margin-top:4px">
+                      <img :src="resolveUrl(item.icon)" alt="icon" />
+                      <DeleteOutlined class="thumb-delete" @click="item.icon = ''" title="删除" />
+                    </div>
+                  </div>
+                  <div class="header-icon-field">
+                    <span class="header-icon-label">昵称</span>
+                    <a-input v-model:value="item.name" placeholder="图标名称" size="small" style="width:120px" />
+                  </div>
+                  <div class="header-icon-field">
+                    <span class="header-icon-label">链接</span>
+                    <a-input v-model:value="item.link" placeholder="点击跳转URL" size="small" style="width:200px" />
+                  </div>
+                  <div class="header-icon-field">
+                    <span class="header-icon-label">尺寸</span>
+                    <a-input-number v-model:value="item.size" :min="16" :max="80" placeholder="32" size="small" style="width:80px" />
+                    <span style="color:#999;font-size:12px;margin-left:2px">px</span>
+                  </div>
+                  <div class="header-icon-field">
+                    <span class="header-icon-label">透明</span>
+                    <a-switch v-model:checked="item.transparent" size="small" />
+                    <span style="color:#999;font-size:11px;margin-left:4px">去掉边框背景</span>
+                  </div>
+                </div>
+                <a-button type="text" size="small" danger @click="removeHeaderIcon(idx)"><DeleteOutlined /></a-button>
+              </div>
+              <a-button type="dashed" size="small" :disabled="config.headerIcons.length >= 5" @click="addHeaderIcon" style="margin-top:8px">
+                <PlusOutlined /> 添加图标
+              </a-button>
+              <span v-if="config.headerIcons.length >= 5" class="faq-limit-hint" style="margin-left:8px">已达上限</span>
+            </div>
 
             <!-- 客服气泡 -->
             <a-divider orientation="left">客服气泡</a-divider>
@@ -279,81 +344,94 @@
           </a-tabs>
           <div class="preview-container" :class="previewTab">
             <div class="preview-wrapper" :style="previewWrapperStyle">
-              <!-- 聊天窗口 -->
-              <div class="preview-chat" :style="previewChatStyle">
-                <!-- 头部 -->
-                <div v-if="config.headerVisible" class="p-header" :style="{ background: config.themeColor || '#667eea' }">
-                  <div class="p-header-content">
-                    <img v-if="config.logo" :src="resolveUrl(config.logo)" class="p-logo" alt="logo" />
-                    <span class="p-title">{{ config.pageTitle || '在线客服' }}</span>
-                  </div>
+              <!-- 全宽头部（独立于 preview-chat，横跨整个 preview-wrapper） -->
+              <div v-if="config.headerVisible" class="p-header-full" :style="previewHeaderStyle">
+                <div class="p-header-content">
+                  <img v-if="config.logo" :src="resolveUrl(config.logo)" class="p-logo" alt="logo" />
+                  <span class="p-title">{{ config.pageTitle || '在线客服' }}</span>
                 </div>
-                <!-- 滚动文字 -->
-                <div v-if="config.scrollText" class="p-scroll-bar"
-                     :style="{ background: config.scrollTextBgColor || '#1890ff', color: config.scrollTextColor || '#fff' }">
-                  <div class="p-scroll-text" :style="{ animationDuration: (config.scrollDuration || 15) + 's' }">
-                    {{ config.scrollText }}
-                  </div>
-                </div>
-                <!-- 消息区域 -->
-                <div class="p-messages" :style="msgAreaStyle">
-                  <!-- 客服消息 -->
-                  <div class="p-msg p-msg-agent">
-                    <div class="p-avatar">🤖</div>
-                    <div class="p-bubble" :style="{ background: config.agentBubbleBgColor || '#f5f5f5', color: config.agentBubbleFontColor || '#333' }">
-                      你好，有什么可以帮助您的？
-                    </div>
-                  </div>
-                  <!-- 访客消息 -->
-                  <div class="p-msg p-msg-visitor">
-                    <div class="p-bubble" :style="{ background: config.visitorBubbleBgColor || '#667eea', color: config.visitorBubbleFontColor || '#fff' }">
-                      我想咨询一下产品信息
-                    </div>
-                    <div class="p-avatar">
-                      <img v-if="config.visitorAvatar" :src="resolveUrl(config.visitorAvatar)" class="p-avatar-img" />
-                      <span v-else>👤</span>
-                    </div>
-                  </div>
-                  <!-- 客服回复 -->
-                  <div class="p-msg p-msg-agent">
-                    <div class="p-avatar">🤖</div>
-                    <div class="p-bubble" :style="{ background: config.agentBubbleBgColor || '#f5f5f5', color: config.agentBubbleFontColor || '#333' }">
-                      好的，请问您想了解哪款产品？
-                    </div>
-                  </div>
-                </div>
-                <!-- 手机端FAQ入口（输入框上方） -->
-                <div v-if="previewTab === 'mobile' && config.faqEnabled && config.faqList.length > 0" class="p-faq-mobile">
-                  <div class="p-faq-mobile-title"><QuestionCircleOutlined /> 常见问题</div>
-                  <div class="p-faq-mobile-list">
-                    <div v-for="(faq, idx) in config.faqList" :key="idx" class="p-faq-mobile-item">{{ faq.question }}</div>
-                  </div>
-                </div>
-                <!-- 输入区 -->
-                <div class="p-input-area">
-                  <div class="p-toolbar">
-                    <span v-if="config.sendEmoji" class="p-tool-icon">😊</span>
-                    <span v-if="config.sendImage" class="p-tool-icon">🖼</span>
-                    <span v-if="config.sendVideo" class="p-tool-icon">🎬</span>
-                    <span v-if="config.sendPdf" class="p-tool-icon">📄</span>
-                  </div>
-                  <div class="p-input-box">
-                    <span class="p-input-placeholder">输入消息...</span>
-                    <span class="p-send-btn" :style="{ background: config.themeColor || '#667eea' }">发送</span>
-                  </div>
-                </div>
-              </div>
-              <!-- PC右侧区域（广告+FAQ） -->
-              <div v-if="previewTab === 'pc' && hasSidebar" class="preview-sidebar">
-                <div v-if="config.pcAdImage" class="preview-ad">
-                  <a :href="config.pcAdLink || '#'" target="_blank" rel="noopener">
-                    <img :src="resolveUrl(config.pcAdImage)" class="preview-ad-img" alt="ad" />
+                <div v-if="previewTab === 'pc' && config.headerIcons?.length" class="p-header-icons">
+                  <a v-for="(item, idx) in config.headerIcons" :key="idx" class="p-header-icon-item" :href="item.link || '#'" target="_blank" rel="noopener">
+                    <img v-if="item.icon" :src="resolveUrl(item.icon)"
+                         :class="['p-header-icon-img', { 'p-header-icon-transparent': item.transparent }]"
+                         :style="{ width: (item.size || 32) + 'px', height: (item.size || 32) + 'px' }" />
+                    <span v-else class="p-header-icon-placeholder">📎</span>
+                    <span class="p-header-icon-name"
+                          :style="{ fontSize: Math.max(9, Math.round((item.size || 32) * 0.3)) + 'px', maxWidth: Math.max(36, (item.size || 32) * 1.6) + 'px' }">{{ item.name || '图标' }}</span>
                   </a>
                 </div>
-                <div v-if="config.faqEnabled && config.faqList.length > 0" class="preview-faq">
-                  <div class="preview-faq-title"><QuestionCircleOutlined /> 常见问题</div>
-                  <div class="preview-faq-list">
-                    <div v-for="(faq, idx) in config.faqList" :key="idx" class="preview-faq-item">{{ faq.question }}</div>
+              </div>
+              <!-- 内容区域（聊天 + 侧边栏水平排列） -->
+              <div class="preview-body">
+                <!-- 聊天窗口 -->
+                <div class="preview-chat" :style="previewChatStyle">
+                  <!-- 滚动文字 -->
+                  <div v-if="config.scrollText" class="p-scroll-bar"
+                       :style="{ background: config.scrollTextBgColor || '#1890ff', color: config.scrollTextColor || '#fff' }">
+                    <div class="p-scroll-text" :style="{ animationDuration: (config.scrollDuration || 15) + 's' }">
+                      {{ config.scrollText }}
+                    </div>
+                  </div>
+                  <!-- 消息区域 -->
+                  <div class="p-messages" :style="msgAreaStyle">
+                    <!-- 客服消息 -->
+                    <div class="p-msg p-msg-agent">
+                      <div class="p-avatar">🤖</div>
+                      <div class="p-bubble" :style="{ background: config.agentBubbleBgColor || '#f5f5f5', color: config.agentBubbleFontColor || '#333' }">
+                        你好，有什么可以帮助您的？
+                      </div>
+                    </div>
+                    <!-- 访客消息 -->
+                    <div class="p-msg p-msg-visitor">
+                      <div class="p-bubble" :style="{ background: config.visitorBubbleBgColor || '#667eea', color: config.visitorBubbleFontColor || '#fff' }">
+                        我想咨询一下产品信息
+                      </div>
+                      <div class="p-avatar">
+                        <img v-if="config.visitorAvatar" :src="resolveUrl(config.visitorAvatar)" class="p-avatar-img" />
+                        <span v-else>👤</span>
+                      </div>
+                    </div>
+                    <!-- 客服回复 -->
+                    <div class="p-msg p-msg-agent">
+                      <div class="p-avatar">🤖</div>
+                      <div class="p-bubble" :style="{ background: config.agentBubbleBgColor || '#f5f5f5', color: config.agentBubbleFontColor || '#333' }">
+                        好的，请问您想了解哪款产品？
+                      </div>
+                    </div>
+                  </div>
+                  <!-- 手机端FAQ入口（输入框上方） -->
+                  <div v-if="previewTab === 'mobile' && config.faqEnabled && config.faqList.length > 0" class="p-faq-mobile">
+                    <div class="p-faq-mobile-title"><QuestionCircleOutlined /> 常见问题</div>
+                    <div class="p-faq-mobile-list">
+                      <div v-for="(faq, idx) in config.faqList" :key="idx" class="p-faq-mobile-item">{{ faq.question }}</div>
+                    </div>
+                  </div>
+                  <!-- 输入区 -->
+                  <div class="p-input-area">
+                    <div class="p-toolbar">
+                      <span v-if="config.sendEmoji" class="p-tool-icon">😊</span>
+                      <span v-if="config.sendImage" class="p-tool-icon">🖼</span>
+                      <span v-if="config.sendVideo" class="p-tool-icon">🎬</span>
+                      <span v-if="config.sendPdf" class="p-tool-icon">📄</span>
+                    </div>
+                    <div class="p-input-box">
+                      <span class="p-input-placeholder">输入消息...</span>
+                      <span class="p-send-btn" :style="{ background: config.themeColor || '#667eea' }">发送</span>
+                    </div>
+                  </div>
+                </div>
+                <!-- PC右侧区域（广告+FAQ） -->
+                <div v-if="previewTab === 'pc' && hasSidebar" class="preview-sidebar">
+                  <div v-if="config.pcAdImage" class="preview-ad">
+                    <a :href="config.pcAdLink || '#'" target="_blank" rel="noopener">
+                      <img :src="resolveUrl(config.pcAdImage)" class="preview-ad-img" alt="ad" />
+                    </a>
+                  </div>
+                  <div v-if="config.faqEnabled && config.faqList.length > 0" class="preview-faq">
+                    <div class="preview-faq-title"><QuestionCircleOutlined /> 常见问题</div>
+                    <div class="preview-faq-list">
+                      <div v-for="(faq, idx) in config.faqList" :key="idx" class="preview-faq-item">{{ faq.question }}</div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -441,6 +519,8 @@ const config = reactive({
   backgroundImage: '',
   pcAdLink: '',
   pcAdImage: '',
+  headerBgImage: '',
+  headerIcons: [] as Array<{ icon: string; name: string; link: string; size: number; transparent: boolean }>,
   faqEnabled: false,
   faqList: [] as FaqItem[],
 });
@@ -503,6 +583,39 @@ function removeFaq(idx: number) {
   config.faqList.splice(idx, 1);
 }
 
+// ==================== 头部图标 ====================
+function addHeaderIcon() {
+  if (config.headerIcons.length >= 5) {
+    createMessage.warning('最多添加5个头部图标');
+    return;
+  }
+  config.headerIcons.push({ icon: '', name: '', link: '', size: 32, transparent: false });
+}
+
+function removeHeaderIcon(idx: number) {
+  config.headerIcons.splice(idx, 1);
+}
+
+async function handleIconUpload(info: any, index: number) {
+  const file = info?.file;
+  if (!file) return;
+  try {
+    const res: any = await uploadImg({ file }, () => {});
+    const data = res?.result || res;
+    const url = data?.url || data?.fileUrl || data?.path || data?.message;
+    if (!url) {
+      createMessage.error('上传失败：未获取到文件地址');
+      return;
+    }
+    if (config.headerIcons[index]) {
+      config.headerIcons[index].icon = url;
+    }
+    createMessage.success('上传成功');
+  } catch (e) {
+    createMessage.error('上传失败');
+  }
+}
+
 // 是否有右侧内容
 const hasSidebar = computed(() => {
   return !!config.pcAdImage || (config.faqEnabled && config.faqList.length > 0);
@@ -549,9 +662,12 @@ async function fetchConfig() {
           (config as any)[k] = parsed[k];
         }
       });
-      // 确保 faqList 是数组
+      // 确保 faqList 和 headerIcons 是数组
       if (!Array.isArray(config.faqList)) {
         config.faqList = [];
+      }
+      if (!Array.isArray(config.headerIcons)) {
+        config.headerIcons = [];
       }
     }
   } catch (e) {
@@ -586,6 +702,16 @@ const previewChatStyle = computed(() => ({
   flex: '1',
   minWidth: '0',
 }));
+
+const previewHeaderStyle = computed(() => {
+  const s: any = { background: config.themeColor || '#667eea' };
+  if (config.headerBgImage) {
+    s.backgroundImage = `url(${resolveUrl(config.headerBgImage)})`;
+    s.backgroundSize = 'cover';
+    s.backgroundPosition = 'center';
+  }
+  return s;
+});
 
 const msgAreaStyle = computed(() => {
   const s: any = {};
@@ -680,6 +806,64 @@ onMounted(() => {
 }
 .preview-thumb:hover .thumb-delete {
   opacity: 1;
+}
+
+/* 头部图标配置区 */
+.header-icons-section {
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  padding: 16px;
+  background: #fafafa;
+}
+.header-icons-empty {
+  text-align: center;
+  padding: 16px 0;
+}
+.header-icon-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+.header-icon-row:hover {
+  border-color: #d9d9d9;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+.header-icon-row-num {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #667eea;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 500;
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+.header-icon-row-fields {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.header-icon-field {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.header-icon-label {
+  font-size: 12px;
+  color: #666;
+  white-space: nowrap;
+  line-height: 32px;
 }
 
 /* FAQ配置区 */
@@ -786,10 +970,16 @@ onMounted(() => {
 }
 .preview-wrapper {
   display: flex;
+  flex-direction: column;
   border-radius: 12px;
   overflow: hidden;
   box-shadow: 0 2px 12px rgba(0,0,0,0.1);
   transition: all 0.3s;
+}
+.preview-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
 }
 .preview-chat {
   display: flex;
@@ -797,15 +987,55 @@ onMounted(() => {
   background: #fff;
   overflow: hidden;
 }
-.p-header {
+/* 全宽头部 */
+.p-header-full {
   padding: 12px 16px;
   color: #fff;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 .p-header-content {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.p-header-icons {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.p-header-icon-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-decoration: none;
+  color: #fff;
+  gap: 2px;
+}
+.p-header-icon-img {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid rgba(255,255,255,0.3);
+}
+.p-header-icon-img.p-header-icon-transparent {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+.p-header-icon-placeholder {
+  font-size: 18px;
+}
+.p-header-icon-name {
+  font-size: 10px;
+  opacity: 0.9;
+  max-width: 48px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .p-logo {
   width: 28px;
@@ -960,13 +1190,11 @@ onMounted(() => {
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding: 8px;
 }
 .preview-ad-img {
   width: 100%;
-  max-height: 300px;
-  object-fit: contain;
-  border-radius: 4px;
+  object-fit: cover;
+  display: block;
 }
 .preview-faq {
   flex: 1;

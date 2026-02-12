@@ -24,7 +24,7 @@
     return el
   }
 
-  function buildChatUrl(baseUrl, token, externalUserId, userName, source, key) {
+  function buildChatUrl(baseUrl, token, externalUserId, userName, source, key, agentId) {
     var url = baseUrl.replace(/\/$/, '') + '/cs/userChat'
     var params = []
     if (key) params.push('key=' + encodeURIComponent(key))
@@ -32,6 +32,7 @@
     if (externalUserId) params.push('externalUserId=' + encodeURIComponent(externalUserId))
     if (userName) params.push('userName=' + encodeURIComponent(userName))
     if (source) params.push('source=' + encodeURIComponent(source))
+    if (agentId) params.push('agentId=' + encodeURIComponent(agentId))
     return url + (params.length ? '?' + params.join('&') : '')
   }
 
@@ -48,28 +49,90 @@
   Widget.prototype.init = function () {
     var _this = this
     if (this.button) return
-    var position = (this.options.position || {}).right != null
-      ? this.options.position
-      : { right: 24, bottom: 24 }
+    var opts = this.options
+
+    // 按钮位置（支持上下左右边距）
+    var position = opts.position || {}
+    var btnRight = position.right != null ? position.right : 24
+    var btnBottom = position.bottom != null ? position.bottom : 24
+    var btnLeft = position.left != null ? position.left : null
+    var btnTop = position.top != null ? position.top : null
+
+    // 按钮外观
+    var btnSize = opts.buttonSize || 56
+    var btnColor = opts.buttonColor || '#4c6ef5'
+    var btnIcon = opts.buttonIcon || ''
+    var btnText = opts.buttonText || ''
+    var btnBorderRadius = opts.buttonBorderRadius != null ? opts.buttonBorderRadius : btnSize / 2
+    var btnShadow = opts.buttonShadow != null ? opts.buttonShadow : '0 6px 18px rgba(0,0,0,.2)'
+
+    var btnStyle = {
+      position: 'fixed',
+      width: btnSize + 'px',
+      height: btnSize + 'px',
+      borderRadius: btnBorderRadius + 'px',
+      background: btnColor,
+      color: '#fff',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      cursor: 'pointer',
+      boxShadow: btnShadow,
+      zIndex: (opts.zIndex || 9999).toString(),
+      border: 'none',
+      padding: '0',
+      overflow: 'hidden',
+      transition: 'transform .2s, box-shadow .2s'
+    }
+    // 定位：支持四个方向
+    if (btnRight != null && btnLeft == null) btnStyle.right = btnRight + 'px'
+    if (btnLeft != null) btnStyle.left = btnLeft + 'px'
+    if (btnBottom != null && btnTop == null) btnStyle.bottom = btnBottom + 'px'
+    if (btnTop != null) btnStyle.top = btnTop + 'px'
+
+    // 按钮内容：优先自定义图标，其次文字，最后默认
+    var btnChildren = []
+    if (btnIcon) {
+      btnChildren.push(createEl('img', {
+        style: {
+          width: Math.round(btnSize * 0.6) + 'px',
+          height: Math.round(btnSize * 0.6) + 'px',
+          objectFit: 'contain',
+          borderRadius: '0',
+          pointerEvents: 'none'
+        },
+        src: btnIcon
+      }))
+    } else if (btnText) {
+      btnChildren.push(createEl('span', {
+        style: { fontSize: Math.max(12, Math.round(btnSize * 0.25)) + 'px', fontWeight: '500' }
+      }, [btnText]))
+    } else {
+      // 默认 SVG 图标
+      var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+      svg.setAttribute('viewBox', '0 0 24 24')
+      svg.setAttribute('fill', 'none')
+      svg.setAttribute('stroke', 'currentColor')
+      svg.setAttribute('stroke-width', '2')
+      svg.style.width = Math.round(btnSize * 0.5) + 'px'
+      svg.style.height = Math.round(btnSize * 0.5) + 'px'
+      svg.innerHTML = '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke-linecap="round" stroke-linejoin="round"/>'
+      btnChildren.push(svg)
+    }
+
     this.button = createEl('div', {
       className: 'jeecg-cs-button',
-      style: {
-        position: 'fixed',
-        right: position.right + 'px',
-        bottom: position.bottom + 'px',
-        width: '56px',
-        height: '56px',
-        borderRadius: '50%',
-        background: '#4c6ef5',
-        color: '#fff',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        cursor: 'pointer',
-        boxShadow: '0 6px 18px rgba(0,0,0,.2)',
-        zIndex: (this.options.zIndex || 9999).toString()
-      }
-    }, ['客服'])
+      style: btnStyle
+    }, btnChildren)
+
+    // hover 效果
+    this.button.addEventListener('mouseenter', function () {
+      _this.button.style.transform = 'scale(1.08)'
+    })
+    this.button.addEventListener('mouseleave', function () {
+      _this.button.style.transform = 'scale(1)'
+    })
+
     this.button.addEventListener('click', function () {
       if (_this.opened) {
         _this.close()
@@ -82,6 +145,7 @@
 
   Widget.prototype.open = function () {
     var _this = this
+    var opts = this.options
     this.opened = true
     this.minimized = false
     if (!this.overlay) {
@@ -91,7 +155,7 @@
           position: 'fixed',
           inset: '0',
           background: 'rgba(0,0,0,.25)',
-          zIndex: (this.options.zIndex || 9999).toString()
+          zIndex: (opts.zIndex || 9999).toString()
         }
       })
       this.overlay.addEventListener('click', function () {
@@ -99,8 +163,9 @@
       })
     }
     if (!this.panel) {
-      var width = this.options.width || 420
-      var height = this.options.height || 640
+      var width = opts.width || 420
+      var height = opts.height || 640
+      var panelColor = opts.panelColor || '#4c6ef5'
       this.panel = createEl('div', {
         className: 'jeecg-cs-panel',
         style: {
@@ -113,7 +178,7 @@
           borderRadius: '12px',
           overflow: 'hidden',
           boxShadow: '0 12px 30px rgba(0,0,0,.2)',
-          zIndex: (this.options.zIndex || 9999).toString()
+          zIndex: (opts.zIndex || 9999).toString()
         }
       })
       var header = createEl('div', {
@@ -124,12 +189,12 @@
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '0 12px',
-          background: '#4c6ef5',
+          background: panelColor,
           color: '#fff',
           fontSize: '14px'
         }
       }, [
-        createEl('span', null, [this.options.title || '在线客服']),
+        createEl('span', null, [opts.title || '在线客服']),
         createEl('div', {
           style: {
             display: 'flex',
@@ -196,9 +261,9 @@
     document.body.appendChild(this.overlay)
     document.body.appendChild(this.panel)
 
-    var tokenPromise = Promise.resolve(this.options.token || '')
-    if (typeof this.options.getToken === 'function') {
-      tokenPromise = Promise.resolve(this.options.getToken())
+    var tokenPromise = Promise.resolve(opts.token || '')
+    if (typeof opts.getToken === 'function') {
+      tokenPromise = Promise.resolve(opts.getToken())
     }
     tokenPromise.then(function (token) {
       _this.options.token = token
@@ -208,7 +273,8 @@
         _this.options.externalUserId || '',
         _this.options.userName || '',
         _this.options.source || '',
-        _this.options.key || ''
+        _this.options.key || '',
+        _this.options.agentId || ''
       )
       _this.iframe.setAttribute('src', url)
     })

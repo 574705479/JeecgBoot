@@ -187,19 +187,52 @@ public class CsMessageServiceImpl implements ICsMessageService {
     @Override
     public CsMessage sendUserMessage(String conversationId, String userId, String userName, String content,
                                      Integer msgType, String extra) {
-        CsMessage message = sendUserMessage(conversationId, userId, userName, content);
-        // 如果有附件类型或extra，覆盖消息属性
+        log.info("[CS-Message] 用户发送消息(含附件): conversationId={}, userId={}, msgType={}", conversationId, userId, msgType);
+
+        // 确保会话存在
+        CsConversation conversation = conversationService.getOrCreateConversation(
+                conversationId, null, userId, userName);
+
+        // 创建用户消息，在保存之前就设置好 msgType 和 extra，避免二次保存导致重复
+        CsMessage userMessage = CsMessage.createUserMessage(conversationId, userId, userName, content);
         if (msgType != null && msgType != CsMessage.MSG_TYPE_TEXT) {
-            message.setMsgType(msgType);
+            userMessage.setMsgType(msgType);
         }
         if (oConvertUtils.isNotEmpty(extra)) {
-            message.setExtra(extra);
+            userMessage.setExtra(extra);
         }
-        // 如果修改了，重新保存到MongoDB
-        if ((msgType != null && msgType != CsMessage.MSG_TYPE_TEXT) || oConvertUtils.isNotEmpty(extra)) {
-            saveToMongo(message);
+
+        // 保存到MongoDB（一次性，包含附件信息）
+        saveToMongo(userMessage);
+
+        // 更新会话最后消息
+        conversationService.updateLastMessage(conversationId, content);
+
+        // 重置超时提醒标记
+        conversationService.resetTimeoutWarning(conversationId);
+
+        // 推送给所有相关客服
+        pushToAgents(conversation, userMessage);
+
+        // 增加客服未读数
+        conversationService.incrementUnread(conversationId);
+
+        // 根据回复模式处理
+        int replyMode = conversation.getReplyMode() != null ?
+                conversation.getReplyMode() : CsConversation.REPLY_MODE_AI_AUTO;
+
+        switch (replyMode) {
+            case CsConversation.REPLY_MODE_AI_AUTO:
+                generateAndSendAiReply(conversation, content);
+                break;
+            case CsConversation.REPLY_MODE_AI_ASSIST:
+                generateAiSuggestionStream(conversation, content, null);
+                break;
+            case CsConversation.REPLY_MODE_MANUAL:
+                break;
         }
-        return message;
+
+        return userMessage;
     }
 
     @Override
