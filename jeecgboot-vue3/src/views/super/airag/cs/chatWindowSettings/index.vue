@@ -23,30 +23,12 @@
               </a-col>
               <a-col :span="12">
                 <a-form-item label="Logo">
-                  <a-space>
-                    <a-upload :showUploadList="false" :customRequest="(info) => handleUpload(info, 'logo')">
-                      <a-button size="small">上传Logo</a-button>
-                    </a-upload>
-                    <a-input v-model:value="config.logo" placeholder="图片URL" size="small" style="width:180px" />
-                  </a-space>
-                  <div v-if="config.logo" class="preview-thumb">
-                    <img :src="resolveUrl(config.logo)" alt="logo" />
-                    <DeleteOutlined class="thumb-delete" @click="config.logo = ''" title="删除" />
-                  </div>
+                  <CropperUpload v-model:value="config.logo" :uploadApi="uploadImg" btnText="上传Logo" />
                 </a-form-item>
               </a-col>
               <a-col :span="12">
                 <a-form-item label="背景图片（聊天区域）">
-                  <a-space>
-                    <a-upload :showUploadList="false" :customRequest="(info) => handleUpload(info, 'backgroundImage')">
-                      <a-button size="small">上传背景</a-button>
-                    </a-upload>
-                    <a-input v-model:value="config.backgroundImage" placeholder="图片URL" size="small" style="width:180px" />
-                  </a-space>
-                  <div v-if="config.backgroundImage" class="preview-thumb preview-thumb--wide">
-                    <img :src="resolveUrl(config.backgroundImage)" alt="bg" />
-                    <DeleteOutlined class="thumb-delete" @click="config.backgroundImage = ''" title="删除" />
-                  </div>
+                  <CropperUpload v-model:value="config.backgroundImage" :uploadApi="uploadImg" btnText="上传背景" />
                 </a-form-item>
               </a-col>
             </a-row>
@@ -62,17 +44,8 @@
               </a-col>
               <a-col :span="12">
                 <a-form-item label="头部背景图">
-                  <a-space>
-                    <a-upload :showUploadList="false" :customRequest="(info) => handleUpload(info, 'headerBgImage')">
-                      <a-button size="small">上传背景图</a-button>
-                    </a-upload>
-                    <a-input v-model:value="config.headerBgImage" placeholder="图片URL" size="small" style="width:160px" />
-                  </a-space>
+                  <CropperUpload v-model:value="config.headerBgImage" :uploadApi="uploadImg" btnText="上传背景图" />
                   <div class="upload-hint">上传后头部将使用背景图替代纯色</div>
-                  <div v-if="config.headerBgImage" class="preview-thumb preview-thumb--wide">
-                    <img :src="resolveUrl(config.headerBgImage)" alt="header bg" />
-                    <DeleteOutlined class="thumb-delete" @click="config.headerBgImage = ''" title="删除" />
-                  </div>
                 </a-form-item>
               </a-col>
               <a-col :span="24">
@@ -115,16 +88,7 @@
                 <div class="header-icon-row-fields">
                   <div class="header-icon-field">
                     <span class="header-icon-label">图标</span>
-                    <a-space>
-                      <a-upload :showUploadList="false" :customRequest="(info) => handleIconUpload(info, idx)">
-                        <a-button size="small">上传</a-button>
-                      </a-upload>
-                      <a-input v-model:value="item.icon" placeholder="图标URL" size="small" style="width:140px" />
-                    </a-space>
-                    <div v-if="item.icon" class="preview-thumb" style="margin-top:4px">
-                      <img :src="resolveUrl(item.icon)" alt="icon" />
-                      <DeleteOutlined class="thumb-delete" @click="item.icon = ''" title="删除" />
-                    </div>
+                    <CropperUpload v-model:value="item.icon" :uploadApi="uploadImg" :aspectRatio="1" btnText="上传" inputWidth="140px" />
                   </div>
                   <div class="header-icon-field">
                     <span class="header-icon-label">昵称</span>
@@ -195,17 +159,8 @@
               </a-col>
               <a-col :span="12">
                 <a-form-item label="访客头像">
-                  <a-space>
-                    <a-upload :showUploadList="false" :customRequest="(info) => handleUpload(info, 'visitorAvatar')">
-                      <a-button size="small">上传头像</a-button>
-                    </a-upload>
-                    <a-input v-model:value="config.visitorAvatar" placeholder="图片URL" size="small" style="width:160px" />
-                  </a-space>
+                  <CropperUpload v-model:value="config.visitorAvatar" :uploadApi="uploadImg" :aspectRatio="1" btnText="上传头像" inputWidth="160px" />
                   <div class="upload-hint">建议尺寸 80×80 px</div>
-                  <div v-if="config.visitorAvatar" class="preview-thumb">
-                    <img :src="resolveUrl(config.visitorAvatar)" alt="avatar" />
-                    <DeleteOutlined class="thumb-delete" @click="config.visitorAvatar = ''" title="删除" />
-                  </div>
                 </a-form-item>
               </a-col>
             </a-row>
@@ -273,17 +228,8 @@
               </a-col>
               <a-col :span="12">
                 <a-form-item label="广告图片">
-                  <a-space>
-                    <a-upload :showUploadList="false" :customRequest="(info) => handleUpload(info, 'pcAdImage')">
-                      <a-button size="small">上传广告图</a-button>
-                    </a-upload>
-                    <a-input v-model:value="config.pcAdImage" placeholder="图片URL" size="small" style="width:160px" />
-                  </a-space>
+                  <CropperUpload v-model:value="config.pcAdImage" :uploadApi="uploadImg" btnText="上传广告图" inputWidth="160px" />
                   <div class="upload-hint">建议尺寸 200×540 px</div>
-                  <div v-if="config.pcAdImage" class="preview-thumb preview-thumb--wide">
-                    <img :src="resolveUrl(config.pcAdImage)" alt="ad" />
-                    <DeleteOutlined class="thumb-delete" @click="config.pcAdImage = ''" title="删除" />
-                  </div>
                 </a-form-item>
               </a-col>
             </a-row>
@@ -496,6 +442,8 @@ import { useMessage } from '/@/hooks/web/useMessage';
 import { uploadImg } from '/@/api/sys/upload';
 import { DeleteOutlined, EditOutlined, PlusOutlined, QuestionCircleOutlined } from '@ant-design/icons-vue';
 import { Tinymce } from '/@/components/Tinymce/index';
+import { CropperUpload } from '/@/components/Cropper';
+import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
 
 defineOptions({ name: 'ChatWindowSettingsPage' });
 
@@ -614,26 +562,6 @@ function removeHeaderIcon(idx: number) {
   config.headerIcons.splice(idx, 1);
 }
 
-async function handleIconUpload(info: any, index: number) {
-  const file = info?.file;
-  if (!file) return;
-  try {
-    const res: any = await uploadImg({ file }, () => {});
-    const data = res?.result || res;
-    const url = data?.url || data?.fileUrl || data?.path || data?.message;
-    if (!url) {
-      createMessage.error('上传失败：未获取到文件地址');
-      return;
-    }
-    if (config.headerIcons[index]) {
-      config.headerIcons[index].icon = url;
-    }
-    createMessage.success('上传成功');
-  } catch (e) {
-    createMessage.error('上传失败');
-  }
-}
-
 // 是否有右侧内容
 const hasSidebar = computed(() => {
   return !!config.pcAdImage || (config.faqEnabled && config.faqList.length > 0);
@@ -642,26 +570,7 @@ const hasSidebar = computed(() => {
 function resolveUrl(url: string) {
   if (!url) return '';
   if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return url;
-  const base = (window as any)._JEECG_API_BASE_URL || import.meta.env.VITE_GLOB_DOMAIN_URL || '';
-  return base + '/' + url.replace(/^\//, '');
-}
-
-async function handleUpload(info: any, field: string) {
-  const file = info?.file;
-  if (!file) return;
-  try {
-    const res: any = await uploadImg({ file }, () => {});
-    const data = res?.result || res;
-    const url = data?.url || data?.fileUrl || data?.path || data?.message;
-    if (!url) {
-      createMessage.error('上传失败：未获取到文件地址');
-      return;
-    }
-    (config as any)[field] = url;
-    createMessage.success('上传成功');
-  } catch (e) {
-    createMessage.error('上传失败');
-  }
+  return getFileAccessHttpUrl(url);
 }
 
 async function fetchConfig() {

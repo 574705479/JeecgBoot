@@ -215,18 +215,13 @@ expireAt: {{ expireAt || '' }}</pre>
                   </div>
                   <div class="wc-field" style="flex-wrap:wrap">
                     <span class="wc-label">自定义图标</span>
-                    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-                      <a-input v-model:value="wc.buttonIcon" placeholder="图标URL地址" size="small" style="width:180px" />
-                      <a-upload
-                        :showUploadList="false"
-                        :customRequest="customIconUpload"
-                        accept="image/png,image/jpeg,image/gif,image/svg+xml,image/x-icon,image/webp"
-                      >
-                        <a-button size="small" :loading="iconUploading">上传图标</a-button>
-                      </a-upload>
-                      <img v-if="wc.buttonIcon" :src="resolveUrl(wc.buttonIcon)" style="width:26px;height:26px;object-fit:contain;border:1px solid #eee;border-radius:4px" />
-                      <a-button v-if="wc.buttonIcon" size="small" danger @click="wc.buttonIcon = ''">清除</a-button>
-                    </div>
+                    <CropperUpload
+                      v-model:value="wc.buttonIcon"
+                      :uploadApi="uploadImg"
+                      :aspectRatio="1"
+                      btnText="上传图标"
+                      accept="image/png,image/jpeg,image/gif,image/svg+xml,image/x-icon,image/webp"
+                    />
                   </div>
                   <div class="wc-field">
                     <span class="wc-label">按钮文字</span>
@@ -375,6 +370,8 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { message } from 'ant-design-vue';
 import { defHttp } from '/@/utils/http/axios';
 import { uploadImg } from '/@/api/sys/upload';
+import { CropperUpload } from '/@/components/Cropper';
+import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
 
@@ -543,37 +540,10 @@ const md = new MarkdownIt({
 let widgetInstance: any = null;
 let widgetScriptEl: HTMLScriptElement | null = null;
 const widgetLoaded = ref(false);
-const iconUploading = ref(false);
-
 function resolveUrl(url: string) {
   if (!url) return '';
   if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return url;
-  const base = (window as any)._JEECG_API_BASE_URL || import.meta.env.VITE_GLOB_DOMAIN_URL || '';
-  return base + '/' + url.replace(/^\//, '');
-}
-
-async function customIconUpload({ file, onSuccess, onError }: any) {
-  iconUploading.value = true;
-  try {
-    const res: any = await uploadImg({ file }, () => {});
-    // uploadImg 返回 axios response（isReturnResponse: true），真实数据在 res.data
-    const body = res?.data || res;
-    const data = body?.result || body;
-    const url = data?.url || data?.fileUrl || data?.path || data?.message;
-    if (url) {
-      wc.buttonIcon = url;
-      message.success('图标上传成功');
-      onSuccess?.(res);
-    } else {
-      message.error('图标上传失败：未获取到文件地址');
-      onError?.(new Error('no url'));
-    }
-  } catch (e) {
-    message.error('图标上传失败');
-    onError?.(e);
-  } finally {
-    iconUploading.value = false;
-  }
+  return getFileAccessHttpUrl(url);
 }
 
 const accessUrl = computed(() => {

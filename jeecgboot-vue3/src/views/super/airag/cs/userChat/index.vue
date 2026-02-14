@@ -576,8 +576,7 @@ const dynamicCssVars = computed(() => ({
 function resolveFileUrl(url: string) {
   if (!url) return '';
   if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return url;
-  const base = (window as any)._JEECG_API_BASE_URL || import.meta.env.VITE_GLOB_DOMAIN_URL || '';
-  return base + '/' + url.replace(/^\//, '');
+  return getFileAccessHttpUrl(url);
 }
 
 async function loadChatWindowConfig() {
