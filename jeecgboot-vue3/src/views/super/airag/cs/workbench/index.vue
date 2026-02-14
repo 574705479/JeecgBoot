@@ -5,7 +5,9 @@
       <!-- 客服状态栏 -->
       <div class="agent-bar">
         <div class="agent-info">
-          <a-badge :status="agentStatus === 1 ? 'success' : 'default'" />
+          <a-avatar :size="26" class="self-agent-avatar" :src="agentAvatar ? getFileAccessHttpUrl(agentAvatar) : ''">
+            {{ (agentName || '客').charAt(0) }}
+          </a-avatar>
           <span class="agent-name">{{ agentName }}</span>
         </div>
         <div class="agent-actions">
@@ -222,7 +224,13 @@
               <CaretDownOutlined v-if="group.expanded" />
               <CaretRightOutlined v-else />
             </span>
-            <a-badge :status="getAgentStatusType(group.agent.status)" />
+            <a-avatar
+              :size="24"
+              class="monitor-agent-avatar"
+              :src="getAgentItemAvatarUrl(group.agent)"
+            >
+              {{ (group.agent.nickname || '客').charAt(0) }}
+            </a-avatar>
             <span class="monitor-agent-name">{{ group.agent.nickname || '未知客服' }}</span>
             <span class="monitor-agent-status" :class="'status-' + group.agent.status">
               {{ getAgentStatusText(group.agent.status) }}
@@ -898,6 +906,7 @@ function httpDelete<T = any>(config: any, options: any = {}) {
 // 客服信息
 const agentId = ref('');
 const agentName = ref('');
+const agentAvatar = ref('');
 const agentStatus = ref(0);
 const isOnline = ref(false);
 const agentRole = ref(0); // 0-普通客服, 1-管理者
@@ -1016,10 +1025,6 @@ function toggleAgentExpand(agentId: string) {
 
 function getAgentStatusText(status: number) {
   return status === 1 ? '在线' : status === 0 ? '离线' : '隐身';
-}
-
-function getAgentStatusType(status: number): string {
-  return status === 1 ? 'success' : status === 0 ? 'error' : 'default';
 }
 
 // 消息
@@ -1397,6 +1402,7 @@ async function loadAgentInfo() {
     if (res?.id) {
       agentId.value = res.id;
       agentName.value = res.nickname || '客服';
+      agentAvatar.value = res.avatar || '';
       agentStatus.value = res.status || 0;
       isOnline.value = res.status === 1;
       agentRole.value = res.role || 0; // 获取角色：0-普通客服, 1-管理者
@@ -1541,6 +1547,24 @@ function getAttachmentUrl(attachment: any) {
 
 function getMessageAvatarUrl(msg: any) {
   const avatar = msg?.senderAvatar;
+  if (avatar) {
+    return getFileAccessHttpUrl(avatar);
+  }
+  if (Number(msg?.senderType) === 1) {
+    const conv = conversations.value.find((c) => c.id === msg?.conversationId);
+    const ownerAvatar = msg?.ownerAgentAvatar || conv?.ownerAgentAvatar || currentConversation.value?.ownerAgentAvatar;
+    if (ownerAvatar) {
+      return getFileAccessHttpUrl(ownerAvatar);
+    }
+    if (agentAvatar.value) {
+      return getFileAccessHttpUrl(agentAvatar.value);
+    }
+  }
+  return '';
+}
+
+function getAgentItemAvatarUrl(agent: any) {
+  const avatar = agent?.avatar;
   return avatar ? getFileAccessHttpUrl(avatar) : '';
 }
 
@@ -3124,6 +3148,9 @@ function handleWsMessage(data: any) {
           senderAvatar: data.senderAvatar,
           createTime: data.timestamp || new Date().toISOString(),
         };
+        if (!newMsg.senderAvatar && Number(newMsg.senderType) === 1) {
+          newMsg.senderAvatar = conv?.ownerAgentAvatar || currentConversation.value?.ownerAgentAvatar || '';
+        }
         // 避免重复添加
         if (!messages.value.find(m => m.id === newMsg.id)) {
           messages.value.push(newMsg);
@@ -3169,6 +3196,7 @@ function handleWsMessage(data: any) {
       {
         const extraData = data.extra || data;
         const assignedAgentId = extraData.agentId;
+        const assignedAgentAvatar = extraData.agentAvatar || '';
         const assignedAgentName = extraData.agentName
           || (assignedAgentId && assignedAgentId === agentId.value ? agentName.value : '其他客服');
         const assignedConv = conversations.value.find(c => c.id === extraData.conversationId);
@@ -3177,6 +3205,7 @@ function handleWsMessage(data: any) {
           assignedConv.status = 1; // 已分配
           assignedConv.ownerAgentId = assignedAgentId;
           assignedConv.ownerAgentName = assignedAgentName;
+          assignedConv.ownerAgentAvatar = assignedAgentAvatar;
           assignedConv.assignTime = new Date().toISOString();
           
           // 如果当前是待接入列表，从列表中移除该会话
@@ -3192,6 +3221,7 @@ function handleWsMessage(data: any) {
             currentConversation.value.status = 1;
             currentConversation.value.ownerAgentId = assignedAgentId;
             currentConversation.value.ownerAgentName = assignedAgentName;
+            currentConversation.value.ownerAgentAvatar = assignedAgentAvatar;
           }
           
           // 如果不是当前客服接入的，显示提示
@@ -3385,12 +3415,14 @@ function handleWsMessage(data: any) {
           if (transferredConv) {
             transferredConv.ownerAgentId = extraData.toAgentId;
             transferredConv.ownerAgentName = extraData.toAgentName;
+            transferredConv.ownerAgentAvatar = extraData.toAgentAvatar || extraData.conversation?.ownerAgentAvatar || '';
           }
           
           // 如果是当前选中的会话，更新显示
           if (currentConversation.value?.id === conversationId) {
             currentConversation.value.ownerAgentId = extraData.toAgentId;
             currentConversation.value.ownerAgentName = extraData.toAgentName;
+            currentConversation.value.ownerAgentAvatar = extraData.toAgentAvatar || extraData.conversation?.ownerAgentAvatar || '';
           }
 
           // 如果在待接入列表里且已分配，移除该会话
@@ -3969,6 +4001,10 @@ function restoreMessageScroll() {
     align-items: center;
     gap: 8px;
   }
+
+  .self-agent-avatar {
+    flex-shrink: 0;
+  }
   
   .agent-name {
     font-weight: 500;
@@ -4139,6 +4175,10 @@ function restoreMessageScroll() {
     font-weight: 500;
     font-size: 14px;
     color: #333;
+    flex-shrink: 0;
+  }
+
+  .monitor-agent-avatar {
     flex-shrink: 0;
   }
   
@@ -4429,6 +4469,10 @@ function restoreMessageScroll() {
   }
   
   &.user {
+    .msg-body {
+      align-items: flex-start;
+    }
+
     .msg-avatar {
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     }
@@ -4439,6 +4483,19 @@ function restoreMessageScroll() {
     
     .msg-body {
       align-items: flex-end;
+      margin-left: auto;
+    }
+
+    .msg-info {
+      justify-content: flex-end;
+    }
+
+    .msg-bubble {
+      align-self: flex-end;
+    }
+
+    .msg-meta {
+      justify-content: flex-end;
     }
     
     .msg-avatar {

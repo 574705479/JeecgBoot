@@ -4,6 +4,9 @@
       <template #tableTitle>
         <a-button type="primary" preIcon="ant-design:plus-outlined" @click="handleAdd">新增子客服</a-button>
       </template>
+      <template #avatar="{ record }">
+        <a-avatar :src="getAvatarUrl(record.avatar)">{{ (record.nickname || '客').charAt(0) }}</a-avatar>
+      </template>
       <template #action="{ record }">
         <TableAction :actions="getActions(record)" :dropDownActions="getDropDownActions(record)" />
       </template>
@@ -30,6 +33,9 @@
         </a-form-item>
         <a-form-item label="客服昵称" required>
           <a-input v-model:value="formState.nickname" placeholder="请输入客服昵称" />
+        </a-form-item>
+        <a-form-item label="头像">
+          <JImageUpload v-model:value="formState.avatar" />
         </a-form-item>
         <a-form-item label="手机号">
           <a-input v-model:value="formState.phone" placeholder="请输入手机号" />
@@ -82,11 +88,14 @@ import { BasicTable, useTable, TableAction } from '/@/components/Table';
 import { BasicModal, useModal } from '/@/components/Modal';
 import { defHttp } from '/@/utils/http/axios';
 import { useMessage } from '/@/hooks/web/useMessage';
+import JImageUpload from '/@/components/Form/src/jeecg/components/JImageUpload.vue';
+import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
 
 const { createConfirm, createMessage } = useMessage();
 
 // ==================== 表格 ====================
 const columns = [
+  { title: '头像', dataIndex: 'avatar', width: 80, slots: { customRender: 'avatar' } },
   { title: '客服昵称', dataIndex: 'nickname', width: 120 },
   { title: '登录账号', dataIndex: 'username', width: 120 },
   { title: '最大接待数', dataIndex: 'maxSessions', width: 100 },
@@ -157,6 +166,7 @@ const formState = reactive({
   username: '',
   password: '',
   nickname: '',
+  avatar: '',
   phone: '',
   email: '',
   maxSessions: 10,
@@ -165,6 +175,10 @@ const formState = reactive({
 });
 
 const modalTitle = computed(() => isUpdate.value ? '编辑子客服' : '新增子客服');
+
+function getAvatarUrl(avatar?: string) {
+  return avatar ? getFileAccessHttpUrl(avatar) : '';
+}
 
 // ==================== 菜单树 ====================
 const menuTreeData = ref<any[]>([]);
@@ -214,6 +228,7 @@ function handleAdd() {
     username: '',
     password: '',
     nickname: '',
+    avatar: '',
     phone: '',
     email: '',
     maxSessions: 10,
@@ -234,6 +249,7 @@ async function handleEdit(record: any) {
       username: res.username || '',
       password: '',
       nickname: agent.nickname || '',
+      avatar: agent.avatar || '',
       phone: res.phone || '',
       email: res.email || '',
       maxSessions: agent.maxSessions || 10,
@@ -255,6 +271,7 @@ async function handleEdit(record: any) {
       username: '',
       password: '',
       nickname: record.nickname || '',
+      avatar: record.avatar || '',
       phone: '',
       email: '',
       maxSessions: record.maxSessions || 10,

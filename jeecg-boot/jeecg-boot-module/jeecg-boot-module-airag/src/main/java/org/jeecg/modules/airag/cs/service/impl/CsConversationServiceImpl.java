@@ -178,6 +178,7 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             extra.put("replyMode", conversation.getReplyMode());
             extra.put("agentName", assignedAgent.getNickname());
             extra.put("agentId", assignedAgent.getId());
+            extra.put("agentAvatar", assignedAgent.getAvatar());
             notifyUser(conversation.getId(), "agent_connected", 
                     "客服 " + assignedAgent.getNickname() + " 为您服务", extra);
         } else {
@@ -505,6 +506,7 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             assignData.put("conversationId", conversationId);
             assignData.put("agentId", agentId);
             assignData.put("agentName", agent.getNickname());
+            assignData.put("agentAvatar", agent.getAvatar());
             assignData.put("assignTime", new Date());
             broadcastToAllAgents("conversation_assigned", assignData);
             
@@ -512,6 +514,8 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             Map<String, Object> extra = new HashMap<>();
             extra.put("replyMode", CsConversation.REPLY_MODE_MANUAL);
             extra.put("agentName", agent.getNickname());
+            extra.put("agentId", agent.getId());
+            extra.put("agentAvatar", agent.getAvatar());
             notifyUser(conversationId, "agent_connected", "客服 " + agent.getNickname() + " 为您服务", extra);
         }
         
@@ -744,8 +748,12 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         
         notifyRelatedAgents(conversationId, "transfer",
                 "会话已从 " + fromName + " 移交给 " + toAgent.getNickname(), null);
-        notifyUser(conversationId, "agent_changed", 
-                "客服 " + toAgent.getNickname() + " 继续为您服务");
+        Map<String, Object> userExtra = new HashMap<>();
+        userExtra.put("agentId", toAgent.getId());
+        userExtra.put("agentName", toAgent.getNickname());
+        userExtra.put("agentAvatar", toAgent.getAvatar());
+        notifyUser(conversationId, "agent_changed",
+                "客服 " + toAgent.getNickname() + " 继续为您服务", userExtra);
         
         // ★ 广播会话转接给所有客服（包含完整的会话信息）
         broadcastConversationTransfer(conversation, fromAgentId, fromName, toAgentId, toAgent.getNickname());
@@ -766,6 +774,10 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             data.put("fromAgentName", fromAgentName);
             data.put("toAgentId", toAgentId);
             data.put("toAgentName", toAgentName);
+            CsAgent toAgent = agentService.getById(toAgentId);
+            if (toAgent != null) {
+                data.put("toAgentAvatar", toAgent.getAvatar());
+            }
             data.put("transferTime", new Date());
             
             // ★ 添加完整的会话信息，供前端直接使用
@@ -779,6 +791,9 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             conversationData.put("replyMode", conversation.getReplyMode());
             conversationData.put("ownerAgentId", toAgentId);
             conversationData.put("ownerAgentName", toAgentName);
+            if (toAgent != null) {
+                conversationData.put("ownerAgentAvatar", toAgent.getAvatar());
+            }
             conversationData.put("lastMessage", conversation.getLastMessage());
             conversationData.put("lastMessageTime", conversation.getLastMessageTime());
             conversationData.put("unreadCount", conversation.getUnreadCount());

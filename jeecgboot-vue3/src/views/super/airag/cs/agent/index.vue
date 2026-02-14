@@ -4,6 +4,9 @@
       <template #tableTitle>
         <a-button type="primary" preIcon="ant-design:plus-outlined" @click="handleAdd">新增管理员客服</a-button>
       </template>
+      <template #avatar="{ record }">
+        <a-avatar :src="getAvatarUrl(record.avatar)">{{ (record.nickname || '客').charAt(0) }}</a-avatar>
+      </template>
       <template #action="{ record }">
         <TableAction :actions="getActions(record)" />
       </template>
@@ -23,6 +26,7 @@ import { BasicTable, useTable, TableAction } from '/@/components/Table';
 import { useModal } from '/@/components/Modal';
 import { defHttp } from '/@/utils/http/axios';
 import { useMessage } from '/@/hooks/web/useMessage';
+import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
 import CsAgentModal from './CsAgentModal.vue';
 
 const { createConfirm, createMessage } = useMessage();
@@ -30,6 +34,7 @@ const { createConfirm, createMessage } = useMessage();
 const [registerModal, { openModal }] = useModal();
 
 const columns = [
+  { title: '头像', dataIndex: 'avatar', width: 80, slots: { customRender: 'avatar' } },
   { title: '客服昵称', dataIndex: 'nickname', width: 120 },
   { title: '登录账号', dataIndex: 'username', width: 120 },
   { title: '最大接待数', dataIndex: 'maxSessions', width: 100 },
@@ -74,6 +79,10 @@ const [registerTable, { reload }] = useTable({
 const rowSelection = ref({
   type: 'checkbox',
 });
+
+function getAvatarUrl(avatar?: string) {
+  return avatar ? getFileAccessHttpUrl(avatar) : '';
+}
 
 function getStatusBadge(status: number) {
   switch (status) {

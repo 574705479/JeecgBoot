@@ -777,7 +777,7 @@ function resolveAvatarUrl(avatar?: string) {
 }
 
 function getAgentAvatar(msg?: any) {
-  const avatar = msg?.senderAvatar || appInfo.value.avatar;
+  const avatar = msg?.senderAvatar || currentAgentAvatar.value || appInfo.value.avatar;
   return resolveAvatarUrl(avatar) || defaultAvatar;
 }
 
@@ -926,6 +926,7 @@ const conversationId = ref('');
 const conversationClosed = ref(false);  // 会话是否已结束
 const replyMode = ref(0);  // 回复模式: 0=AI自动, 1=手动
 const hasAgent = ref(false);  // 是否有客服接入
+const currentAgentAvatar = ref(''); // 当前接待客服头像（用于无消息场景）
 
 // ==================== 满意度评价 ====================
 const showSatisfactionModal = ref(false);
@@ -2004,6 +2005,9 @@ function handleWsMessage(data: any) {
     case 'message':
       // 收到新消息（来自客服或AI）
       const msgSenderType = Number(data.senderType);
+      if (msgSenderType === 1 && data.senderAvatar) {
+        currentAgentAvatar.value = data.senderAvatar;
+      }
       const newMsg = {
         id: data.messageId || Date.now().toString(),
         conversationId: data.conversationId,
@@ -2070,6 +2074,11 @@ function handleWsMessage(data: any) {
     case 'agent_connected':
       // 客服已接入，自动切换为手动模式
       hasAgent.value = true;
+      if (data.extra?.agentAvatar) {
+        currentAgentAvatar.value = data.extra.agentAvatar;
+      } else if (data.senderAvatar) {
+        currentAgentAvatar.value = data.senderAvatar;
+      }
       if (data.extra?.replyMode !== undefined) {
         replyMode.value = data.extra.replyMode;
       } else {
@@ -2080,6 +2089,23 @@ function handleWsMessage(data: any) {
       messages.value.push({
         id: Date.now().toString(),
         content: data.content || `客服 ${data.extra?.agentName || data.senderName || ''} 已为您服务`,
+        senderType: 3,
+        createTime: new Date().toISOString(),
+      });
+      scrollToBottom();
+      break;
+
+    case 'agent_changed':
+      // 会话转接后更新当前客服信息
+      hasAgent.value = true;
+      if (data.extra?.agentAvatar) {
+        currentAgentAvatar.value = data.extra.agentAvatar;
+      } else if (data.senderAvatar) {
+        currentAgentAvatar.value = data.senderAvatar;
+      }
+      messages.value.push({
+        id: Date.now().toString(),
+        content: data.content || `客服 ${data.extra?.agentName || data.senderName || ''} 继续为您服务`,
         senderType: 3,
         createTime: new Date().toISOString(),
       });
@@ -3028,10 +3054,14 @@ watch(messages, () => {
   gap: 12px;
 
   .message-content {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
     max-width: 70%;
   }
 
   .message-text {
+    max-width: 100%;
     padding: 12px 16px;
     background: var(--visitor-bubble-bg, linear-gradient(135deg, #667eea 0%, #764ba2 100%));
     color: var(--visitor-bubble-color, #fff);
@@ -3075,6 +3105,7 @@ watch(messages, () => {
   }
 
   .message-content {
+    width: fit-content;
     max-width: 70%;
   }
 
@@ -3091,6 +3122,8 @@ watch(messages, () => {
   }
 
   .message-text {
+    display: inline-block;
+    max-width: 100%;
     padding: 12px 16px;
     background: var(--agent-bubble-bg, #f5f5f5);
     color: var(--agent-bubble-color, #333);
