@@ -1,5 +1,7 @@
 package org.jeecg.modules.airag.cs.service.impl;
 
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -54,6 +56,9 @@ public class CsMessageServiceImpl implements ICsMessageService {
     /** 访客AI应用全局配置的Redis Key */
     private static final String VISITOR_APP_REDIS_KEY = "cs:global:visitor_app_id";
     private static final String VISITOR_APP_CONFIG_KEY = "visitor_app_id";
+
+    /** 聊天窗口设置的Redis Key（含FAQ配置） */
+    private static final String CHAT_WINDOW_REDIS_KEY = "cs:global:chat_window_settings";
 
     @Autowired
     private IChatMessageService chatMessageService;
@@ -156,6 +161,11 @@ public class CsMessageServiceImpl implements ICsMessageService {
         // 增加客服未读数
         conversationService.incrementUnread(conversationId);
         
+        // FAQ关键词匹配（最高优先级，匹配成功则跳过AI回复）
+        if (tryFaqKeywordMatch(conversationId, content)) {
+            return userMessage;
+        }
+        
         // 根据回复模式处理
         int replyMode = conversation.getReplyMode() != null ? 
                 conversation.getReplyMode() : CsConversation.REPLY_MODE_AI_AUTO;
@@ -245,6 +255,11 @@ public class CsMessageServiceImpl implements ICsMessageService {
         // 增加客服未读数
         conversationService.incrementUnread(conversationId);
 
+        // FAQ关键词匹配（最高优先级，匹配成功则跳过AI回复）
+        if (tryFaqKeywordMatch(conversationId, content)) {
+            return userMessage;
+        }
+
         // 根据回复模式处理
         int replyMode = conversation.getReplyMode() != null ?
                 conversation.getReplyMode() : CsConversation.REPLY_MODE_AI_AUTO;
@@ -261,6 +276,65 @@ public class CsMessageServiceImpl implements ICsMessageService {
         }
 
         return userMessage;
+    }
+
+    /**
+     * FAQ关键词匹配（最高优先级）
+     * 用户发送的消息中包含FAQ配置的任意关键词时，自动发送预设答案
+     * @param conversationId 会话ID
+     * @param content 用户消息内容
+     * @return true=匹配成功并已发送答案, false=无匹配
+     */
+    private boolean tryFaqKeywordMatch(String conversationId, String content) {
+        if (oConvertUtils.isEmpty(content)) {
+            return false;
+        }
+        try {
+            String settingsJson = redisTemplate.opsForValue().get(CHAT_WINDOW_REDIS_KEY);
+            if (oConvertUtils.isEmpty(settingsJson)) {
+                return false;
+            }
+
+            JSONObject settings = JSON.parseObject(settingsJson);
+            Boolean faqEnabled = settings.getBoolean("faqEnabled");
+            if (faqEnabled == null || !faqEnabled) {
+                return false;
+            }
+
+            JSONArray faqList = settings.getJSONArray("faqList");
+            if (faqList == null || faqList.isEmpty()) {
+                return false;
+            }
+
+            String lowerContent = content.toLowerCase().trim();
+
+            // 遍历FAQ列表，按顺序匹配（第一个命中的FAQ生效）
+            for (int i = 0; i < faqList.size(); i++) {
+                JSONObject faq = faqList.getJSONObject(i);
+                if (faq == null) continue;
+
+                JSONArray keywords = faq.getJSONArray("keywords");
+                if (keywords == null || keywords.isEmpty()) continue;
+
+                for (int j = 0; j < keywords.size(); j++) {
+                    String keyword = keywords.getString(j);
+                    if (oConvertUtils.isNotEmpty(keyword)
+                            && lowerContent.contains(keyword.toLowerCase().trim())) {
+                        // 匹配成功，发送FAQ预设答案
+                        String answer = faq.getString("answer");
+                        if (oConvertUtils.isNotEmpty(answer)) {
+                            log.info("[CS-Message] FAQ关键词匹配成功: conversationId={}, keyword={}, faqIndex={}", 
+                                    conversationId, keyword, i);
+                            sendAgentMessage(conversationId, "faq_system", "智能助手", answer, 0, null);
+                            return true;
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.error("[CS-Message] FAQ关键词匹配异常", e);
+        }
+        return false;
     }
 
     @Override

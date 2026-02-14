@@ -248,14 +248,20 @@
 
     <!-- 手机端FAQ（仅窄屏显示，PC端在右侧sidebar展示） -->
     <div v-if="chatWindowConfig.faqEnabled && chatWindowConfig.faqList?.length > 0" class="faq-mobile-section">
-      <div class="faq-mobile-header" @click="faqMobileExpanded = !faqMobileExpanded">
+      <div class="faq-mobile-header" @click="faqMobileExpanded = !faqMobileExpanded; faqMobileShowAll = false">
         <QuestionCircleOutlined />
         <span>常见问题</span>
         <span class="faq-mobile-toggle">{{ faqMobileExpanded ? '收起' : '展开' }}</span>
       </div>
-      <div v-if="faqMobileExpanded" class="faq-mobile-list">
-        <div v-for="(faq, idx) in chatWindowConfig.faqList" :key="idx" class="faq-mobile-item" @click="handleFaqClick(faq)">
+      <div v-if="faqMobileExpanded" class="faq-mobile-list" :class="{ 'faq-mobile-list-scrollable': faqMobileShowAll && chatWindowConfig.faqList.length > FAQ_MOBILE_DEFAULT_COUNT }">
+        <div v-for="(faq, idx) in (faqMobileShowAll ? chatWindowConfig.faqList : chatWindowConfig.faqList.slice(0, FAQ_MOBILE_DEFAULT_COUNT))" :key="idx" class="faq-mobile-item" @click="handleFaqClick(faq)">
           {{ faq.question }}
+        </div>
+        <div v-if="!faqMobileShowAll && chatWindowConfig.faqList.length > FAQ_MOBILE_DEFAULT_COUNT" class="faq-show-more" @click.stop="faqMobileShowAll = true">
+          查看全部 ({{ chatWindowConfig.faqList.length }}条)
+        </div>
+        <div v-if="faqMobileShowAll && chatWindowConfig.faqList.length > FAQ_MOBILE_DEFAULT_COUNT" class="faq-show-more" @click.stop="faqMobileShowAll = false">
+          收起
         </div>
       </div>
     </div>
@@ -350,10 +356,16 @@
         </div>
         <div v-if="chatWindowConfig.faqEnabled && chatWindowConfig.faqList?.length > 0" class="sidebar-faq">
           <div class="sidebar-faq-title"><QuestionCircleOutlined /> 常见问题</div>
-          <div class="sidebar-faq-list">
-            <div v-for="(faq, idx) in chatWindowConfig.faqList" :key="idx" class="sidebar-faq-item" @click="handleFaqClick(faq)">
+          <div class="sidebar-faq-list" :class="{ 'sidebar-faq-list-scrollable': faqPcShowAll && chatWindowConfig.faqList.length > FAQ_PC_DEFAULT_COUNT }">
+            <div v-for="(faq, idx) in (faqPcShowAll ? chatWindowConfig.faqList : chatWindowConfig.faqList.slice(0, FAQ_PC_DEFAULT_COUNT))" :key="idx" class="sidebar-faq-item" @click="handleFaqClick(faq)">
               {{ faq.question }}
             </div>
+          </div>
+          <div v-if="!faqPcShowAll && chatWindowConfig.faqList.length > FAQ_PC_DEFAULT_COUNT" class="sidebar-faq-more" @click="faqPcShowAll = true">
+            查看全部 ({{ chatWindowConfig.faqList.length }}条)
+          </div>
+          <div v-if="faqPcShowAll && chatWindowConfig.faqList.length > FAQ_PC_DEFAULT_COUNT" class="sidebar-faq-more" @click="faqPcShowAll = false">
+            收起
           </div>
         </div>
       </div>
@@ -527,11 +539,15 @@ const chatWindowConfig = reactive({
   pcAdLink: '',
   pcAdImage: '',
   faqEnabled: false,
-  faqList: [] as Array<{ question: string; answer: string }>,
+  faqList: [] as Array<{ question: string; answer: string; keywords?: string[] }>,
 });
 
-// FAQ展开状态（手机端）
+// FAQ展开状态
 const faqMobileExpanded = ref(false);
+const faqMobileShowAll = ref(false);
+const faqPcShowAll = ref(false);
+const FAQ_PC_DEFAULT_COUNT = 8;
+const FAQ_MOBILE_DEFAULT_COUNT = 5;
 
 // 头部样式（支持背景图）
 const headerStyle = computed(() => {
@@ -589,6 +605,12 @@ async function loadChatWindowConfig() {
     if (!Array.isArray(chatWindowConfig.faqList)) {
       chatWindowConfig.faqList = [];
     }
+    // 旧数据兼容：确保每个FAQ项都有keywords字段
+    chatWindowConfig.faqList.forEach((faq: any) => {
+      if (!Array.isArray(faq.keywords)) {
+        faq.keywords = [];
+      }
+    });
     // 设置页面标题
     if (chatWindowConfig.pageTitle) {
       document.title = chatWindowConfig.pageTitle;
@@ -2656,6 +2678,21 @@ watch(messages, () => {
   background: #e6f7ff;
   border-color: #91d5ff;
 }
+.sidebar-faq-list-scrollable {
+  max-height: 400px;
+  overflow-y: auto;
+}
+.sidebar-faq-more {
+  text-align: center;
+  font-size: 12px;
+  color: #1890ff;
+  cursor: pointer;
+  padding: 6px 0 2px;
+  user-select: none;
+}
+.sidebar-faq-more:hover {
+  color: #40a9ff;
+}
 
 /* 手机端FAQ */
 .faq-mobile-section {
@@ -2701,6 +2738,22 @@ watch(messages, () => {
 .faq-mobile-item:active {
   background: #e6f7ff;
   border-color: #91d5ff;
+}
+.faq-mobile-list-scrollable {
+  max-height: 300px;
+  overflow-y: auto;
+}
+.faq-show-more {
+  width: 100%;
+  text-align: center;
+  font-size: 12px;
+  color: #1890ff;
+  cursor: pointer;
+  padding: 4px 0;
+  user-select: none;
+}
+.faq-show-more:active {
+  color: #40a9ff;
 }
 
 @media (max-width: 800px) {

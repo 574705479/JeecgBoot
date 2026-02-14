@@ -300,11 +300,10 @@
               <a-col :span="24" v-if="config.faqEnabled">
                 <div class="faq-section">
                   <div class="faq-header">
-                    <a-button type="primary" size="small" :disabled="config.faqList.length >= 10" @click="openFaqEditor(-1)">
+                    <a-button type="primary" size="small" @click="openFaqEditor(-1)">
                       <PlusOutlined /> 添加问题
                     </a-button>
-                    <span class="faq-count">{{ config.faqList.length }} / 10 条</span>
-                    <span v-if="config.faqList.length >= 10" class="faq-limit-hint">已达上限，最多添加10条常见问题</span>
+                    <span class="faq-count">{{ config.faqList.length }} 条</span>
                   </div>
                   <div v-if="config.faqList.length === 0" class="faq-empty">
                     <QuestionCircleOutlined style="font-size:28px;color:#d9d9d9;margin-bottom:8px" />
@@ -316,6 +315,9 @@
                     <div class="faq-item-body">
                       <div class="faq-item-question">{{ faq.question }}</div>
                       <div class="faq-item-answer">{{ stripHtml(faq.answer) }}</div>
+                      <div v-if="faq.keywords?.length" class="faq-item-keywords">
+                        <a-tag v-for="kw in faq.keywords" :key="kw" size="small" color="blue">{{ kw }}</a-tag>
+                      </div>
                     </div>
                     <div class="faq-item-actions" @click.stop>
                       <a-tooltip title="编辑">
@@ -457,6 +459,18 @@
         <a-form-item label="问题" :required="true" style="margin-bottom:16px">
           <a-input v-model:value="faqEditForm.question" placeholder="请输入访客常见问题，例如：你们的产品有哪些？" :maxlength="100" showCount size="large" />
         </a-form-item>
+        <a-form-item style="margin-bottom:16px">
+          <template #label>
+            <span>匹配关键词 <span style="color:#999;font-weight:normal;font-size:12px">（可选，用户消息包含任一关键词时自动匹配此问题）</span></span>
+          </template>
+          <a-select
+            v-model:value="faqEditForm.keywords"
+            mode="tags"
+            placeholder="输入关键词后按回车添加，支持多个（至少2个字符）"
+            :token-separators="[',', '，']"
+            style="width:100%"
+          />
+        </a-form-item>
         <a-form-item style="margin-bottom:0">
           <template #label>
             <span>答案 <span style="color:#999;font-weight:normal;font-size:12px">（支持富文本格式，可插入图片、链接等）</span></span>
@@ -492,6 +506,7 @@ const previewTab = ref('pc');
 interface FaqItem {
   question: string;
   answer: string;
+  keywords: string[];
 }
 
 const config = reactive({
@@ -528,7 +543,7 @@ const config = reactive({
 // FAQ编辑器状态
 const faqEditorVisible = ref(false);
 const faqEditIndex = ref(-1); // -1=新增
-const faqEditForm = reactive<FaqItem>({ question: '', answer: '' });
+const faqEditForm = reactive<FaqItem>({ question: '', answer: '', keywords: [] });
 const faqEditorPlugins = 'lists image link media fullscreen paste';
 const faqEditorToolbar = 'bold italic underline strikethrough | bullist numlist | alignleft aligncenter alignright | fontsize forecolor backcolor | link image media | removeformat';
 
@@ -550,9 +565,11 @@ function openFaqEditor(idx: number) {
   if (idx >= 0 && config.faqList[idx]) {
     faqEditForm.question = config.faqList[idx].question;
     faqEditForm.answer = config.faqList[idx].answer;
+    faqEditForm.keywords = Array.isArray(config.faqList[idx].keywords) ? [...config.faqList[idx].keywords] : [];
   } else {
     faqEditForm.question = '';
     faqEditForm.answer = '';
+    faqEditForm.keywords = [];
   }
   faqEditorVisible.value = true;
 }
@@ -566,14 +583,15 @@ function saveFaqItem() {
     createMessage.warning('请输入答案');
     return;
   }
-  const item: FaqItem = { question: faqEditForm.question.trim(), answer: faqEditForm.answer };
+  // 过滤掉长度不足2个字符的关键词
+  const validKeywords = (faqEditForm.keywords || []).filter(k => k.trim().length >= 2).map(k => k.trim());
+  if (faqEditForm.keywords.length > 0 && validKeywords.length < faqEditForm.keywords.length) {
+    createMessage.warning('关键词长度至少为2个字符，已自动过滤无效关键词');
+  }
+  const item: FaqItem = { question: faqEditForm.question.trim(), answer: faqEditForm.answer, keywords: validKeywords };
   if (faqEditIndex.value >= 0) {
     config.faqList[faqEditIndex.value] = item;
   } else {
-    if (config.faqList.length >= 10) {
-      createMessage.warning('最多添加10条常见问题');
-      return;
-    }
     config.faqList.push(item);
   }
   faqEditorVisible.value = false;
@@ -666,6 +684,12 @@ async function fetchConfig() {
       if (!Array.isArray(config.faqList)) {
         config.faqList = [];
       }
+      // 旧数据兼容：确保每个FAQ项都有keywords字段
+      config.faqList.forEach((faq: any) => {
+        if (!Array.isArray(faq.keywords)) {
+          faq.keywords = [];
+        }
+      });
       if (!Array.isArray(config.headerIcons)) {
         config.headerIcons = [];
       }
@@ -872,6 +896,8 @@ onMounted(() => {
   border-radius: 8px;
   padding: 16px;
   background: #fafafa;
+  max-height: 600px;
+  overflow-y: auto;
 }
 .faq-header {
   display: flex;
@@ -947,6 +973,18 @@ onMounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 380px;
+}
+.faq-item-keywords {
+  margin-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.faq-item-keywords .ant-tag {
+  margin: 0;
+  font-size: 11px;
+  line-height: 18px;
+  padding: 0 6px;
 }
 .faq-item-actions {
   flex-shrink: 0;
@@ -1160,6 +1198,8 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  max-height: 80px;
+  overflow-y: auto;
 }
 .p-faq-mobile-item {
   background: #fff;
