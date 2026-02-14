@@ -6,7 +6,16 @@
     @ok="handleSubmit"
     width="600px"
   >
-    <BasicForm @register="registerForm" />
+    <BasicForm @register="registerForm">
+      <template #avatar="{ model, field }">
+        <CropperAvatar
+          :uploadApi="uploadImg"
+          :value="getAvatarFullUrl(model[field])"
+          @change="(src, data) => { model[field] = data }"
+          width="100"
+        />
+      </template>
+    </BasicForm>
   </BasicModal>
 </template>
 
@@ -14,14 +23,21 @@
 import { ref, computed, unref } from 'vue';
 import { BasicModal, useModalInner } from '/@/components/Modal';
 import { BasicForm, useForm } from '/@/components/Form';
+import { CropperAvatar } from '/@/components/Cropper';
 import { defHttp } from '/@/utils/http/axios';
 import { useMessage } from '/@/hooks/web/useMessage';
+import { uploadImg } from '/@/api/sys/upload';
+import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
 
 const emit = defineEmits(['success', 'register']);
 const { createMessage } = useMessage();
 
 const isUpdate = ref(false);
 const recordId = ref('');
+
+function getAvatarFullUrl(path: string) {
+  return path ? getFileAccessHttpUrl(path) : '';
+}
 
 const [registerForm, { setFieldsValue, resetFields, validate, updateSchema }] = useForm({
   labelWidth: 100,
@@ -45,7 +61,7 @@ const [registerForm, { setFieldsValue, resetFields, validate, updateSchema }] = 
     { field: 'nickname', label: '客服昵称', component: 'Input', required: true,
       componentProps: { placeholder: '请输入客服昵称' }
     },
-    { field: 'avatar', label: '头像', component: 'JImageUpload' },
+    { field: 'avatar', label: '头像', component: 'Input', slot: 'avatar' },
     { field: 'maxSessions', label: '最大接待数', component: 'InputNumber', defaultValue: 10,
       componentProps: { min: 1, max: 50 }
     },

@@ -35,7 +35,12 @@
           <a-input v-model:value="formState.nickname" placeholder="请输入客服昵称" />
         </a-form-item>
         <a-form-item label="头像">
-          <JImageUpload v-model:value="formState.avatar" />
+          <CropperAvatar
+            :uploadApi="uploadImg"
+            :value="getAvatarFullUrl(formState.avatar)"
+            @change="handleAvatarChange"
+            width="100"
+          />
         </a-form-item>
         <a-form-item label="手机号">
           <a-input v-model:value="formState.phone" placeholder="请输入手机号" />
@@ -88,7 +93,8 @@ import { BasicTable, useTable, TableAction } from '/@/components/Table';
 import { BasicModal, useModal } from '/@/components/Modal';
 import { defHttp } from '/@/utils/http/axios';
 import { useMessage } from '/@/hooks/web/useMessage';
-import JImageUpload from '/@/components/Form/src/jeecg/components/JImageUpload.vue';
+import { CropperAvatar } from '/@/components/Cropper';
+import { uploadImg } from '/@/api/sys/upload';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
 
 const { createConfirm, createMessage } = useMessage();
@@ -178,6 +184,14 @@ const modalTitle = computed(() => isUpdate.value ? '编辑子客服' : '新增�
 
 function getAvatarUrl(avatar?: string) {
   return avatar ? getFileAccessHttpUrl(avatar) : '';
+}
+
+function getAvatarFullUrl(path: string) {
+  return path ? getFileAccessHttpUrl(path) : '';
+}
+
+function handleAvatarChange(src: string, data: string) {
+  formState.avatar = data;
 }
 
 // ==================== 菜单树 ====================

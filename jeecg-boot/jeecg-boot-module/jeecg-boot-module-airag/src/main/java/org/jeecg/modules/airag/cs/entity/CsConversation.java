@@ -113,6 +113,11 @@ public class CsConversation implements Serializable {
     @Schema(description = "最后消息时间")
     private Date lastMessageTime;
 
+    @JsonFormat(timezone = "GMT+8", pattern = "yyyy-MM-dd HH:mm:ss")
+    @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    @Schema(description = "访客最后发消息时间(NULL表示客服已回复)")
+    private Date visitorLastMsgTime;
+
     @Schema(description = "客服未读消息数")
     private Integer unreadCount;
 

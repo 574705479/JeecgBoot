@@ -946,6 +946,24 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         update(updateWrapper);
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updateVisitorLastMsgTime(String conversationId) {
+        LambdaUpdateWrapper<CsConversation> updateWrapper = new LambdaUpdateWrapper<>();
+        updateWrapper.eq(CsConversation::getId, conversationId)
+                .set(CsConversation::getVisitorLastMsgTime, new Date());
+        update(updateWrapper);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void clearVisitorLastMsgTime(String conversationId) {
+        LambdaUpdateWrapper<CsConversation> updateWrapper = new LambdaUpdateWrapper<>();
+        updateWrapper.eq(CsConversation::getId, conversationId)
+                .set(CsConversation::getVisitorLastMsgTime, null);
+        update(updateWrapper);
+    }
+
     // ==================== 评价 ====================
 
     @Override

@@ -218,6 +218,20 @@ public interface ICsConversationService extends IService<CsConversation> {
      */
     void resetTimeoutWarning(String conversationId);
 
+    /**
+     * 更新访客最后发消息时间（访客发消息时调用，标记等待回复）
+     *
+     * @param conversationId 会话ID
+     */
+    void updateVisitorLastMsgTime(String conversationId);
+
+    /**
+     * 清除访客最后发消息时间（客服回复时调用，标记已回复）
+     *
+     * @param conversationId 会话ID
+     */
+    void clearVisitorLastMsgTime(String conversationId);
+
     // ==================== 评价 ====================
 
     /**

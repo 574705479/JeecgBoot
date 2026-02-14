@@ -155,6 +155,9 @@ public class CsMessageServiceImpl implements ICsMessageService {
         // 重置超时提醒标记（用户活跃，取消超时倒计时）
         conversationService.resetTimeoutWarning(conversationId);
         
+        // 标记访客发消息时间（用于客服超时未回复精确判断）
+        conversationService.updateVisitorLastMsgTime(conversationId);
+        
         // 推送给所有相关客服
         pushToAgents(conversation, userMessage);
         
@@ -209,6 +212,9 @@ public class CsMessageServiceImpl implements ICsMessageService {
         // 重置超时提醒标记
         conversationService.resetTimeoutWarning(conversationId);
 
+        // 标记访客发消息时间（用于客服超时未回复精确判断）
+        conversationService.updateVisitorLastMsgTime(conversationId);
+
         // 推送给访客自己（因为消息是后端代发的，前端需要通过WebSocket接收）
         pushToUser(conversationId, userMessage);
 
@@ -248,6 +254,9 @@ public class CsMessageServiceImpl implements ICsMessageService {
 
         // 重置超时提醒标记
         conversationService.resetTimeoutWarning(conversationId);
+
+        // 标记访客发消息时间（用于客服超时未回复精确判断）
+        conversationService.updateVisitorLastMsgTime(conversationId);
 
         // 推送给所有相关客服
         pushToAgents(conversation, userMessage);
@@ -376,11 +385,13 @@ public class CsMessageServiceImpl implements ICsMessageService {
         // 保存到MongoDB（异步）
         asyncTaskExecutor.submitMongo(() -> saveToMongo(agentMessage));
 
-        // 更新会话最后消息 + 清除未读（异步）
+        // 更新会话最后消息 + 清除未读 + 清除访客等待标记（异步）
         String lastMessage = buildMessagePreview(content, msgType, extra);
         asyncTaskExecutor.submitConversation(() -> {
             conversationService.updateLastMessage(conversationId, lastMessage);
             conversationService.clearUnread(conversationId);
+            // 客服回复后清除访客等待标记（FAQ自动回复也算已回复）
+            conversationService.clearVisitorLastMsgTime(conversationId);
         });
 
         // 推送给用户 + 其他客服（异步）

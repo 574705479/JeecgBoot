@@ -5,7 +5,7 @@
       <!-- 客服状态栏 -->
       <div class="agent-bar">
         <div class="agent-info">
-          <a-avatar :size="26" class="self-agent-avatar" :src="agentAvatar ? getFileAccessHttpUrl(agentAvatar) : ''">
+          <a-avatar :size="32" class="self-agent-avatar" :src="agentAvatar ? getFileAccessHttpUrl(agentAvatar) : ''">
             {{ (agentName || '客').charAt(0) }}
           </a-avatar>
           <span class="agent-name">{{ agentName }}</span>
@@ -225,7 +225,7 @@
               <CaretRightOutlined v-else />
             </span>
             <a-avatar
-              :size="24"
+              :size="30"
               class="monitor-agent-avatar"
               :src="getAgentItemAvatarUrl(group.agent)"
             >
@@ -265,6 +265,10 @@
                   <span class="conv-time">{{ formatTime(conv.lastMessageTime) }}</span>
                 </div>
                 <div class="conv-preview">{{ stripHtmlTags(conv.lastMessage) || '暂无消息' }}</div>
+                <div class="conv-waiting" v-if="agentTimeoutConfig.enabled && visitorWaitingSeconds[conv.id]">
+                  <span class="waiting-icon">⏱</span>
+                  <span class="waiting-text">等待回复 {{ formatWaitingTime(visitorWaitingSeconds[conv.id]) }}</span>
+                </div>
               </div>
               <div class="conv-badge" v-if="conv.unreadCount > 0">
                 {{ conv.unreadCount > 99 ? '99+' : conv.unreadCount }}
@@ -1062,7 +1066,7 @@ const lastNotifyMap = new Map<string, number>();
 const showEmojiPanel = ref(false);
 const messagesRef = ref<HTMLElement | null>(null);
 const inputRef = ref();
-const messageAvatarSize = 32;
+const messageAvatarSize = 38;
 
 // 流式AI消息临时存储 (messageId -> 累积内容)
 const streamingMessages = ref<Map<string, string>>(new Map());
@@ -1345,6 +1349,8 @@ onUnmounted(() => {
 onActivated(async () => {
   if (keepConnectionOnDeactivate) {
     restoreMessageScroll();
+    // 刷新客服信息（头像、昵称等可能在其他页面修改）
+    loadAgentInfo();
     return;
   }
   // 菜单切换返回时，确保客服在线、会话和WebSocket正常
@@ -1956,12 +1962,12 @@ function clearVisitorWaiting(conversationId: string) {
   visitorWaitingSeconds.value = w;
 }
 
-/** 初始化已有会话的等待追踪（基于未读数 > 0 且已分配） */
+/** 初始化已有会话的等待追踪（基于服务端 visitorLastMsgTime 精确判断） */
 function initWaitingTracking() {
   conversations.value.forEach((conv: any) => {
-    if (conv.status === 1 && conv.unreadCount > 0 && conv.lastMessageTime) {
-      // 有未读消息表示可能有访客消息未回复
-      const ts = new Date(conv.lastMessageTime).getTime();
+    if (conv.status === 1 && conv.visitorLastMsgTime) {
+      // 服务端 visitorLastMsgTime 非空 = 访客在等待客服回复
+      const ts = new Date(conv.visitorLastMsgTime).getTime();
       if (ts > 0) {
         visitorLastMsgTime.set(conv.id, ts);
       }
@@ -2566,6 +2572,7 @@ async function sendMessage() {
       senderType: 2,
       senderId: agentId.value,
       senderName: agentName.value,
+      senderAvatar: agentAvatar.value || '',
       actualSenderName: agentName.value,
       createTime: nowIso,
     };
@@ -2607,6 +2614,9 @@ async function sendMessage() {
       if (idx > -1) {
         messages.value[idx].id = resMessage.id;
         messages.value[idx].createTime = resMessage.createTime || nowIso;
+        if (resMessage.senderAvatar) {
+          messages.value[idx].senderAvatar = resMessage.senderAvatar;
+        }
       }
     }
 
@@ -4510,14 +4520,14 @@ function restoreMessageScroll() {
 }
 
 .msg-avatar {
-  width: 32px;
-  height: 32px;
+  width: 38px;
+  height: 38px;
   border-radius: 50%;
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
+  font-size: 14px;
   flex-shrink: 0;
 }
 
@@ -4542,7 +4552,7 @@ function restoreMessageScroll() {
   .msg-avatar-inline {
     background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
     color: #fff;
-    font-size: 12px;
+    font-size: 14px;
     flex-shrink: 0;
   }
 }

@@ -107,7 +107,7 @@ public interface CsSubAgentMapper {
     @Select("SELECT id, parent_id AS parentId, name, url, component, icon, sort_no AS sortNo, menu_type AS menuType " +
             "FROM sys_permission " +
             "WHERE del_flag = 0 " +
-            "AND id NOT IN ('cs_sub_agent', 'cs_agent', 'cs_agent_ip_whitelist', 'cs_agent_login_log') " +
+            "AND id NOT IN ('cs_sub_agent', 'cs_agent', 'cs_agent_ip_whitelist', 'cs_agent_login_log', 'cs_domain_config', 'cs_domain_save', 'cs_visitor') " +
             "AND (url LIKE '/cs/%' OR url LIKE '/security/%' OR component LIKE 'super/airag/cs/%' OR id IN " +
             "(SELECT parent_id FROM sys_permission WHERE (url LIKE '/cs/%' OR url LIKE '/security/%' OR component LIKE 'super/airag/cs/%') AND del_flag = 0)) " +
             "ORDER BY sort_no ASC")

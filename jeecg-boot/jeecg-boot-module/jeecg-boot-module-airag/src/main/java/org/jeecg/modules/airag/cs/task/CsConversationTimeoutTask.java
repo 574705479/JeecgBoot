@@ -169,11 +169,11 @@ public class CsConversationTimeoutTask {
         Date timeoutTime = new Date(System.currentTimeMillis() - (long)timeoutSeconds * 1000L);
         
         // 查找已分配但客服超时未回复的会话
-        // 条件：已分配 + 最后消息时间超过阈值 + 未发送过超时提醒
+        // 条件：已分配 + 访客发消息时间非空(有未回复消息) + 访客等待时间超过阈值
         LambdaQueryWrapper<CsConversation> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(CsConversation::getStatus, CsConversation.STATUS_ASSIGNED)
-                .isNotNull(CsConversation::getLastMessageTime)
-                .lt(CsConversation::getLastMessageTime, timeoutTime);
+                .isNotNull(CsConversation::getVisitorLastMsgTime)
+                .lt(CsConversation::getVisitorLastMsgTime, timeoutTime);
         
         List<CsConversation> conversations = conversationService.list(queryWrapper);
         

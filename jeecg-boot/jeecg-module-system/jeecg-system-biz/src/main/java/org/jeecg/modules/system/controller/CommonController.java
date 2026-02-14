@@ -209,9 +209,16 @@ public class CommonController {
                 return;
                 //throw new RuntimeException();
             }
-            // 设置强制下载不打开
-            response.setContentType("application/force-download");
-            response.addHeader("Content-Disposition", "attachment;fileName=" + new String(file.getName().getBytes("UTF-8"),"iso-8859-1"));
+            // 根据文件扩展名设置正确的Content-Type（图片等可直接预览，其他走下载）
+            String contentType = resolveContentType(file.getName());
+            response.setContentType(contentType);
+            if (contentType.startsWith("image/")) {
+                response.addHeader("Content-Disposition", "inline;fileName=" + new String(file.getName().getBytes("UTF-8"),"iso-8859-1"));
+                // 允许浏览器缓存图片资源（7天）
+                response.setHeader("Cache-Control", "public, max-age=604800");
+            } else {
+                response.addHeader("Content-Disposition", "attachment;fileName=" + new String(file.getName().getBytes("UTF-8"),"iso-8859-1"));
+            }
             
             // 结合 StreamingResponseBody 的流式写法
             try (InputStream inputStream = new BufferedInputStream(new FileInputStream(file));
@@ -229,6 +236,26 @@ public class CommonController {
             e.printStackTrace();
         }
 
+    }
+
+    /**
+     * 根据文件扩展名解析Content-Type
+     * 图片文件返回对应的image MIME类型，其他返回通用下载类型
+     */
+    private String resolveContentType(String fileName) {
+        if (oConvertUtils.isEmpty(fileName)) {
+            return "application/octet-stream";
+        }
+        String lower = fileName.toLowerCase();
+        if (lower.endsWith(".png")) return "image/png";
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+        if (lower.endsWith(".gif")) return "image/gif";
+        if (lower.endsWith(".webp")) return "image/webp";
+        if (lower.endsWith(".svg")) return "image/svg+xml";
+        if (lower.endsWith(".bmp")) return "image/bmp";
+        if (lower.endsWith(".ico")) return "image/x-icon";
+        if (lower.endsWith(".pdf")) return "application/pdf";
+        return "application/octet-stream";
     }
 
 //	/**
