@@ -2554,6 +2554,7 @@ function renderUserMessage(content: string) {
 // 渲染消息内容（支持富文本HTML、Markdown、纯文本）
 function renderMessage(content: string) {
   if (!content) return '';
+  content = content.replace(/#\s*\{\s*domainURL\s*\}/g, globSetting.domainUrl);
   // 1. 检测是否为完整HTML（TinyMCE富文本，如FAQ答案）— 直接返回，不经markdown-it二次处理
   const isRichHtml = /^\s*<(?:p|div|ul|ol|h[1-6]|table|blockquote)\b/i.test(content.trim());
   if (isRichHtml) {

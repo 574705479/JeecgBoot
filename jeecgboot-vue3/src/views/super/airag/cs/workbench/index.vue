@@ -3838,6 +3838,7 @@ const md = new MarkdownIt({
 // 渲染消息内容（支持富文本HTML、Markdown、纯文本）
 function renderMessage(content: string) {
   if (!content) return '';
+  content = content.replace(/#\s*\{\s*domainURL\s*\}/g, globSetting.domainUrl);
   const cached = renderCache.get(content);
   if (cached) {
     return cached;
@@ -3877,6 +3878,7 @@ function renderMessage(content: string) {
 // ★ 渲染回复建议内容（保留Markdown渲染）
 function renderMarkdown(content: string) {
   if (!content) return '';
+  content = content.replace(/#\s*\{\s*domainURL\s*\}/g, globSetting.domainUrl);
   const cached = renderCache.get(content);
   if (cached) {
     return cached;

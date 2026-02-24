@@ -326,15 +326,9 @@ public class AiragKnowledgeDocServiceImpl extends ServiceImpl<AiragKnowledgeDocM
                 doc.setType(LLMConsts.KNOWLEDGE_DOC_TYPE_FILE);
                 doc.setStatus(LLMConsts.KNOWLEDGE_DOC_STATUS_DRAFT);
 
-                String relativePath;
-                if (File.separator.equals("\\")) {
-                    // Windows path handling
-                    String escapedPath = uploadpath.replace("//", "\\\\");
-                    relativePath = uploadedFile.getPath().replaceFirst("^" + escapedPath, "");
-                } else {
-                    // Unix path handling
-                    relativePath = uploadedFile.getPath().replaceFirst("^" + uploadpath, "");
-                }
+                String normalizedFilePath = uploadedFile.getPath().replace("\\", "/");
+                String normalizedUploadPath = uploadpath.replace("\\", "/");
+                String relativePath = normalizedFilePath.replaceFirst("^" + java.util.regex.Pattern.quote(normalizedUploadPath), "");
                 JSONObject metadata = new JSONObject();
                 metadata.put(LLMConsts.KNOWLEDGE_DOC_METADATA_FILEPATH, relativePath);
                 metadata.put(LLMConsts.KNOWLEDGE_DOC_METADATA_SOURCES_PATH, sourcesPath);

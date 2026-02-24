@@ -475,13 +475,9 @@ public class EmbeddingHandler implements IEmbeddingHandler {
                     String baseUrl = "#{domainURL}/sys/common/static/";
                     String sourcePath = metadataJson.getString(LLMConsts.KNOWLEDGE_DOC_METADATA_SOURCES_PATH);
                     if(oConvertUtils.isNotEmpty(sourcePath)) {
-                        String escapedPath = uploadpath;
-                        //update-begin---author:wangshuai---date:2025-06-03---for:【QQYUN-12636】【AI知识库】文档库上传 本地local 文档中的图片不展示---
-                        /*if (File.separator.equals("\\")){
-                            escapedPath = uploadpath.replace("//", "\\\\");
-                        }*/
-                        //update-end---author:wangshuai---date:2025-06-03---for:【QQYUN-12636】【AI知识库】文档库上传 本地local 文档中的图片不展示---
-                        sourcePath = sourcePath.replaceFirst("^" + escapedPath, "").replace("\\", "/");
+                        String normalizedSourcePath = sourcePath.replace("\\", "/");
+                        String normalizedUploadPath = uploadpath.replace("\\", "/");
+                        sourcePath = normalizedSourcePath.replaceFirst("^" + java.util.regex.Pattern.quote(normalizedUploadPath), "/").replace("//", "/");
                         String docFilePath = metadataJson.getString(LLMConsts.KNOWLEDGE_DOC_METADATA_FILEPATH);
                         docFilePath = FilenameUtils.getPath(docFilePath);
                         docFilePath = docFilePath.replace("\\", "/");
@@ -572,7 +568,7 @@ public class EmbeddingHandler implements IEmbeddingHandler {
             File convertedFile = new File(newFileDir + fileBaseName + ".md");
             if (convertedFile.exists()) {
                 log.info("文件转换成md成功,替换文件路径和静态资源路径");
-                newFileDir = newFileDir.replaceFirst("^" + uploadpath, "");
+                newFileDir = newFileDir.replace("\\", "/").replaceFirst("^" + java.util.regex.Pattern.quote(uploadpath.replace("\\", "/")), "");
                 metadataJson.put(LLMConsts.KNOWLEDGE_DOC_METADATA_FILEPATH, newFileDir + fileBaseName + ".md");
                 metadataJson.put(LLMConsts.KNOWLEDGE_DOC_METADATA_SOURCES_PATH, newFileDir);
                 doc.setMetadata(metadataJson.toJSONString());
