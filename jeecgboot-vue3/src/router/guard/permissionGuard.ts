@@ -27,7 +27,8 @@ const TOKEN_LOGIN = PageEnum.TOKEN_LOGIN;
 const ROOT_PATH = RootRoute.path;
 
 // 代码逻辑说明: [VUEN-2472]分享免登录------------
-const whitePathList: PageEnum[] = [LOGIN_PATH, OAUTH2_LOGIN_PAGE_PATH,SYS_FILES_PATH, TOKEN_LOGIN ];
+const LICENSE_ACTIVATE_PATH = '/license/activate';
+const whitePathList: (PageEnum | string)[] = [LOGIN_PATH, OAUTH2_LOGIN_PAGE_PATH,SYS_FILES_PATH, TOKEN_LOGIN, LICENSE_ACTIVATE_PATH ];
 
 export function createPermissionGuard(router: Router) {
   const userStore = useUserStoreWithOut();
@@ -201,22 +202,31 @@ export function createPermissionGuard(router: Router) {
     }
 
     // 构建后台菜单路由
-    const routes = await permissionStore.buildRoutesAction();
-    routes.forEach((route) => {
-      router.addRoute(route as unknown as RouteRecordRaw);
-    });
+    try {
+      const routes = await permissionStore.buildRoutesAction();
+      routes.forEach((route) => {
+        router.addRoute(route as unknown as RouteRecordRaw);
+      });
 
-    router.addRoute(PAGE_NOT_FOUND_ROUTE as unknown as RouteRecordRaw);
-    permissionStore.setDynamicAddedRoute(true);
-    // 代码逻辑说明: 【issues/7500】vue-router4.5.0版本路由name:PageNotFound同名导致登录进不去
-    if (to.name === PAGE_NOT_FOUND_NAME_404) {
-      // 动态添加路由后，此处应当重定向到fullPath，否则会加载404页面内容
-      next({ path: to.fullPath, replace: true, query: to.query });
-    } else {
-      const redirectPath = (from.query.redirect || to.path) as string;
-      const redirect = decodeURIComponent(redirectPath);
-      const nextData = to.path === redirect ? { ...to, replace: true } : { path: redirect };
-      next(nextData);
+      router.addRoute(PAGE_NOT_FOUND_ROUTE as unknown as RouteRecordRaw);
+      permissionStore.setDynamicAddedRoute(true);
+      // 代码逻辑说明: 【issues/7500】vue-router4.5.0版本路由name:PageNotFound同名导致登录进不去
+      if (to.name === PAGE_NOT_FOUND_NAME_404) {
+        // 动态添加路由后，此处应当重定向到fullPath，否则会加载404页面内容
+        next({ path: to.fullPath, replace: true, query: to.query });
+      } else {
+        const redirectPath = (from.query.redirect || to.path) as string;
+        const redirect = decodeURIComponent(redirectPath);
+        const nextData = to.path === redirect ? { ...to, replace: true } : { path: redirect };
+        next(nextData);
+      }
+    } catch (e: any) {
+      if (e?.message?.includes('未授权')) {
+        next({ path: '/license/activate', replace: true });
+        return;
+      }
+      next({ path: LOGIN_PATH, replace: true });
+      return;
     }
   });
 }

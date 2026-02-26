@@ -1,0 +1,48 @@
+server:
+  port: 8090
+
+spring:
+  application:
+    name: license-server
+  datasource:
+    url: jdbc:mysql://127.0.0.1:13306/license_server?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+    username: root
+    password: ${SPRING_DATASOURCE_PASSWORD:92400bda284afba53b21162911f98d00Z}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    open-in-view: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+    default-property-inclusion: non_null
+
+license-server:
+  master-key: ${LICENSE_MASTER_KEY:}
+  trusted-proxies:
+    - 127.0.0.1
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+  jwt:
+    access-token-expire: 7200
+    refresh-token-expire: 604800
+  rate-limit:
+    activate-per-ip: 5
+    activate-per-key: 10
+    verify-per-key: 5
+  log:
+    heartbeat-success: false
+    retention-days: 180
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

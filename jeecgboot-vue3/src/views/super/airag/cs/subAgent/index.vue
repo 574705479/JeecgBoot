@@ -96,6 +96,7 @@ import { useMessage } from '/@/hooks/web/useMessage';
 import { CropperAvatar } from '/@/components/Cropper';
 import { uploadImg } from '/@/api/sys/upload';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
+import { isMenuAllowed } from '/@/utils/license/featureMenuMap';
 
 const { createConfirm, createMessage } = useMessage();
 
@@ -200,9 +201,14 @@ const checkedMenuKeys = ref<string[]>([]);
 
 async function loadMenuTree() {
   try {
-    const res = await defHttp.get({ url: '/cs/sub-agent/menus' });
+    const [res, licenseRes] = await Promise.all([
+      defHttp.get({ url: '/cs/sub-agent/menus' }),
+      defHttp.get({ url: '/license/status' }, { errorMessageMode: 'none' }).catch(() => null),
+    ]);
     if (res && Array.isArray(res)) {
-      menuTreeData.value = buildTree(res);
+      const features: string[] | null = licenseRes?.licensed ? licenseRes.features : null;
+      const filtered = features ? res.filter((item) => !item.url || isMenuAllowed(item.url, features)) : res;
+      menuTreeData.value = buildTree(filtered);
     }
   } catch (e) {
     console.error('加载菜单失败', e);

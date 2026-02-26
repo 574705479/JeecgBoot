@@ -64,5 +64,15 @@ export const TokenLoginRoute: AppRouteRecordRaw = {
     ignoreAuth: true,
   },
 };
+export const LicenseActivateRoute: AppRouteRecordRaw = {
+  path: '/license/activate',
+  name: 'LicenseActivate',
+  component: () => import('/@/views/system/license/LicenseActivate.vue'),
+  meta: {
+    title: '系统授权激活',
+    ignoreAuth: true,
+  },
+};
+
 // Basic routing without permission
-export const basicRoutes = [LoginRoute, RootRoute, ...mainOutRoutes, REDIRECT_ROUTE, PAGE_NOT_FOUND_ROUTE, TokenLoginRoute, Oauth2LoginRoute];
+export const basicRoutes = [LoginRoute, RootRoute, ...mainOutRoutes, REDIRECT_ROUTE, PAGE_NOT_FOUND_ROUTE, TokenLoginRoute, Oauth2LoginRoute, LicenseActivateRoute];

@@ -71,6 +71,15 @@ const transform: AxiosTransform = {
         userStore.setToken(undefined);
         userStore.logout(true);
         break;
+      case 901:
+        router.push('/license/activate').catch(() => {});
+        throw new Error('系统未授权');
+      case 902:
+        createMessage.error(message || '已达授权上限');
+        throw new Error(message || '已达授权上限');
+      case 903:
+        createMessage.warning(message || '此功能需要升级授权套餐');
+        throw new Error(message || '此功能需要升级授权套餐');
       default:
         if (message) {
           timeoutMsg = message;

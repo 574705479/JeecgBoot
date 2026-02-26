@@ -112,6 +112,7 @@ public class ShiroConfig {
         filterChainDefinitionMap.put("/sys/getQrcodeToken/**", "anon"); //监听扫码
         filterChainDefinitionMap.put("/sys/checkAuth", "anon"); //授权接口排除
         filterChainDefinitionMap.put("/openapi/call/**", "anon"); // 开放平台接口排除
+        filterChainDefinitionMap.put("/license/callback", "anon"); // 授权回调端点(License Server -> Client)
 
         // 代码逻辑说明: 排除静态资源后缀
         filterChainDefinitionMap.put("/", "anon");

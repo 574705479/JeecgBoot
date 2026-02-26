@@ -80,20 +80,18 @@ export function phoneLoginApi(params: LoginParams, mode: ErrorMessageMode = 'mod
  */
 export function getUserInfo() {
   return defHttp.get<GetUserInfoModel>({ url: Api.GetUserInfo }, {}).catch((e) => {
-    // Token过期失效，直接跳转登录页面
     if (e && (e.message.includes('timeout') || e.message.includes('401'))) {
-      //接口不通时跳转到登录界面
       const userStore = useUserStoreWithOut();
       userStore.setToken('');
       setAuthCache(TOKEN_KEY, null);
       router.push({
         path: PageEnum.BASE_LOGIN,
         query: {
-          // 传入当前的路由，登录成功后跳转到当前路由
           redirect: router.currentRoute.value.fullPath,
         }
       });
     }
+    throw e;
   });
 }
 

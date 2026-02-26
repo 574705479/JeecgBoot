@@ -329,3 +329,41 @@ justauth:
     type: default
     prefix: 'demo::'
     timeout: 1h
+
+# 授权模块配置（Docker环境）
+license:
+  enabled: true
+  server-url: https://license.example.com
+  app-id: jeecg-boot
+  app-secret: ${LICENSE_APP_SECRET}
+  public-key: classpath:license/public.pem
+  heartbeat-interval: 7200
+  grace-period: 259200
+  connect-timeout: 5000
+  read-timeout: 10000
+  cache-dir: /opt/license/cache
+  callback-url: ${LICENSE_CALLBACK_URL:}
+  exclude-paths:
+    - /sys/login
+    - /sys/mLogin
+    - /sys/phoneLogin
+    - /sys/getEncryptedString
+    - /sys/randomImage/**
+    - /sys/checkCaptcha
+    - /sys/sms
+    - /sys/phoneVerification/**
+    - /license/**
+    - /sys/common/**
+    - /generic/**
+    - /static/**
+    - /websocket/**
+    - /eoaSocket/**
+    - /cs/ws/**
+    - /cs/userChat/**
+    - /cs/visitor/**
+    - /cs/brand/**
+    - /doc.html
+    - /swagger-resources/**
+    - /v3/api-docs/**
+    - /sys/thirdLogin/**
+    - /sys/cas/client/**

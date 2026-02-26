@@ -70,6 +70,8 @@ public class LoginController {
 	private BaseCommonService baseCommonService;
 	@Autowired
 	private JeecgBaseConfig jeecgBaseConfig;
+	@Autowired(required = false)
+	private org.jeecg.common.license.core.LicenseClientService licenseClientService;
 	
 	private final String BASE_CHECK_CODES = "qwertyuiplkjhgfdsazxcvbnmQWERTYUPLKJHGFDSAZXCVBNM1234567890";
 	/**
@@ -458,6 +460,14 @@ public class LoginController {
 	 * @return
 	 */
 	private Result<JSONObject> userInfo(SysUser sysUser, Result<JSONObject> result, HttpServletRequest request, String clientType) {
+		// 授权配额检查：登录前校验在线用户数
+		if (licenseClientService != null && licenseClientService.isLicensed()) {
+			if (licenseClientService.isQuotaExceeded("max_seats")) {
+				Long limit = licenseClientService.getQuotaLimit("max_seats");
+				return result.error500("在线用户数已达授权上限(" + limit + ")");
+			}
+		}
+
 		String username = sysUser.getUsername();
 		String syspassword = sysUser.getPassword();
 		JSONObject obj = new JSONObject(new LinkedHashMap<>());

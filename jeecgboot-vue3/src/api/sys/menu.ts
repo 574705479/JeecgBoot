@@ -35,7 +35,6 @@ export const getMenuList = () => {
 export function getBackMenuAndPerms() {
   return defHttp.get({ url: Api.GetMenuList }).catch((e) => {
     console.log('接口 getBackMenuAndPerms 异常错误信息：', e);
-    // Token过期失效，直接跳转登录页面 2025-09-08 scott
     if (e && (e.message.includes('timeout') || e.message.includes('401') || e.message.includes('500'))) {
       const userStore = useUserStoreWithOut();
       userStore.setToken('');
@@ -43,11 +42,11 @@ export function getBackMenuAndPerms() {
       router.push({
         path: PageEnum.BASE_LOGIN,
         query: {
-          // 传入当前的路由，登录成功后跳转到当前路由
           redirect: router.currentRoute.value.fullPath,
         }
       });
     }
+    throw e;
   });
 }
 

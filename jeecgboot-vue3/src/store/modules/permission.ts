@@ -24,6 +24,7 @@ import { getBackMenuAndPerms } from '/@/api/sys/menu';
 import { useMessage } from '/@/hooks/web/useMessage';
 import { PageEnum } from '/@/enums/pageEnum';
 import { defHttp } from '/@/utils/http/axios';
+import { isMenuAllowed } from '/@/utils/license/featureMenuMap';
 
 // 系统权限
 interface AuthItem {
@@ -257,12 +258,35 @@ export const usePermissionStore = defineStore({
             //     100
             //   );
             // }
-          } catch (error) {
+          } catch (error: any) {
+            if (error?.message?.includes('未授权')) {
+              throw error;
+            }
             console.error(error);
           }
           // 组件地址前加斜杠处理  author: lsq date:2021-09-08
           routeList = addSlashToRouteComponent(routeList);
-          // 首页菜单已恢复显示（不再隐藏 dashboard 路由）
+
+          // === 授权功能菜单过滤 ===
+          try {
+            const licenseRes = await defHttp.get({ url: '/license/status' }, { errorMessageMode: 'none' });
+            if (licenseRes && licenseRes.licensed === true && licenseRes.features) {
+              const licensedFeatures: string[] = licenseRes.features;
+              const filterByLicenseFeatures = (list: AppRouteRecordRaw[], parentPath = ''): AppRouteRecordRaw[] => {
+                return list.filter((route) => {
+                  const fullPath = route.path.startsWith('/') ? route.path : `${parentPath}/${route.path}`;
+                  if (route.children && route.children.length) {
+                    route.children = filterByLicenseFeatures(route.children, fullPath);
+                    return route.children.length > 0;
+                  }
+                  return isMenuAllowed(fullPath, licensedFeatures);
+                });
+              };
+              routeList = filterByLicenseFeatures(routeList);
+            }
+          } catch (e) {
+            console.warn('[License] 获取授权功能失败，跳过菜单过滤', e);
+          }
 
           // === 子客服菜单过滤 ===
           try {
