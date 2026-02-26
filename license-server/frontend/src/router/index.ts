@@ -63,6 +63,24 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '操作日志' },
       },
       {
+        path: 'server/info',
+        name: 'ServerInfoList',
+        component: () => import('../views/server/ServerInfoList.vue'),
+        meta: { title: '服务器管理' },
+      },
+      {
+        path: 'server/docker',
+        name: 'DockerServiceList',
+        component: () => import('../views/server/DockerServiceList.vue'),
+        meta: { title: 'Docker服务管理' },
+      },
+      {
+        path: 'server/info/log',
+        name: 'ServerInfoLogList',
+        component: () => import('../views/server/ServerInfoLogList.vue'),
+        meta: { title: '服务器日志' },
+      },
+      {
         path: 'settings/password',
         name: 'ChangePassword',
         component: () => import('../views/settings/ChangePassword.vue'),

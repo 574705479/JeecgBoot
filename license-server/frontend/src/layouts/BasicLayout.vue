@@ -7,6 +7,7 @@
       </div>
       <a-menu
         v-model:selectedKeys="selectedKeys"
+        v-model:openKeys="openKeys"
         theme="dark"
         mode="inline"
         @click="onMenuClick"
@@ -15,30 +16,46 @@
           <DashboardOutlined />
           <span>仪表盘</span>
         </a-menu-item>
-        <a-menu-item key="/app">
-          <AppstoreOutlined />
-          <span>应用管理</span>
-        </a-menu-item>
-        <a-menu-item key="/plan">
-          <CrownOutlined />
-          <span>套餐管理</span>
-        </a-menu-item>
-        <a-menu-item key="/license">
-          <KeyOutlined />
-          <span>许可证管理</span>
-        </a-menu-item>
-        <a-menu-item key="/customer">
-          <TeamOutlined />
-          <span>客户管理</span>
-        </a-menu-item>
-        <a-menu-item key="/log">
-          <FileTextOutlined />
-          <span>操作日志</span>
-        </a-menu-item>
-        <a-menu-item key="/settings/password">
-          <SettingOutlined />
-          <span>修改密码</span>
-        </a-menu-item>
+        <a-sub-menu key="auth">
+          <template #icon><SafetyCertificateOutlined /></template>
+          <template #title>授权管理</template>
+          <a-menu-item key="/app">
+            <AppstoreOutlined />
+            <span>应用管理</span>
+          </a-menu-item>
+          <a-menu-item key="/plan">
+            <CrownOutlined />
+            <span>套餐管理</span>
+          </a-menu-item>
+          <a-menu-item key="/license">
+            <KeyOutlined />
+            <span>许可证管理</span>
+          </a-menu-item>
+          <a-menu-item key="/customer">
+            <TeamOutlined />
+            <span>客户管理</span>
+          </a-menu-item>
+          <a-menu-item key="/log">
+            <FileTextOutlined />
+            <span>操作日志</span>
+          </a-menu-item>
+        </a-sub-menu>
+        <a-sub-menu key="server">
+          <template #icon><ToolOutlined /></template>
+          <template #title>服务器运维</template>
+          <a-menu-item key="/server/info">
+            <CloudServerOutlined />
+            <span>服务器管理</span>
+          </a-menu-item>
+          <a-menu-item key="/server/docker">
+            <DeploymentUnitOutlined />
+            <span>Docker服务管理</span>
+          </a-menu-item>
+          <a-menu-item key="/server/info/log">
+            <ProfileOutlined />
+            <span>服务器日志</span>
+          </a-menu-item>
+        </a-sub-menu>
       </a-menu>
     </a-layout-sider>
     <a-layout>
@@ -66,6 +83,11 @@
             </span>
             <template #overlay>
               <a-menu>
+                <a-menu-item @click="router.push('/settings/password')">
+                  <LockOutlined />
+                  修改密码
+                </a-menu-item>
+                <a-menu-divider />
                 <a-menu-item @click="handleLogout">
                   <LogoutOutlined />
                   退出登录
@@ -93,7 +115,11 @@ import {
   KeyOutlined,
   TeamOutlined,
   FileTextOutlined,
-  SettingOutlined,
+  CloudServerOutlined,
+  DeploymentUnitOutlined,
+  ProfileOutlined,
+  ToolOutlined,
+  LockOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   UserOutlined,
@@ -107,6 +133,10 @@ const authStore = useAuthStore()
 
 const collapsed = ref(false)
 const selectedKeys = ref<string[]>([route.path])
+const openKeys = ref<string[]>([])
+
+const authMenuPaths = ['/app', '/plan', '/license', '/customer', '/log']
+const serverMenuPaths = ['/server']
 
 const currentTitle = computed(() => {
   return (route.meta?.title as string) || '仪表盘'
@@ -115,14 +145,29 @@ const currentTitle = computed(() => {
 watch(
   () => route.path,
   (path) => {
-    const base = '/' + path.split('/').filter(Boolean)[0]
-    selectedKeys.value = [base]
+    selectedKeys.value = [resolveMenuKey(path)]
+    openKeys.value = resolveOpenKeys(path)
   },
   { immediate: true },
 )
 
 function onMenuClick({ key }: { key: string }) {
   router.push(key)
+}
+
+function resolveMenuKey(path: string) {
+  if (path.startsWith('/server/info/log')) return '/server/info/log'
+  if (path.startsWith('/server/docker')) return '/server/docker'
+  if (path.startsWith('/server/info')) return '/server/info'
+  if (path.startsWith('/settings/password')) return ''
+  const base = '/' + path.split('/').filter(Boolean)[0]
+  return base || '/dashboard'
+}
+
+function resolveOpenKeys(path: string): string[] {
+  if (serverMenuPaths.some(p => path.startsWith(p))) return ['server']
+  if (authMenuPaths.some(p => path.startsWith(p))) return ['auth']
+  return openKeys.value
 }
 
 function handleLogout() {
