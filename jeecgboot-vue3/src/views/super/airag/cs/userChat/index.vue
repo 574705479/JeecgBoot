@@ -943,6 +943,7 @@ const streamingMessages = ref<Map<string, string>>(new Map());
 // 用户信息
 const userId = ref('');
 const userName = ref('访客');
+const visitorSource = ref('');
 const conversationId = ref('');
 const conversationClosed = ref(false);  // 会话是否已结束
 const replyMode = ref(0);  // 回复模式: 0=AI自动, 1=手动
@@ -1167,6 +1168,19 @@ function initUserId() {
   const queryUserId = getQueryParam('externalUserId') || getQueryParam('uid') || getQueryParam('userId');
   const queryUserName = getQueryParam('userName');
   const querySource = getQueryParam('source') || getQueryParam('appKey');
+
+  // 记录访客来源：URL参数 source + document.referrer 域名
+  let referrerHost = '';
+  if (document.referrer) {
+    try { referrerHost = new URL(document.referrer).hostname; } catch {}
+  }
+  if (querySource && referrerHost) {
+    visitorSource.value = `${querySource}(${referrerHost})`;
+  } else if (querySource) {
+    visitorSource.value = querySource;
+  } else if (referrerHost) {
+    visitorSource.value = referrerHost;
+  }
 
   if (!tokenRequired.value) {
     // 免Token模式：设备码作为userId
@@ -1529,6 +1543,7 @@ async function initConversation() {
     const createData: any = {
       userId: userId.value,
       userName: userName.value,
+      source: visitorSource.value || undefined,
       deviceId: generateDeviceId(),
       lang: navigator.language || navigator.userLanguage || 'en',
     };

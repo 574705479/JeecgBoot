@@ -17,10 +17,6 @@
       <template #status="{ record }">
         <a-tag :color="getStatusColor(record.status)">{{ getStatusText(record.status) }}</a-tag>
       </template>
-      <template #deleted="{ record }">
-        <a-tag v-if="record.deleted === 1" color="red">已删除</a-tag>
-        <span v-else>-</span>
-      </template>
       <template #replyMode="{ record }">
         <a-tag :color="getModeColor(record.replyMode)">{{ getModeText(record.replyMode) }}</a-tag>
       </template>
@@ -84,7 +80,6 @@ const columns = [
     customRender: ({ text }: any) => text || '-'
   },
   { title: '状态', dataIndex: 'status', width: 90, slots: { customRender: 'status' } },
-  { title: '删除状态', dataIndex: 'deleted', width: 90, slots: { customRender: 'deleted' } },
   { title: '回复模式', dataIndex: 'replyMode', width: 100, slots: { customRender: 'replyMode' } },
   { title: '来源', dataIndex: 'source', width: 80,
     customRender: ({ text }: any) => text || '直接访问'
