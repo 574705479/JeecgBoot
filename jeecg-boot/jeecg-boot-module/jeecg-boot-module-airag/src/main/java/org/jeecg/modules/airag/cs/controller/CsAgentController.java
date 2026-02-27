@@ -90,6 +90,9 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     @Autowired
     private CsAgentLoginLogMapper csAgentLoginLogMapper;
 
+    @Autowired(required = false)
+    private org.jeecg.common.license.core.LicenseClientService licenseClientService;
+
     /**
      * 分页列表查询
      */
@@ -280,6 +283,11 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     @Operation(summary = "客服上线")
     @PostMapping("/online/{id}")
     public Result<String> goOnline(@PathVariable String id) {
+        if (licenseClientService != null && licenseClientService.isLicensed()
+            && licenseClientService.isQuotaExceeded("max_cs_agents")) {
+            Long limit = licenseClientService.getQuotaLimit("max_cs_agents");
+            return Result.error("客服坐席已满，在线坐席数已达授权上限(" + limit + ")");
+        }
         csAgentService.goOnline(id);
         return Result.OK("上线成功!");
     }

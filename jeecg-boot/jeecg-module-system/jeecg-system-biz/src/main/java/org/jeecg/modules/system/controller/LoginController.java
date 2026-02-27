@@ -72,6 +72,8 @@ public class LoginController {
 	private JeecgBaseConfig jeecgBaseConfig;
 	@Autowired(required = false)
 	private org.jeecg.common.license.core.LicenseClientService licenseClientService;
+	@Autowired
+	private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
 	
 	private final String BASE_CHECK_CODES = "qwertyuiplkjhgfdsazxcvbnmQWERTYUPLKJHGFDSAZXCVBNM1234567890";
 	/**
@@ -460,12 +462,23 @@ public class LoginController {
 	 * @return
 	 */
 	private Result<JSONObject> userInfo(SysUser sysUser, Result<JSONObject> result, HttpServletRequest request, String clientType) {
-		// 授权配额检查：登录前校验在线用户数
+		// 授权配额检查：客服坐席数限制
 		if (licenseClientService != null && licenseClientService.isLicensed()) {
-			if (licenseClientService.isQuotaExceeded("max_seats")) {
-				Long limit = licenseClientService.getQuotaLimit("max_seats");
-				return result.error500("在线用户数已达授权上限(" + limit + ")");
-			}
+			try {
+				Long agentOnline = jdbcTemplate.queryForObject(
+					"SELECT COUNT(*) FROM cs_agent WHERE user_id = ? AND status = 1",
+					Long.class, sysUser.getId());
+				if (agentOnline != null && agentOnline == 0) {
+					Long isAgent = jdbcTemplate.queryForObject(
+						"SELECT COUNT(*) FROM cs_agent WHERE user_id = ?",
+						Long.class, sysUser.getId());
+					if (isAgent != null && isAgent > 0
+						&& licenseClientService.isQuotaExceeded("max_cs_agents")) {
+						Long limit = licenseClientService.getQuotaLimit("max_cs_agents");
+						return result.error500("客服坐席已满，在线坐席数已达授权上限(" + limit + ")");
+					}
+				}
+			} catch (Exception ignored) {}
 		}
 
 		String username = sysUser.getUsername();

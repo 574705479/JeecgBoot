@@ -70,7 +70,7 @@
             </a-descriptions-item>
             <a-descriptions-item label="坐席数量">
               <span class="seat-count">
-                <span class="seat-used">{{ stats.totalAgents || 0 }}</span>
+                <span class="seat-used">{{ stats.onlineAgents || 0 }}</span>
                 <span class="seat-divider"> / </span>
                 <span class="seat-total">{{ licenseInfo.maxAgents }}</span>
               </span>
@@ -217,12 +217,29 @@ async function fetchSecretKey() {
   }
 }
 
-// ==================== 授权信息（模拟数据） ====================
+// ==================== 授权信息 ====================
 const licenseInfo = reactive({
   version: 'V1.0.0',
-  maxAgents: 50,
+  maxAgents: '不限' as string | number,
   expireDate: '永久授权',
 });
+
+async function fetchLicenseInfo() {
+  try {
+    const res = await defHttp.get(
+      { url: '/license/status' },
+      { isTransformResponse: false }
+    );
+    const data = res?.result || res || {};
+    if (data.licensed) {
+      const maxCsAgents = data.quotas?.max_cs_agents;
+      licenseInfo.maxAgents = maxCsAgents && maxCsAgents > 0 ? maxCsAgents : '不限';
+      licenseInfo.expireDate = data.expireDate
+        ? data.expireDate.substring(0, 10)
+        : '永久授权';
+    }
+  } catch {}
+}
 
 // ==================== 坐席实时状态 ====================
 const agentStatusList = ref<any[]>([]);
@@ -259,7 +276,7 @@ async function fetchAgentStatus() {
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 
 onMounted(async () => {
-  await Promise.all([fetchStats(), fetchDomainConfig(), fetchSecretKey(), fetchAgentStatus()]);
+  await Promise.all([fetchStats(), fetchDomainConfig(), fetchSecretKey(), fetchAgentStatus(), fetchLicenseInfo()]);
   // 每30秒自动刷新统计数据和坐席状态
   refreshTimer = setInterval(() => {
     fetchStats();
