@@ -191,6 +191,10 @@ public class LicenseService {
             license.setRemark((String) fields.get("remark"));
             diff.append("remark: ").append(oldVal).append(" -> ").append(license.getRemark()).append("; ");
         }
+        if (fields.containsKey("domainConfig")) {
+            license.setDomainConfig((Map<String, Object>) fields.get("domainConfig"));
+            diff.append("domainConfig: updated; ");
+        }
 
         App app = appService.getById(license.getAppPk());
         filterByDefinitions(license, app);
@@ -378,6 +382,7 @@ public class LicenseService {
                     .featureNames(featureNames)
                     .customerName(custName)
                     .planName(pName)
+                    .domainConfig(license.getDomainConfig())
                     .build();
 
             return com.license.server.dto.Result.ok(response);

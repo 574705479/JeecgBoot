@@ -20,6 +20,7 @@ public class LicenseInfo implements Serializable {
     private Map<String, String> featureNames;
     private String customerName;
     private String planName;
+    private Map<String, Object> domainConfig;
 
     public String getLicenseKey() { return licenseKey; }
     public void setLicenseKey(String licenseKey) { this.licenseKey = licenseKey; }
@@ -46,4 +47,6 @@ public class LicenseInfo implements Serializable {
     public void setCustomerName(String customerName) { this.customerName = customerName; }
     public String getPlanName() { return planName; }
     public void setPlanName(String planName) { this.planName = planName; }
+    public Map<String, Object> getDomainConfig() { return domainConfig; }
+    public void setDomainConfig(Map<String, Object> domainConfig) { this.domainConfig = domainConfig; }
 }

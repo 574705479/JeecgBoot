@@ -22,4 +22,5 @@ public class LicenseResponse {
     private Map<String, String> featureNames;
     private String customerName;
     private String planName;
+    private Map<String, Object> domainConfig;
 }

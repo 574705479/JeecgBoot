@@ -5615,6 +5615,7 @@ function restoreMessageScroll() {
   flex-shrink: 0;
   overflow: hidden;
   border-radius: 0;
+  z-index: 2;
 }
 
 .panel-header {

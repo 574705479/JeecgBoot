@@ -69,6 +69,10 @@ public class License {
     @Column(name = "remark", columnDefinition = "TEXT")
     private String remark;
 
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "domain_config", columnDefinition = "JSON")
+    private Map<String, Object> domainConfig;
+
     @Column(name = "create_time", updatable = false)
     private LocalDateTime createTime;
 

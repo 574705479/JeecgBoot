@@ -141,6 +141,41 @@
           </a-button>
         </div>
       </a-card>
+
+      <a-divider />
+
+      <a-row :gutter="24" v-if="license">
+        <a-col :span="12">
+          <a-card title="域名配置" size="small">
+            <template v-if="license.domainConfig?.domains">
+              <a-tag
+                v-for="(d, idx) in parseDomainList(license.domainConfig.domains)"
+                :key="idx"
+                color="cyan"
+                style="margin-bottom: 4px"
+              >
+                {{ d }}
+              </a-tag>
+            </template>
+            <span v-else style="color: #999">未配置域名</span>
+          </a-card>
+        </a-col>
+        <a-col :span="12">
+          <a-card title="下载链接" size="small">
+            <template v-if="license.domainConfig?.downloadLinks?.length">
+              <div
+                v-for="(link, idx) in license.domainConfig.downloadLinks"
+                :key="idx"
+                style="margin-bottom: 4px"
+              >
+                <span style="color: #666">{{ link.label || '未命名' }}：</span>
+                <a :href="link.url" target="_blank" rel="noopener">{{ link.url }}</a>
+              </div>
+            </template>
+            <span v-else style="color: #999">未配置下载链接</span>
+          </a-card>
+        </a-col>
+      </a-row>
     </a-spin>
 
     <a-modal
@@ -234,6 +269,53 @@
           </div>
         </a-form-item>
 
+        <a-divider>域名与下载配置</a-divider>
+
+        <a-form-item label="域名列表">
+          <a-textarea
+            v-model:value="editForm.domains"
+            :autoSize="{ minRows: 4, maxRows: 10 }"
+            placeholder="每行输入一个域名，例如：&#10;example.com&#10;cs.example.com"
+          />
+          <div style="color: #999; font-size: 12px; margin-top: 4px">
+            每行一个域名，用于客户端域名配置的远程下发
+          </div>
+        </a-form-item>
+
+        <a-form-item label="下载链接">
+          <div style="display: flex; flex-direction: column; gap: 8px">
+            <div
+              v-for="(item, idx) in editForm.downloadLinks"
+              :key="idx"
+              style="display: flex; align-items: center; gap: 8px"
+            >
+              <a-input
+                v-model:value="item.label"
+                placeholder="标签（如 Windows x64）"
+                style="width: 180px"
+              />
+              <a-input
+                v-model:value="item.url"
+                placeholder="下载链接 URL"
+                style="flex: 1"
+              />
+              <a-button danger size="small" @click="editForm.downloadLinks.splice(idx, 1)">
+                删除
+              </a-button>
+            </div>
+            <a-button
+              type="dashed"
+              block
+              @click="editForm.downloadLinks.push({ label: '', url: '' })"
+            >
+              + 添加下载链接
+            </a-button>
+          </div>
+          <div style="color: #999; font-size: 12px; margin-top: 4px">
+            配置客户端下载入口（如 Windows / Mac / Linux），将远程推送到客户端
+          </div>
+        </a-form-item>
+
         <a-form-item label="备注">
           <a-textarea v-model:value="editForm.remark" :rows="3" placeholder="备注信息" />
         </a-form-item>
@@ -277,6 +359,8 @@ const editForm = reactive({
   features: [] as string[],
   allowedIps: [] as string[],
   remark: '',
+  domains: '',
+  downloadLinks: [] as { label: string; url: string }[],
 })
 
 const statusColorMap: Record<string, string> = {
@@ -296,6 +380,10 @@ const statusTextMap: Record<string, string> = {
 
 function formatDate(val: string) {
   return val ? dayjs(val).format('YYYY-MM-DD HH:mm:ss') : '-'
+}
+
+function parseDomainList(domains: string): string[] {
+  return domains.split('\n').map(s => s.trim()).filter(s => s.length > 0)
 }
 
 async function copyText(text: string) {
@@ -436,6 +524,12 @@ async function openEditModal() {
   }
   editForm.quotas = q
 
+  const dc = license.value.domainConfig || {}
+  editForm.domains = dc.domains || ''
+  editForm.downloadLinks = Array.isArray(dc.downloadLinks)
+    ? dc.downloadLinks.map((i: any) => ({ label: i.label || '', url: i.url || '' }))
+    : []
+
   if (appData.value?.id) {
     try {
       const res = await request.get(`/admin/plan/by-app/${appData.value.id}`)
@@ -484,6 +578,12 @@ async function handleEditSave() {
       planId: editForm.planId,
       allowedIps: editForm.allowedIps,
       remark: editForm.remark,
+      domainConfig: {
+        domains: editForm.domains,
+        downloadLinks: editForm.downloadLinks.filter(
+          (i: { label: string; url: string }) => i.label.trim() || i.url.trim()
+        ),
+      },
     }
     const res = await request.put(`/admin/license/${id}`, body)
     if (res.data.code === 200) {

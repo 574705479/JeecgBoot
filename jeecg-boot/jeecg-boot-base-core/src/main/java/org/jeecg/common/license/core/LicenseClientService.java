@@ -323,6 +323,11 @@ public class LicenseClientService {
         info.setCustomerName((String) data.get("customerName"));
         info.setPlanName((String) data.get("planName"));
 
+        Object domainConfigObj = data.get("domainConfig");
+        if (domainConfigObj instanceof Map) {
+            info.setDomainConfig((Map<String, Object>) domainConfigObj);
+        }
+
         return info;
     }
 
