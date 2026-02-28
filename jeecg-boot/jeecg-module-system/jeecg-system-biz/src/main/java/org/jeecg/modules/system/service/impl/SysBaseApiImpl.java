@@ -12,7 +12,7 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.google.common.base.Joiner;
-import com.jeecg.dingtalk.api.core.response.Response;
+
 import freemarker.core.TemplateClassResolver;
 import freemarker.template.Configuration;
 import freemarker.template.Template;
@@ -133,10 +133,6 @@ public class SysBaseApiImpl implements ISysBaseAPI {
 	private SysPermissionMapper sysPermissionMapper;
 	@Autowired
 	private ISysPermissionDataRuleService sysPermissionDataRuleService;
-	@Autowired
-	private ThirdAppWechatEnterpriseServiceImpl wechatEnterpriseService;
-	@Autowired
-	private ThirdAppDingtalkServiceImpl dingtalkService;
 	@Autowired
 	ISysCategoryService sysCategoryService;
 	@Autowired
@@ -444,13 +440,12 @@ public class SysBaseApiImpl implements ISysBaseAPI {
 				message.getContent(),
 				message.getCategory(),
                 message.getNoticeType());
-		try {
-			// 同步发送第三方APP消息
-			wechatEnterpriseService.sendMessage(message, true);
-			dingtalkService.sendMessage(message, true);
-		} catch (Exception e) {
-			log.error("同步发送第三方APP消息失败！", e);
-		}
+		//try {
+		//	wechatEnterpriseService.sendMessage(message, true);
+		//	dingtalkService.sendMessage(message, true);
+		//} catch (Exception e) {
+		//	log.error("同步发送第三方APP消息失败！", e);
+		//}
 	}
 
 	@Override
@@ -463,13 +458,12 @@ public class SysBaseApiImpl implements ISysBaseAPI {
 				message.getBusType(),
 				message.getBusId(),
 				message.getNoticeType());
-		try {
-			// 同步发送第三方APP消息
-			wechatEnterpriseService.sendMessage(message, true);
-			dingtalkService.sendMessage(message, true);
-		} catch (Exception e) {
-			log.error("同步发送第三方APP消息失败！", e);
-		}
+		//try {
+		//	wechatEnterpriseService.sendMessage(message, true);
+		//	dingtalkService.sendMessage(message, true);
+		//} catch (Exception e) {
+		//	log.error("同步发送第三方APP消息失败！", e);
+		//}
 	}
 
 	@Override
@@ -538,13 +532,12 @@ public class SysBaseApiImpl implements ISysBaseAPI {
 				webSocket.sendMessage(sysUser.getId(), obj.toJSONString());
 			}
 		}
-		try {
-			// 同步企业微信、钉钉的消息通知
-			dingtalkService.sendActionCardMessage(announcement, mobileOpenUrl, true);
-			wechatEnterpriseService.sendTextCardMessage(announcement, mobileOpenUrl, true);
-		} catch (Exception e) {
-			log.error("同步发送第三方APP消息失败！", e);
-		}
+		//try {
+		//	dingtalkService.sendActionCardMessage(announcement, mobileOpenUrl, true);
+		//	wechatEnterpriseService.sendTextCardMessage(announcement, mobileOpenUrl, true);
+		//} catch (Exception e) {
+		//	log.error("同步发送第三方APP消息失败！", e);
+		//}
 
 	}
 
@@ -634,14 +627,12 @@ public class SysBaseApiImpl implements ISysBaseAPI {
 				webSocket.sendMessage(sysUser.getId(), obj.toJSONString());
 			}
 		}
-		try {
-			// 钉钉的消息通知
-			dingtalkService.sendActionCardMessage(announcement, mobileOpenUrl, true);
-			// 企业微信通知
-			wechatEnterpriseService.sendTextCardMessage(announcement, mobileOpenUrl, true);
-		} catch (Exception e) {
-			log.error("同步发送第三方APP消息失败！", e);
-		}
+		//try {
+		//	dingtalkService.sendActionCardMessage(announcement, mobileOpenUrl, true);
+		//	wechatEnterpriseService.sendTextCardMessage(announcement, mobileOpenUrl, true);
+		//} catch (Exception e) {
+		//	log.error("同步发送第三方APP消息失败！", e);
+		//}
 
 	}
 
@@ -2031,19 +2022,17 @@ public class SysBaseApiImpl implements ISysBaseAPI {
 				obj.put(WebsocketConst.MSG_TXT, sysAnnouncement.getTitile());
 				webSocket.sendMessage(userIds, obj.toJSONString());
 			}
-			try {
-				// 同步企业微信、钉钉的消息通知
-				Response<String> dtResponse = dingtalkService.sendActionCardMessage(sysAnnouncement, null, true);
-				wechatEnterpriseService.sendTextCardMessage(sysAnnouncement, null,true);
-
-				if (dtResponse != null && dtResponse.isSuccess()) {
-					String taskId = dtResponse.getResult();
-					sysAnnouncement.setDtTaskId(taskId);
-					sysAnnouncementService.updateById(sysAnnouncement);
-				}
-			} catch (Exception e) {
-				log.error("同步发送第三方APP消息失败：", e);
-			}
+			//try {
+			//	Response<String> dtResponse = dingtalkService.sendActionCardMessage(sysAnnouncement, null, true);
+			//	wechatEnterpriseService.sendTextCardMessage(sysAnnouncement, null,true);
+			//	if (dtResponse != null && dtResponse.isSuccess()) {
+			//		String taskId = dtResponse.getResult();
+			//		sysAnnouncement.setDtTaskId(taskId);
+			//		sysAnnouncementService.updateById(sysAnnouncement);
+			//	}
+			//} catch (Exception e) {
+			//	log.error("同步发送第三方APP消息失败：", e);
+			//}
 		}
 	}
 

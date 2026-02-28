@@ -2,10 +2,6 @@ package org.jeecg.modules.system.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import com.jeecg.dingtalk.api.base.JdtBaseAPI;
-import com.jeecg.dingtalk.api.core.response.Response;
-import com.jeecg.dingtalk.api.core.vo.AccessToken;
-import com.jeecg.dingtalk.api.user.JdtUserAPI;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.shiro.SecurityUtils;
 import org.jeecg.common.constant.CommonConstant;
@@ -167,18 +163,7 @@ public class SysThirdAccountServiceImpl extends ServiceImpl<SysThirdAccountMappe
         user.setThirdUserUuid(tlm.getUuid());
         user.setTenantId(tenantId);
         //=============begin 判断如果是钉钉的情况下，需要将第三方的用户id查询出来，发送模板的时候有用==========
-        if(CommonConstant.DINGTALK.toLowerCase().equals(tlm.getSource())){
-            AccessToken accessToken = JdtBaseAPI.getAccessToken(dingTalkClientId, dingTalkClientSecret);
-            Response<String> getUserIdRes = JdtUserAPI.getUseridByUnionid(tlm.getUuid(), accessToken.getAccessToken());
-            if (getUserIdRes.isSuccess()) {
-                user.setThirdUserId(getUserIdRes.getResult());
-            }else{
-                user.setThirdUserId(tlm.getUuid());
-            }
-        //=============end 判断如果是钉钉的情况下，需要将第三方的用户id查询出来，发送模板的时候有用==========
-        }else{
-            user.setThirdUserId(tlm.getUuid());
-        }
+        user.setThirdUserId(tlm.getUuid());
         super.save(user);
         return user;
     }
