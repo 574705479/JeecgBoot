@@ -34,7 +34,7 @@ public class DockerComposeService {
             config.setHostname(asString(serviceMap.get("hostname")));
             config.setRestartPolicy(defaultIfBlank(asString(serviceMap.get("restart")), "no"));
             config.setCommand(convertCommand(serviceMap.get("command")));
-            config.setDependsOn(asStringList(serviceMap.get("depends_on")));
+            config.setDependsOn(parseDependsOn(serviceMap.get("depends_on")));
             config.setVolumes(asStringList(serviceMap.get("volumes")));
             config.setPorts(asStringList(serviceMap.get("ports")));
             config.setEnvironment(parseEnvironment(serviceMap.get("environment"), config));
@@ -72,9 +72,6 @@ public class DockerComposeService {
 
     public String exportComposeContent(List<DockerServiceConfig> services, String version) {
         StringBuilder sb = new StringBuilder();
-        if (version != null && !version.isBlank()) {
-            sb.append("version: '").append(version).append("'\n");
-        }
         sb.append("services:\n");
         for (DockerServiceConfig service : services) {
             sb.append("  ").append(service.getServiceName()).append(":\n");
@@ -96,7 +93,7 @@ public class DockerComposeService {
             appendList(sb, "ports", service.getPorts(), 4);
             appendEnvironment(sb, service);
             appendList(sb, "volumes", service.getVolumes(), 4);
-            appendList(sb, "depends_on", service.getDependsOn(), 4);
+            appendDependsOn(sb, service.getDependsOn());
             if (service.getRestartPolicy() != null && !service.getRestartPolicy().isBlank()) {
                 sb.append("    restart: ").append(service.getRestartPolicy()).append("\n");
             }
@@ -289,6 +286,34 @@ public class DockerComposeService {
         return null;
     }
 
+    @SuppressWarnings("unchecked")
+    private List<Map<String, String>> parseDependsOn(Object value) {
+        if (value == null) {
+            return null;
+        }
+        List<Map<String, String>> result = new ArrayList<>();
+        if (value instanceof List<?> list) {
+            for (Object item : list) {
+                Map<String, String> dep = new LinkedHashMap<>();
+                dep.put("service", String.valueOf(item));
+                result.add(dep);
+            }
+        } else if (value instanceof Map<?, ?> map) {
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                Map<String, String> dep = new LinkedHashMap<>();
+                dep.put("service", String.valueOf(entry.getKey()));
+                if (entry.getValue() instanceof Map<?, ?> condMap) {
+                    Object condition = condMap.get("condition");
+                    if (condition != null) {
+                        dep.put("condition", String.valueOf(condition));
+                    }
+                }
+                result.add(dep);
+            }
+        }
+        return result.isEmpty() ? null : result;
+    }
+
     private List<String> asStringList(Object value) {
         if (value == null) {
             return null;
@@ -432,6 +457,9 @@ public class DockerComposeService {
             if (healthMap.get("retries") != null) {
                 sb.append("      retries: ").append(healthMap.get("retries")).append("\n");
             }
+            if (healthMap.get("start_period") != null) {
+                sb.append("      start_period: ").append(healthMap.get("start_period")).append("\n");
+            }
         }
     }
 
@@ -477,6 +505,26 @@ public class DockerComposeService {
 
     private String defaultIfBlank(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private void appendDependsOn(StringBuilder sb, List<Map<String, String>> deps) {
+        if (deps == null || deps.isEmpty()) {
+            return;
+        }
+        boolean hasCondition = deps.stream().anyMatch(d -> d.get("condition") != null && !d.get("condition").isBlank());
+        sb.append("    depends_on:\n");
+        if (hasCondition) {
+            for (Map<String, String> dep : deps) {
+                String service = dep.get("service");
+                String condition = dep.get("condition");
+                sb.append("      ").append(service).append(":\n");
+                sb.append("        condition: ").append(condition != null && !condition.isBlank() ? condition : "service_started").append("\n");
+            }
+        } else {
+            for (Map<String, String> dep : deps) {
+                sb.append("    - ").append(dep.get("service")).append("\n");
+            }
+        }
     }
 
     private void appendList(StringBuilder sb, String key, List<String> values, int indent) {

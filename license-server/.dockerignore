@@ -1,0 +1,5 @@
+frontend/node_modules
+docker-data
+data
+.git
+*.md

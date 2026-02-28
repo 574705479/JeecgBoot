@@ -1,0 +1,1 @@
+ALTER TABLE license ADD COLUMN callback_url VARCHAR(500) DEFAULT NULL COMMENT '客户端回调通知地址';

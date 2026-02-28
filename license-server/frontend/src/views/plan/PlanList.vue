@@ -98,7 +98,7 @@
           <div v-for="qDef in currentQuotasDef" :key="qDef.code" style="display: flex; align-items: center; margin-bottom: 8px; gap: 8px">
             <a-checkbox
               :checked="quotaEnabled[qDef.code] || false"
-              @change="(e) => toggleQuota(qDef.code, e.target.checked, qDef.defaultValue)"
+              @change="(e: any) => toggleQuota(qDef.code, e.target.checked, qDef.defaultValue)"
             />
             <a-tooltip :title="qDef.description">
               <span style="width: 130px; flex-shrink: 0">{{ qDef.name }}</span>
@@ -124,7 +124,7 @@
             <a-tooltip v-for="fDef in currentFeaturesDef" :key="fDef.code" :title="fDef.description">
               <a-checkable-tag
                 :checked="form.features.includes(fDef.code)"
-                @change="(checked) => toggleFeature(fDef.code, checked)"
+                @change="(checked: boolean) => toggleFeature(fDef.code, checked)"
               >
                 {{ fDef.name }}
               </a-checkable-tag>

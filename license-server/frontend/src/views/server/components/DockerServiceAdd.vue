@@ -150,7 +150,14 @@ jeecg-boot-redis:
       <a-form-item label="依赖服务">
         <div v-for="(dep, index) in dependsList" :key="index" style="margin-bottom: 8px;">
           <a-row :gutter="8">
-            <a-col :span="21"><a-input v-model:value="dep.service" placeholder="依赖的服务名称" /></a-col>
+            <a-col :span="10"><a-input v-model:value="dep.service" placeholder="依赖的服务名称" /></a-col>
+            <a-col :span="11">
+              <a-select v-model:value="dep.condition" placeholder="启动条件（可选）" allowClear>
+                <a-select-option value="service_started">service_started</a-select-option>
+                <a-select-option value="service_healthy">service_healthy</a-select-option>
+                <a-select-option value="service_completed_successfully">service_completed_successfully</a-select-option>
+              </a-select>
+            </a-col>
             <a-col :span="3" style="text-align: center;">
               <a-button type="link" danger @click="removeDepends(index)"><DeleteOutlined /></a-button>
             </a-col>
@@ -186,7 +193,7 @@ interface PortMapping { host: string; container: string; protocol: string }
 interface EnvVariable { key: string; value: string }
 interface VolumeMapping { host: string; container: string }
 interface NetworkConfig { name: string; ipv4Address?: string }
-interface DependencyConfig { service: string }
+interface DependencyConfig { service: string; condition?: string }
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -268,7 +275,7 @@ const parseYaml = () => {
       message.warning('检测到多个服务，将只解析第一个服务')
     }
 
-    const serviceName = serviceNames[0]
+    const serviceName = serviceNames[0]!
     const serviceConfig = parsed[serviceName]
 
     formData.value.serviceName = serviceName
@@ -287,7 +294,7 @@ const parseYaml = () => {
         const protocolMatch = portStr.match(/^(.+)\/(\w+)$/)
         if (protocolMatch) {
           const [, mapping, protocol] = protocolMatch
-          const [host, container] = mapping.split(':')
+          const [host, container] = mapping!.split(':')
           return { host, container, protocol }
         } else {
           const parts = portStr.split(':')
@@ -361,9 +368,14 @@ const parseYaml = () => {
 
     if (serviceConfig.depends_on) {
       if (Array.isArray(serviceConfig.depends_on)) {
-        dependsList.value = serviceConfig.depends_on.map((dep: string) => ({ service: dep }))
+        dependsList.value = serviceConfig.depends_on.map((dep: any) =>
+          typeof dep === 'string' ? { service: dep } : { service: dep.service, condition: dep.condition }
+        )
       } else if (typeof serviceConfig.depends_on === 'object') {
-        dependsList.value = Object.keys(serviceConfig.depends_on).map(service => ({ service }))
+        dependsList.value = Object.entries(serviceConfig.depends_on).map(([service, config]: [string, any]) => ({
+          service,
+          condition: config?.condition || undefined,
+        }))
       }
     } else {
       dependsList.value = []
@@ -406,7 +418,11 @@ const handleSubmit = async () => {
       networksObj[n.name] = n.ipv4Address?.trim() ? { ipv4_address: n.ipv4Address.trim() } : {}
     })
 
-    const dependsArray = dependsList.value.filter(d => d.service).map(d => d.service)
+    const dependsArray = dependsList.value.filter(d => d.service).map(d => {
+      const item: Record<string, string> = { service: d.service }
+      if (d.condition) item.condition = d.condition
+      return item
+    })
 
     const submitData = {
       serverId: props.serverId,

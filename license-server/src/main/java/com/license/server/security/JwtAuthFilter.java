@@ -38,19 +38,21 @@ public class JwtAuthFilter implements Filter {
             return;
         }
 
+        String token = authHeader.substring(7);
+        Claims claims;
         try {
-            String token = authHeader.substring(7);
-            Claims claims = jwtProvider.parseToken(token);
-            if (!"access".equals(claims.get("type"))) {
-                sendError(res, 401, "无效的token类型");
-                return;
-            }
-            req.setAttribute("userId", Long.parseLong(claims.getSubject()));
-            req.setAttribute("username", claims.get("username"));
-            chain.doFilter(request, response);
+            claims = jwtProvider.parseToken(token);
         } catch (Exception e) {
             sendError(res, 401, "token无效或已过期");
+            return;
         }
+        if (!"access".equals(claims.get("type"))) {
+            sendError(res, 401, "无效的token类型");
+            return;
+        }
+        req.setAttribute("userId", Long.parseLong(claims.getSubject()));
+        req.setAttribute("username", claims.get("username"));
+        chain.doFilter(request, response);
     }
 
     private void sendError(HttpServletResponse res, int code, String message) throws IOException {

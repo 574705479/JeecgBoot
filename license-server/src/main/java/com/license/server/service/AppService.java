@@ -119,11 +119,22 @@ public class AppService {
 
     public String decryptPrivateKey(App app) {
         String masterKey = properties.getMasterKey();
+        String pk = app.getPrivateKey();
         if (masterKey == null || masterKey.isBlank()) {
-            return app.getPrivateKey();
+            return pk;
+        }
+        if (pk != null && pk.startsWith("-----BEGIN")) {
+            try {
+                app.setPrivateKey(CryptoUtil.encryptAesGcm(pk, masterKey));
+                appRepository.save(app);
+                log.info("已自动加密应用[{}]的私钥", app.getAppName());
+            } catch (Exception e) {
+                log.warn("自动加密私钥失败: {}", e.getMessage());
+            }
+            return pk;
         }
         try {
-            return CryptoUtil.decryptAesGcm(app.getPrivateKey(), masterKey);
+            return CryptoUtil.decryptAesGcm(pk, masterKey);
         } catch (Exception e) {
             throw new RuntimeException("解密私钥失败", e);
         }

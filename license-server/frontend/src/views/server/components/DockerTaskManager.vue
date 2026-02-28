@@ -177,7 +177,7 @@ const parseErrorDetail = (resultDetail: string) => {
       return displayItems.map((item: string) => {
         if (item.includes(':')) {
           const parts = item.split(':')
-          const serviceName = parts[0].trim()
+          const serviceName = parts[0]!.trim()
           const errorMsg = parts.slice(1).join(':').trim()
           return `• ${serviceName}\n  └─ ${errorMsg}`
         }

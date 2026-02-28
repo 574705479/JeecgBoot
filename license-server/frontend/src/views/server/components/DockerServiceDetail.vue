@@ -165,7 +165,14 @@
             <div class="config-list">
               <div v-for="(dep, index) in dependencyList" :key="index" class="config-item">
                 <a-row :gutter="8" align="middle">
-                  <a-col :span="20"><a-input v-model:value="dep.service" placeholder="依赖服务名" /></a-col>
+                  <a-col :span="9"><a-input v-model:value="dep.service" placeholder="依赖服务名" /></a-col>
+                  <a-col :span="11">
+                    <a-select v-model:value="dep.condition" placeholder="启动条件（可选）" allowClear>
+                      <a-select-option value="service_started">service_started</a-select-option>
+                      <a-select-option value="service_healthy">service_healthy</a-select-option>
+                      <a-select-option value="service_completed_successfully">service_completed_successfully</a-select-option>
+                    </a-select>
+                  </a-col>
                   <a-col :span="4" style="text-align: center;">
                     <a-button type="link" danger size="small" @click="removeDependency(index)"><DeleteOutlined /> 删除</a-button>
                   </a-col>
@@ -222,6 +229,7 @@
           <a-form-item label="检查间隔"><a-input v-model:value="extraConfig.healthcheckInterval" placeholder="如: 30s" /></a-form-item>
           <a-form-item label="超时时间"><a-input v-model:value="extraConfig.healthcheckTimeout" placeholder="如: 10s" /></a-form-item>
           <a-form-item label="重试次数"><a-input v-model:value="extraConfig.healthcheckRetries" placeholder="如: 3" /></a-form-item>
+          <a-form-item label="启动等待"><a-input v-model:value="extraConfig.healthcheckStartPeriod" placeholder="如: 30s（容器启动后等待多久开始检查）" /></a-form-item>
         </a-tab-pane>
       </a-tabs>
     </a-form>
@@ -238,7 +246,7 @@ interface PortMapping { host: string; container: string; protocol: string }
 interface EnvVariable { key: string; value: string }
 interface VolumeMapping { host: string; container: string; mode: string }
 interface NetworkConfig { name: string; ipv4Address?: string }
-interface DependencyConfig { service: string }
+interface DependencyConfig { service: string; condition?: string }
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -253,6 +261,7 @@ const modalVisible = computed({
 })
 
 const formRef = ref()
+void formRef
 const activeTab = ref('basic')
 const saving = ref(false)
 
@@ -284,6 +293,7 @@ const extraConfig = reactive({
   healthcheckInterval: '',
   healthcheckTimeout: '',
   healthcheckRetries: '',
+  healthcheckStartPeriod: '',
 })
 
 watch(() => [props.open, props.serviceData], ([newVisible, newData]) => {
@@ -369,7 +379,9 @@ const initFormData = (data: any) => {
   try {
     const deps = data.dependsOn
     if (deps && Array.isArray(deps)) {
-      dependencyList.value = deps.map((dep: any) => typeof dep === 'string' ? { service: dep } : dep)
+      dependencyList.value = deps.map((dep: any) =>
+        typeof dep === 'string' ? { service: dep } : { service: dep.service, condition: dep.condition || undefined }
+      )
     } else {
       dependencyList.value = []
     }
@@ -403,6 +415,7 @@ const initFormData = (data: any) => {
         extraConfig.healthcheckInterval = ext.healthcheck.interval || ''
         extraConfig.healthcheckTimeout = ext.healthcheck.timeout || ''
         extraConfig.healthcheckRetries = ext.healthcheck.retries ? String(ext.healthcheck.retries) : ''
+        extraConfig.healthcheckStartPeriod = ext.healthcheck.start_period || ''
       }
     } else {
       extraConfig.loggingDriver = ''
@@ -412,6 +425,7 @@ const initFormData = (data: any) => {
       extraConfig.healthcheckInterval = ''
       extraConfig.healthcheckTimeout = ''
       extraConfig.healthcheckRetries = ''
+      extraConfig.healthcheckStartPeriod = ''
       labelList.value = []
     }
   } catch {
@@ -422,6 +436,7 @@ const initFormData = (data: any) => {
     extraConfig.healthcheckInterval = ''
     extraConfig.healthcheckTimeout = ''
     extraConfig.healthcheckRetries = ''
+    extraConfig.healthcheckStartPeriod = ''
     labelList.value = []
   }
 }
@@ -458,7 +473,11 @@ const handleSave = async () => {
       networksObj[n.name] = n.ipv4Address?.trim() ? { ipv4_address: n.ipv4Address.trim() } : {}
     })
 
-    const dependsArray = dependencyList.value.filter(d => d.service).map(d => d.service)
+    const dependsArray = dependencyList.value.filter(d => d.service).map(d => {
+      const item: Record<string, string> = { service: d.service }
+      if (d.condition) item.condition = d.condition
+      return item
+    })
 
     const extraConfigObj: any = {}
     if (extraConfig.loggingDriver) {
@@ -477,6 +496,7 @@ const handleSave = async () => {
       if (extraConfig.healthcheckInterval) extraConfigObj.healthcheck.interval = extraConfig.healthcheckInterval
       if (extraConfig.healthcheckTimeout) extraConfigObj.healthcheck.timeout = extraConfig.healthcheckTimeout
       if (extraConfig.healthcheckRetries) extraConfigObj.healthcheck.retries = parseInt(extraConfig.healthcheckRetries)
+      if (extraConfig.healthcheckStartPeriod) extraConfigObj.healthcheck.start_period = extraConfig.healthcheckStartPeriod
     }
 
     const saveData = {

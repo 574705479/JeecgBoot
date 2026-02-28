@@ -5,7 +5,7 @@ spring:
   application:
     name: license-server
   datasource:
-    url: jdbc:mysql://127.0.0.1:13306/license_server?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://127.0.0.1:13306/license_server?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
     username: root
     password: ${SPRING_DATASOURCE_PASSWORD:92400bda284afba53b21162911f98d00Z}
     driver-class-name: com.mysql.cj.jdbc.Driver

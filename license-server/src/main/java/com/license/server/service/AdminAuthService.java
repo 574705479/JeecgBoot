@@ -29,20 +29,18 @@ public class AdminAuthService implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         if (adminUserRepository.count() == 0) {
-            byte[] randomBytes = new byte[8];
-            new SecureRandom().nextBytes(randomBytes);
-            String randomPassword = HexFormat.of().formatHex(randomBytes);
+            String defaultPassword = "admin123";
 
             AdminUser admin = new AdminUser();
             admin.setUsername("admin");
-            admin.setPassword(passwordEncoder.encode(randomPassword));
+            admin.setPassword(passwordEncoder.encode(defaultPassword));
             admin.setRealName("超级管理员");
             adminUserRepository.save(admin);
 
             log.warn("========================================");
             log.warn("初始管理员账号已创建");
             log.warn("用户名: admin");
-            log.warn("密码: {}", randomPassword);
+            log.warn("密码: {}", defaultPassword);
             log.warn("请首次登录后立即修改密码！");
             log.warn("========================================");
         }

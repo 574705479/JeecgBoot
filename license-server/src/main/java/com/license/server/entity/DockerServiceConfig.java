@@ -53,7 +53,7 @@ public class DockerServiceConfig {
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "depends_on", columnDefinition = "JSON")
-    private List<String> dependsOn;
+    private List<Map<String, String>> dependsOn;
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "networks", columnDefinition = "JSON")
