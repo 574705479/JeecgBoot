@@ -4,7 +4,7 @@ MAINTAINER jeecgos@163.com
 
 RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 
-#RUN mkdir -p /jeecg-boot/config/jeecg/
+ENV LANG=C.UTF-8
 
 WORKDIR /jeecg-boot
 
@@ -15,4 +15,4 @@ ADD ./target/jeecg-system-start-3.9.0.jar ./
 
 RUN mkdir -p /jeecg-boot/config
 
-CMD sleep 60;java -Dfile.encoding=UTF-8 -Djava.security.egd=file:/dev/./urandom -jar jeecg-system-start-3.9.0.jar
+CMD sleep 60;java -Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8 -Djava.security.egd=file:/dev/./urandom -jar jeecg-system-start-3.9.0.jar

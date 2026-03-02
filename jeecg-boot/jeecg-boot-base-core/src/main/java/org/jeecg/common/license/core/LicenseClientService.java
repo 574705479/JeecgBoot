@@ -17,6 +17,7 @@ public class LicenseClientService {
     private static final Logger log = LoggerFactory.getLogger(LicenseClientService.class);
 
     private volatile LicenseState state = LicenseState.EMPTY;
+    private volatile String resolvedCallbackUrl;
 
     private final LicenseProperties properties;
     private final RsaVerifier rsaVerifier;
@@ -209,6 +210,18 @@ public class LicenseClientService {
         return this.state;
     }
 
+    public void setResolvedCallbackUrl(String url) {
+        this.resolvedCallbackUrl = url;
+    }
+
+    private String getEffectiveCallbackUrl() {
+        String configured = properties.getCallbackUrl();
+        if (configured != null && !configured.isBlank()) {
+            return configured;
+        }
+        return resolvedCallbackUrl;
+    }
+
     private void handleHeartbeatError(int code, LicenseState current) {
         switch (code) {
             case 40001 -> {
@@ -255,8 +268,9 @@ public class LicenseClientService {
         body.put("licenseKey", licenseKey);
         body.put("timestamp", timestamp);
         body.put("sign", sign);
-        if (properties.getCallbackUrl() != null && !properties.getCallbackUrl().isBlank()) {
-            body.put("callbackUrl", properties.getCallbackUrl());
+        String callbackUrl = getEffectiveCallbackUrl();
+        if (callbackUrl != null && !callbackUrl.isBlank()) {
+            body.put("callbackUrl", callbackUrl);
         }
 
         String url = properties.getServerUrl() + "/api/" + properties.getApiVersion() + path;

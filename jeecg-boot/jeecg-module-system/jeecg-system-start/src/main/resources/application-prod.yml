@@ -22,7 +22,7 @@ management:
 spring:
   flyway:
     # 是否启用flyway
-    enabled: false
+    enabled: true
     # 是否关闭要清除已有库下的表功能,生产环境必须为true,否则会删库，非常重要！！！
     clean-disabled: true
     # 迁移sql脚本存放路径
@@ -338,3 +338,45 @@ justauth:
     type: default
     prefix: 'demo::'
     timeout: 1h
+license:
+  enabled: true
+  server-url: https://sq.beartalk.net
+  app-id: jeecg-boot
+  app-secret: ${LICENSE_APP_SECRET:aff2a84cb689091555be1f4db2f70966da736a9fa9c8ba4ae5cd4d7671095ea0}
+  public-key: |
+    -----BEGIN PUBLIC KEY-----
+    MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2EIgjzuA9G55nOieh076
+    s1u2yi85U3520hCEaX7CFtOsI1dDT/GOqa0yriBdrBCrxkc7ynMuvRfuK/wZ1acx
+    9a3+Otas11oBoLVE0KrUSCShHRL7/Vd2b6v1nMTbNu9toguTjRMQL8APpzxJy6HD
+    hRT8tjpHDTtP08Lx0oj54wlZZ5j0owvEtRucbyuVOuetIDuEU1sSyTFres2ItVjD
+    tVeaqgXIVQmGCr6GWE10G3dTxXQ4VzxvHTTQQV0I+eWOA9MwSU/6NZzAENDGs0Ba
+    t4iWy3ZocOwS7OD1V1Uo1ATo1tVnjYQfVfHpBkxJf/CSUGumAhxl/bEd59/AKmmx
+    MQIDAQAB
+    -----END PUBLIC KEY-----
+  heartbeat-interval: 7200
+  grace-period: 259200
+  cache-dir: ${user.home}/.license
+  exclude-paths:
+    - /sys/login
+    - /sys/mLogin
+    - /sys/phoneLogin
+    - /sys/getEncryptedString
+    - /sys/randomImage/**
+    - /sys/checkCaptcha
+    - /sys/sms
+    - /sys/phoneVerification/**
+    - /license/**
+    - /sys/common/**
+    - /generic/**
+    - /static/**
+    - /websocket/**
+    - /eoaSocket/**
+    - /cs/ws/**
+    - /cs/userChat/**
+    - /cs/visitor/**
+    - /cs/brand/**
+    - /doc.html
+    - /swagger-resources/**
+    - /v3/api-docs/**
+    - /sys/thirdLogin/**
+    - /sys/cas/client/**

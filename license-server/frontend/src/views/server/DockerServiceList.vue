@@ -37,7 +37,7 @@
     </div>
 
     <a-row :gutter="16">
-      <a-col :span="16">
+      <a-col :span="16" style="min-width: 0">
         <a-empty
           v-if="!loading && list.length === 0"
           description="暂无Docker服务配置"
@@ -62,6 +62,7 @@
           :row-selection="{ selectedRowKeys, onChange: onSelectChange }"
           row-key="id"
           :pagination="false"
+          :scroll="{ x: 1100 }"
           bordered
         >
           <template #bodyCell="{ column, record }">
@@ -69,7 +70,7 @@
               {{ record.imageName }}:{{ record.currentVersion }}
             </template>
             <template v-else-if="column.key === 'targetVersion'">
-              <a-input v-model:value="record.targetVersion" style="width: 120px" size="small" @blur="changeVersion(record)" />
+              <a-input v-model:value="record.targetVersion" style="width: 100%" size="small" @blur="changeVersion(record)" />
             </template>
             <template v-else-if="column.key === 'useParamsMode'">
               <a-tag :color="record.useParamsMode === 1 ? 'blue' : 'default'">
@@ -256,30 +257,45 @@ let logStreamInterval: number | null = null
 const statusMap: Record<number, string> = { 0: '停止', 1: '运行中', 2: '异常' }
 
 const columns = [
-  { title: '服务名称', dataIndex: 'serviceName', key: 'serviceName', width: 150 },
-  { title: '容器名称', dataIndex: 'containerName', key: 'containerName', width: 150 },
-  { title: '当前镜像', key: 'imageFull', width: 250 },
-  { title: '目标版本', key: 'targetVersion', width: 150 },
+  { title: '服务名称', dataIndex: 'serviceName', key: 'serviceName', width: 120 },
+  { title: '容器名称', dataIndex: 'containerName', key: 'containerName', width: 120 },
+  { title: '当前镜像', key: 'imageFull', width: 200, ellipsis: true },
+  { title: '目标版本', key: 'targetVersion', width: 120 },
   { title: 'PARAMS模式', key: 'useParamsMode', width: 100 },
-  { title: '状态', key: 'status', width: 100 },
-  { title: '重启策略', dataIndex: 'restartPolicy', key: 'restartPolicy', width: 120 },
-  { title: '操作', key: 'action', fixed: 'right' as const, width: 350 },
+  { title: '状态', key: 'status', width: 80 },
+  { title: '重启策略', dataIndex: 'restartPolicy', key: 'restartPolicy', width: 100 },
+  { title: '操作', key: 'action', fixed: 'right' as const, width: 260 },
 ]
 
 function onSelectChange(keys: number[]) { selectedRowKeys.value = keys }
 function onServerChange() { loadServices(); }
 
 async function loadServerOptions() {
-  const res = await listServerInfo({ page: 1, size: 200 })
-  if (res.data.code === 200) serverOptions.value = res.data.data.records
+  try {
+    const res = await listServerInfo({ page: 1, size: 200 })
+    if (res.data.code === 200) serverOptions.value = res.data.data.records
+    else message.error(res.data.message || '加载服务器列表失败')
+  } catch (err: any) {
+    message.error('加载服务器列表失败: ' + (err.message || err))
+  }
 }
+
+const originalVersions = ref<Map<number, string>>(new Map())
 
 async function loadServices() {
   if (!serverId.value) return
   loading.value = true
   try {
     const res = await listDockerServiceByServerId(serverId.value)
-    if (res.data.code === 200) list.value = res.data.data || []
+    if (res.data.code === 200) {
+      list.value = res.data.data || []
+      originalVersions.value.clear()
+      list.value.forEach(s => originalVersions.value.set(s.id, s.targetVersion || ''))
+    } else {
+      message.error(res.data.message || '加载服务列表失败')
+    }
+  } catch (err: any) {
+    message.error('加载服务列表失败: ' + (err.message || err))
   } finally {
     loading.value = false
   }
@@ -311,8 +327,18 @@ async function syncStatusAction() {
 }
 
 async function changeVersion(record: any) {
-  const res = await updateDockerVersion(record.id, record.targetVersion)
-  if (res.data.code !== 200) message.error(res.data.message)
+  const orig = originalVersions.value.get(record.id)
+  if (record.targetVersion === orig) return
+  try {
+    const res = await updateDockerVersion(record.id, record.targetVersion)
+    if (res.data.code === 200) {
+      originalVersions.value.set(record.id, record.targetVersion)
+    } else {
+      message.error(res.data.message || '更新版本失败')
+    }
+  } catch (err: any) {
+    message.error('更新版本失败: ' + (err.message || err))
+  }
 }
 
 function openDetailModal(record: any) {
@@ -330,6 +356,7 @@ function runCommand(record: any, commandType: string) {
 
     executeDockerCommand({ serviceId: record.id, commandType: 'logs', serverId: serverId.value! })
       .then(res => {
+        if (!logVisible.value) return
         if (res.data.code === 200) {
           logContent.value = res.data.data || '暂无日志'
           startLogStream()
@@ -339,6 +366,7 @@ function runCommand(record: any, commandType: string) {
         }
       })
       .catch(err => {
+        if (!logVisible.value) return
         logContent.value = ''
         message.error('获取日志失败: ' + (err.message || err))
       })
@@ -457,9 +485,15 @@ function handleRemoveService(record: any) {
 }
 
 async function batchUpdateAction() {
+  const selectedServices = list.value.filter(s => selectedRowKeys.value.includes(s.id))
   Modal.confirm({
     title: '确认批量更新',
-    content: `是否批量更新选中的 ${selectedRowKeys.value.length} 个服务？`,
+    content: () => h('div', [
+      h('p', `即将批量更新以下 ${selectedServices.length} 个服务：`),
+      h('div', { style: 'margin: 8px 0; max-height: 200px; overflow-y: auto;' },
+        selectedServices.map(s => h('div', { key: s.id, style: 'padding: 2px 0; color: #1890ff;' }, `• ${s.serviceName}`))
+      ),
+    ]),
     onOk: async () => {
       const res = await executeDockerAsync({ serviceIds: selectedRowKeys.value, commandType: 'update', serverId: serverId.value! })
       if (res.data.code === 200) {
@@ -479,14 +513,18 @@ async function batchUpdateAction() {
 
 async function exportComposeAction() {
   if (!serverId.value) return
-  const res = await exportComposeFile(serverId.value)
-  const blob = new Blob([res.data], { type: 'application/x-yaml' })
-  const url = window.URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `docker-compose-${serverId.value}.yml`
-  a.click()
-  window.URL.revokeObjectURL(url)
+  try {
+    const res = await exportComposeFile(serverId.value)
+    const blob = new Blob([res.data], { type: 'application/x-yaml' })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `docker-compose-${serverId.value}.yml`
+    a.click()
+    window.URL.revokeObjectURL(url)
+  } catch (err: any) {
+    message.error('导出Compose文件失败: ' + (err.message || err))
+  }
 }
 
 onMounted(async () => {

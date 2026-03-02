@@ -1,26 +1,30 @@
-version: '2'
+version: '2.1'
 services:
-  #这是服务器端部署用的yml配置，domain要改成对应的仓库域名地址，mysql后续没有改动就只需要制作一次镜像，后续有变更的正常只有system和vue.
+  #这是服务器端部署用的yml配置，domain要改成对应的仓库域名地址。首次部署需将初始化SQL放到 /www/docker-data/kefu/init-sql/ 目录.
   kefu-mysql:
-    image: domain/kefu-mysql:1.0.0
+    image: mysql:8.4
     environment:
       MYSQL_ROOT_PASSWORD: 92400bda284afba53b21162911f98d00Z
       MYSQL_ROOT_HOST: '%'
+      MYSQL_DATABASE: jeecg-boot
       TZ: Asia/Shanghai
     restart: always
     container_name: kefu-mysql
     # 🔒 数据持久化配置 - 防止容器重建时数据丢失
     volumes:
-      - ./docker-data/mysql:/var/lib/mysql
+      - /www/docker-data/kefu/mysql:/var/lib/mysql
     command:
       --character-set-server=utf8mb4
       --collation-server=utf8mb4_general_ci
       --explicit_defaults_for_timestamp=true
       --lower_case_table_names=1
       --max_allowed_packet=128M
-      --default-authentication-plugin=caching_sha2_password
     ports:
       - 13306:3306
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      retries: 10
     networks:
       - kefu
 
@@ -30,7 +34,7 @@ services:
       - 6379:6379
     # 🔒 数据持久化配置 - 防止容器重建时数据丢失
     volumes:
-      - ./docker-data/redis:/data
+      - /www/docker-data/kefu/redis:/data
     restart: always
     hostname: kefu-redis
     container_name: kefu-redis
@@ -48,6 +52,8 @@ services:
     ports:
       - 5432:5432
     restart: always
+    volumes:
+      - /www/docker-data/kefu/pgvector:/var/lib/postgresql/data
     networks:
       - kefu
 
@@ -63,30 +69,58 @@ services:
     ports:
       - 27017:27017
     volumes:
-      - ./data/mongodb:/data/db
+      - /www/docker-data/kefu/mongodb:/data/db
     networks:
       - kefu
       
   kefu-system:
-    image: domain/kefu-system:1.0.0
+    image: registry.beartalk.net/kefu-system:1.0.0
     restart: on-failure
     environment:
-      SPRING_APPLICATION_JSON: '{"spring":{"data":{"mongodb":{"authentication-database":"admin"}}}}'
+      LANG: C.UTF-8
+      JAVA_TOOL_OPTIONS: -Dsun.jnu.encoding=UTF-8
+      SPRING_PROFILES_ACTIVE: prod
+      # MySQL
+      SPRING_DATASOURCE_DYNAMIC_DATASOURCE_MASTER_URL: jdbc:mysql://kefu-mysql:3306/jeecg-boot?characterEncoding=UTF-8&useUnicode=true&useSSL=false&tinyInt1isBit=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+      SPRING_DATASOURCE_DYNAMIC_DATASOURCE_MASTER_USERNAME: root
+      SPRING_DATASOURCE_DYNAMIC_DATASOURCE_MASTER_PASSWORD: 92400bda284afba53b21162911f98d00Z
+      # Redis
+      SPRING_DATA_REDIS_HOST: kefu-redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_PASSWORD: 92400bda284afba53b21162911f98d00Z
+      # MongoDB
+      SPRING_DATA_MONGODB_HOST: kefu-mongodb
+      SPRING_DATA_MONGODB_PORT: 27017
+      SPRING_DATA_MONGODB_USERNAME: root
+      SPRING_DATA_MONGODB_PASSWORD: 92400bda284afba53b21162911f98d00Z
+      SPRING_DATA_MONGODB_DATABASE: jeecg
+      SPRING_DATA_MONGODB_AUTHENTICATIONDATABASE: admin
+      # PgVector
+      JEECG_AIRAG_EMBEDSTORE_HOST: kefu-pgvector
+      JEECG_AIRAG_EMBEDSTORE_PORT: 5432
+      JEECG_AIRAG_EMBEDSTORE_USER: postgres
+      JEECG_AIRAG_EMBEDSTORE_PASSWORD: 92400bda284afba53b21162911f98d00Z
+      # Redisson
+      JEECG_REDISSON_ADDRESS: kefu-redis:6379
+      JEECG_REDISSON_PASSWORD: 92400bda284afba53b21162911f98d00Z
     depends_on:
-      - kefu-mysql
-      - kefu-redis
+      kefu-mysql:
+        condition: service_healthy
+      kefu-redis:
+        condition: service_started
     container_name: kefu-system
     hostname: kefu-system
     ports:
-      - 8080:8080
+      - 8091:8080
     volumes:
-      - ./docker-data/upload:/opt/jeecg-boot/upload
-      - ./docker-data/webapp:/opt/jeecg-boot/webapp
+      - /www/docker-data/kefu/upload:/opt/jeecg-boot/upload
+      - /www/docker-data/kefu/webapp:/opt/jeecg-boot/webapp
+      - /www/docker-data/kefu/license-cache:/root/.license
     networks:
       - kefu
 
   kefu-vue:
-    image: domain/kefu-vue:1.0.0
+    image: registry.beartalk.net/kefu-vue:1.0.0
     container_name: kefu-vue-nginx
     depends_on:
       - kefu-system

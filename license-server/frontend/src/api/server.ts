@@ -15,7 +15,7 @@ export function getServerTree(keyword?: string) {
 }
 
 export function saveServerInfo(payload: any, isEdit: boolean) {
-  return request[isEdit ? 'post' : 'post'](`/admin/serverinfo/htServerInfo/${isEdit ? 'edit' : 'add'}`, payload)
+  return request.post(`/admin/serverinfo/htServerInfo/${isEdit ? 'edit' : 'add'}`, payload)
 }
 
 export function deleteServerInfo(id: number) {
@@ -59,7 +59,7 @@ export function listDockerServiceByServerId(serverId: number) {
 }
 
 export function saveDockerService(payload: any, isEdit: boolean) {
-  return request[isEdit ? 'post' : 'post'](`/admin/dockerservice/htDockerService/${isEdit ? 'edit' : 'add'}`, payload)
+  return request.post(`/admin/dockerservice/htDockerService/${isEdit ? 'edit' : 'add'}`, payload)
 }
 
 export function deleteDockerService(id: number) {

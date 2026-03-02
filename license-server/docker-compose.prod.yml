@@ -5,10 +5,10 @@ services:
     restart: unless-stopped
     ports: ["13308:3306"]
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-license123}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-fab93de1c8054a2e6b7d3f1094c58a}
       MYSQL_DATABASE: license_server
     volumes:
-      - ./docker-data/mysql:/var/lib/mysql
+      - /www/docker-data/license/mysql:/var/lib/mysql
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_general_ci
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
@@ -17,7 +17,7 @@ services:
       retries: 10
 
   license-server:
-    image: registry.domain.net/license-server:1.0.0
+    image: registry.beartalk.net/license-server:1.0.0
     container_name: license-server
     restart: unless-stopped
     ports: ["8180:8080"]
@@ -25,11 +25,13 @@ services:
       license-mysql:
         condition: service_healthy
     environment:
+      LANG: C.UTF-8
+      JAVA_TOOL_OPTIONS: -Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8
       SPRING_DATASOURCE_URL: jdbc:mysql://license-mysql:3306/license_server?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
-      SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD:-license123}
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD:-fab93de1c8054a2e6b7d3f1094c58a}
       LICENSE_MASTER_KEY: ${LICENSE_MASTER_KEY:-a3f7c9e1b5d824067fab93de1c8054a2e6b7d3f1094c58a2b7e6d4f801c93a25}
     volumes:
-      - ./docker-data/app-data:/app/data
+      - /www/docker-data/license/app-data:/app/data
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/actuator/health"]
       interval: 10s
@@ -38,7 +40,7 @@ services:
       start_period: 30s
 
   license-frontend:
-    image: registry.domain.net/license-frontend:1.0.0
+    image: registry.beartalk.net/license-frontend:1.0.0
     container_name: license-frontend
     restart: unless-stopped
     ports: ["8181:80"]

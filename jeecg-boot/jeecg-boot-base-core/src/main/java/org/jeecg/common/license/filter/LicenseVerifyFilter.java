@@ -19,6 +19,7 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 public class LicenseVerifyFilter implements Filter {
 
@@ -28,6 +29,7 @@ public class LicenseVerifyFilter implements Filter {
     private final List<String> excludePaths;
     private final AntPathMatcher pathMatcher = new AntPathMatcher();
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private volatile boolean callbackUrlResolved = false;
 
     public LicenseVerifyFilter(LicenseClientService licenseClientService, LicenseProperties properties) {
         this.licenseClientService = licenseClientService;
@@ -39,6 +41,11 @@ public class LicenseVerifyFilter implements Filter {
             throws IOException, ServletException {
         HttpServletRequest req = (HttpServletRequest) request;
         HttpServletResponse res = (HttpServletResponse) response;
+
+        if (!callbackUrlResolved) {
+            resolveCallbackUrl(req);
+        }
+
         String path = req.getRequestURI();
         String contextPath = req.getContextPath();
         if (contextPath != null && !contextPath.isEmpty() && path.startsWith(contextPath)) {
@@ -63,6 +70,40 @@ public class LicenseVerifyFilter implements Filter {
         result.put("message", "系统未授权");
         result.put("success", false);
         res.getWriter().write(objectMapper.writeValueAsString(result));
+    }
+
+    private void resolveCallbackUrl(HttpServletRequest req) {
+        try {
+            String host = req.getHeader("X-Forwarded-Host");
+            if (host == null) host = req.getHeader("Host");
+            if (host == null || !host.contains(".")) {
+                return;
+            }
+            callbackUrlResolved = true;
+
+            if (host.contains(",")) host = host.split(",")[0].trim();
+
+            String scheme = req.getHeader("X-Forwarded-Proto");
+            if (scheme == null || scheme.isBlank()) scheme = req.getScheme();
+
+            String contextPath = req.getContextPath();
+            String callbackUrl = scheme + "://" + host
+                    + (contextPath != null ? contextPath : "")
+                    + "/license/callback";
+
+            licenseClientService.setResolvedCallbackUrl(callbackUrl);
+            log.info("[License] Auto-detected callback URL: {}", callbackUrl);
+
+            CompletableFuture.runAsync(() -> {
+                try {
+                    licenseClientService.heartbeat();
+                } catch (Exception e) {
+                    log.debug("[License] Post-detection heartbeat failed: {}", e.getMessage());
+                }
+            });
+        } catch (Exception e) {
+            log.warn("[License] Failed to auto-detect callback URL: {}", e.getMessage());
+        }
     }
 
     private boolean isExcluded(String path) {

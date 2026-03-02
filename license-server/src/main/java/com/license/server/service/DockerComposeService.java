@@ -32,7 +32,7 @@ public class DockerComposeService {
             config.setServiceName(serviceName);
             config.setContainerName(defaultIfBlank(asString(serviceMap.get("container_name")), serviceName));
             config.setHostname(asString(serviceMap.get("hostname")));
-            config.setRestartPolicy(defaultIfBlank(asString(serviceMap.get("restart")), "no"));
+            config.setRestartPolicy(parseRestartPolicy(serviceMap.get("restart")));
             config.setCommand(convertCommand(serviceMap.get("command")));
             config.setDependsOn(parseDependsOn(serviceMap.get("depends_on")));
             config.setVolumes(asStringList(serviceMap.get("volumes")));
@@ -95,7 +95,7 @@ public class DockerComposeService {
             appendList(sb, "volumes", service.getVolumes(), 4);
             appendDependsOn(sb, service.getDependsOn());
             if (service.getRestartPolicy() != null && !service.getRestartPolicy().isBlank()) {
-                sb.append("    restart: ").append(service.getRestartPolicy()).append("\n");
+                sb.append("    restart: \"").append(service.getRestartPolicy()).append("\"\n");
             }
             if (service.getCommand() != null && !service.getCommand().isBlank()) {
                 sb.append("    command: ").append(service.getCommand()).append("\n");
@@ -326,6 +326,17 @@ public class DockerComposeService {
 
     private String asString(Object value) {
         return value == null ? null : String.valueOf(value);
+    }
+
+    private String parseRestartPolicy(Object value) {
+        if (value == null) {
+            return "no";
+        }
+        if (value instanceof Boolean) {
+            return Boolean.TRUE.equals(value) ? "always" : "no";
+        }
+        String str = String.valueOf(value).trim();
+        return str.isEmpty() ? "no" : str;
     }
 
     private String convertCommand(Object command) {

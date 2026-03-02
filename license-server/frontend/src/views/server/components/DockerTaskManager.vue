@@ -15,7 +15,20 @@
           <a-tag color="processing">执行中</a-tag>
         </div>
         <div class="task-info">
-          <div class="service-names">{{ task.serviceNames || '处理中...' }}</div>
+          <div class="service-names">
+            <template v-if="task.serviceNames">
+              <a-tag v-for="name in getVisibleNames(task)" :key="name" size="small">{{ name }}</a-tag>
+              <a-tag v-if="getHiddenCount(task) > 0 && !expandedTasks.has(task.id)"
+                color="blue" size="small" style="cursor: pointer" @click="expandedTasks.add(task.id)">
+                +{{ getHiddenCount(task) }}
+              </a-tag>
+              <a-tag v-if="expandedTasks.has(task.id) && parseServiceNames(task.serviceNames).length > 3"
+                size="small" style="cursor: pointer" @click="expandedTasks.delete(task.id)">
+                收起
+              </a-tag>
+            </template>
+            <span v-else class="placeholder-text">处理中...</span>
+          </div>
           <div class="current-service" v-if="task.currentService">
             正在执行: {{ task.currentService }}
           </div>
@@ -43,7 +56,20 @@
           <a-tag :color="getTaskStatusColor(task.status)">{{ getTaskStatusText(task.status) }}</a-tag>
         </div>
         <div class="task-info">
-          <div class="service-names">{{ task.serviceNames || '无服务信息' }}</div>
+          <div class="service-names">
+            <template v-if="task.serviceNames">
+              <a-tag v-for="name in getVisibleNames(task)" :key="name" size="small">{{ name }}</a-tag>
+              <a-tag v-if="getHiddenCount(task) > 0 && !expandedTasks.has(task.id)"
+                color="blue" size="small" style="cursor: pointer" @click="expandedTasks.add(task.id)">
+                +{{ getHiddenCount(task) }}
+              </a-tag>
+              <a-tag v-if="expandedTasks.has(task.id) && parseServiceNames(task.serviceNames).length > 3"
+                size="small" style="cursor: pointer" @click="expandedTasks.delete(task.id)">
+                收起
+              </a-tag>
+            </template>
+            <span v-else class="placeholder-text">无服务信息</span>
+          </div>
           <div class="task-stats" :class="{ 'has-error': task.status === 3 || task.failCount > 0 }">
             成功: <span class="success-count">{{ task.successCount || 0 }}</span> /
             失败: <span class="fail-count" :class="{ 'highlight-error': task.failCount > 0 }">{{ task.failCount || 0 }}</span> /
@@ -79,7 +105,7 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
 import { Empty } from 'ant-design-vue'
 import { LoadingOutlined, CheckCircleOutlined, CloseCircleOutlined, ClockCircleOutlined } from '@ant-design/icons-vue'
 import { getRecentDockerTasks } from '../../../api/server'
@@ -99,8 +125,29 @@ const recentTasks = ref<any[]>([])
 const pollingInterval = ref<any>(null)
 const highlightTaskId = ref<number | null>(null)
 const taskRefs = ref<Map<number, any>>(new Map())
+const expandedTasks = reactive(new Set<number>())
+const pendingTimers: number[] = []
 
 const runningTaskCount = computed(() => runningTasks.value.length)
+
+const parseServiceNames = (names: string): string[] => {
+  if (!names) return []
+  return names.split(',').map(s => s.trim()).filter(Boolean)
+}
+
+const COLLAPSE_THRESHOLD = 3
+
+const getVisibleNames = (task: any): string[] => {
+  const all = parseServiceNames(task.serviceNames)
+  if (expandedTasks.has(task.id) || all.length <= COLLAPSE_THRESHOLD) return all
+  return all.slice(0, COLLAPSE_THRESHOLD)
+}
+
+const getHiddenCount = (task: any): number => {
+  const all = parseServiceNames(task.serviceNames)
+  if (expandedTasks.has(task.id) || all.length <= COLLAPSE_THRESHOLD) return 0
+  return all.length - COLLAPSE_THRESHOLD
+}
 
 const setTaskRef = (taskId: number, el: any) => {
   if (el) {
@@ -112,15 +159,16 @@ const setTaskRef = (taskId: number, el: any) => {
 
 const scrollToTask = (taskId: number) => {
   highlightTaskId.value = taskId
-  setTimeout(() => {
+  const t1 = window.setTimeout(() => {
     const taskEl = taskRefs.value.get(taskId)
     if (taskEl) {
       taskEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
     }
   }, 300)
-  setTimeout(() => {
+  const t2 = window.setTimeout(() => {
     highlightTaskId.value = null
   }, 3000)
+  pendingTimers.push(t1, t2)
 }
 
 const getTaskTypeName = (taskType: string) => {
@@ -190,6 +238,9 @@ const parseErrorDetail = (resultDetail: string) => {
   }
 }
 
+const POLL_ACTIVE = 3000
+const POLL_IDLE = 15000
+
 const loadTasks = async () => {
   try {
     const res = await getRecentDockerTasks(props.serverId, 20)
@@ -202,16 +253,25 @@ const loadTasks = async () => {
     if (oldRunningCount > 0 && runningTasks.value.length < oldRunningCount) {
       emit('taskComplete')
     }
+
+    reschedulePolling()
   } catch (error: any) {
     console.error('加载任务失败', error)
   }
 }
 
-const startPolling = () => {
-  loadTasks()
+const reschedulePolling = () => {
+  if (pollingInterval.value) {
+    clearInterval(pollingInterval.value)
+  }
+  const interval = runningTasks.value.length > 0 ? POLL_ACTIVE : POLL_IDLE
   pollingInterval.value = setInterval(() => {
     loadTasks()
-  }, 3000)
+  }, interval)
+}
+
+const startPolling = () => {
+  loadTasks()
 }
 
 const stopPolling = () => {
@@ -227,6 +287,8 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopPolling()
+  pendingTimers.forEach(t => clearTimeout(t))
+  pendingTimers.length = 0
 })
 
 defineExpose({
@@ -328,12 +390,20 @@ defineExpose({
 
       .task-info {
         .service-names {
-          font-size: 12px;
-          color: #666;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 4px;
           margin-bottom: 4px;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
+
+          .ant-tag {
+            margin: 0;
+            font-size: 11px;
+          }
+
+          .placeholder-text {
+            font-size: 12px;
+            color: #999;
+          }
         }
 
         .current-service {

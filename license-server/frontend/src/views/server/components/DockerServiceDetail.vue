@@ -300,7 +300,7 @@ watch(() => [props.open, props.serviceData], ([newVisible, newData]) => {
   if (newVisible && newData && typeof newData === 'object' && 'id' in newData && (newData as any).id) {
     initFormData(newData)
   }
-}, { immediate: true, deep: true })
+}, { immediate: true })
 
 const initFormData = (data: any) => {
   formData.id = data.id || null

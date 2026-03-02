@@ -1,15 +1,14 @@
 version: '2'
 services:
   kefu-mysql:
-    build:
-      context: ./jeecg-boot/db
+    image: mysql:8.4
     environment:
       MYSQL_ROOT_PASSWORD: 92400bda284afba53b21162911f98d00Z
       MYSQL_ROOT_HOST: '%'
+      MYSQL_DATABASE: jeecg-boot
       TZ: Asia/Shanghai
     restart: always
     container_name: kefu-mysql
-    image: kefu-mysql
     # 🔒 数据持久化配置 - 防止容器重建时数据丢失
     volumes:
       - ./docker-data/mysql:/var/lib/mysql
@@ -19,7 +18,6 @@ services:
       --explicit_defaults_for_timestamp=true
       --lower_case_table_names=1
       --max_allowed_packet=128M
-      --default-authentication-plugin=caching_sha2_password
     ports:
       - 13306:3306
     networks:
@@ -49,6 +47,8 @@ services:
     ports:
       - 5432:5432
     restart: always
+    volumes:
+      - ./docker-data/pgvector:/var/lib/postgresql/data
     networks:
       - kefu
 
@@ -68,31 +68,36 @@ services:
     networks:
       - kefu
       
-#  kefu-system:
-#    build:
-#      context: ./jeecg-boot/jeecg-module-system/jeecg-system-start
-#    restart: on-failure
-#    depends_on:
-#      - kefu-mysql
-#      - kefu-redis
-#    container_name: kefu-system
-#    image: kefu-system
-#    hostname: kefu-system
-#    ports:
-#      - 8080:8080
-#    networks:
-#      - kefu
-#  kefu-vue:
-#    build:
-#      context: ./jeecgboot-vue3
-#    container_name: kefu-vue-nginx
-#    image: kefu-vue
-#    depends_on:
-#      - kefu-system
-#    networks:
-#      - kefu
-#    ports:
-#      - 3111:80
+  kefu-system:
+    build:
+      context: ./jeecg-boot/jeecg-module-system/jeecg-system-start
+    restart: on-failure
+    environment:
+      LANG: C.UTF-8
+      JAVA_TOOL_OPTIONS: -Dsun.jnu.encoding=UTF-8
+    depends_on:
+      - kefu-mysql
+      - kefu-redis
+    container_name: kefu-system
+    image: kefu-system
+    hostname: kefu-system
+    ports:
+      - 8080:8080
+    volumes:
+      - ./docker-data/license-cache:/root/.license
+    networks:
+      - kefu
+  kefu-vue:
+    build:
+      context: ./jeecgboot-vue3
+    container_name: kefu-vue-nginx
+    image: kefu-vue
+    depends_on:
+      - kefu-system
+    networks:
+      - kefu
+    ports:
+      - 3111:80
 
 networks:
   kefu:

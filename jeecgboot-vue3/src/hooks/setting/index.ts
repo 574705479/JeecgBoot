@@ -30,41 +30,11 @@ export const useGlobSetting = (): Readonly<GlobConfig> => {
   const brand = getBrandSetting();
   const appTitle = brand.appTitle || VITE_GLOB_APP_TITLE;
   const appShortTitle = brand.appShortTitle || VITE_GLOB_APP_SHORT_NAME;
-  // 短标题：替换shortName的下划线为空格
   const shortTitle = appShortTitle.replace(/_/g, ' ');
-  // Take global configuration
-  const glob: Readonly<GlobConfig> = {
-    title: appTitle,
-    domainUrl: VITE_GLOB_DOMAIN_URL,
-    apiUrl: VITE_GLOB_API_URL,
-    shortName: appShortTitle,
-    shortTitle: shortTitle,
-    openSso: VITE_GLOB_APP_OPEN_SSO,
-    openQianKun: VITE_GLOB_APP_OPEN_QIANKUN,
-    casBaseUrl: VITE_GLOB_APP_CAS_BASE_URL,
-    urlPrefix: VITE_GLOB_API_URL_PREFIX,
-    uploadUrl: VITE_GLOB_DOMAIN_URL,
-    viewUrl: VITE_GLOB_ONLINE_VIEW_URL,
-    // true: 新任务办理页面弹窗, false:旧的任务办理页面弹窗
-    useNewTaskModal: true,
-    // 当前是否运行在 electron 平台
-    isElectronPlatform: VITE_GLOB_RUN_PLATFORM === 'electron',
 
-    // 【JEECG作为乾坤子应用】是否以乾坤子应用模式启动
-    isQiankunMicro: VITE_GLOB_QIANKUN_MICRO_APP_NAME != null && VITE_GLOB_QIANKUN_MICRO_APP_NAME !== '',
-    // 【JEECG作为乾坤子应用】乾坤子应用入口
-    qiankunMicroAppEntry: VITE_GLOB_QIANKUN_MICRO_APP_ENTRY,
-  };
-
-  // 【JEECG作为乾坤子应用】乾坤子应用下，需要定义一下
-  if (!window['_CONFIG']) {
-    window['_CONFIG'] = {}
-  }
-
-  // 代码逻辑说明: 【QQYUN-10956】配置了自定义前缀，外部连接打不开，需要兼容处理
+  // 【QQYUN-10956】配置了自定义前缀，外部连接打不开，需要兼容处理
+  // 将相对路径的 domainURL 拼接当前页面域名，确保 WebSocket/上传等场景获得完整 URL
   let domainURL = VITE_GLOB_DOMAIN_URL;
-
-  // 如果不是以http(s)开头的，也不是以域名开头的，那么就是拼接当前域名
   if (!/^http(s)?/.test(domainURL) && !/^(\/\/)?(.*\.)?.+\..+/.test(domainURL)) {
     if (!domainURL.startsWith('/')) {
       domainURL = '/' + domainURL;
@@ -72,6 +42,27 @@ export const useGlobSetting = (): Readonly<GlobConfig> => {
     domainURL = window.location.origin + domainURL;
   }
 
+  const glob: Readonly<GlobConfig> = {
+    title: appTitle,
+    domainUrl: domainURL,
+    apiUrl: VITE_GLOB_API_URL,
+    shortName: appShortTitle,
+    shortTitle: shortTitle,
+    openSso: VITE_GLOB_APP_OPEN_SSO,
+    openQianKun: VITE_GLOB_APP_OPEN_QIANKUN,
+    casBaseUrl: VITE_GLOB_APP_CAS_BASE_URL,
+    urlPrefix: VITE_GLOB_API_URL_PREFIX,
+    uploadUrl: domainURL,
+    viewUrl: VITE_GLOB_ONLINE_VIEW_URL,
+    useNewTaskModal: true,
+    isElectronPlatform: VITE_GLOB_RUN_PLATFORM === 'electron',
+    isQiankunMicro: VITE_GLOB_QIANKUN_MICRO_APP_NAME != null && VITE_GLOB_QIANKUN_MICRO_APP_NAME !== '',
+    qiankunMicroAppEntry: VITE_GLOB_QIANKUN_MICRO_APP_ENTRY,
+  };
+
+  if (!window['_CONFIG']) {
+    window['_CONFIG'] = {}
+  }
   // @ts-ignore
   window._CONFIG['domianURL'] = domainURL;
 

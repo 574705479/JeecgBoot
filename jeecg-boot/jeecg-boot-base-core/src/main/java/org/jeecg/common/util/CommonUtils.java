@@ -25,7 +25,7 @@ import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
+
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.SQLException;
@@ -162,12 +162,7 @@ public class CommonUtils {
                 // 创建文件根目录
                 file.mkdirs();
             }
-            // 获取文件名
             String orgName = mf.getOriginalFilename();
-            // 无中文情况下进行转码
-            if (orgName != null && !CommonUtils.ifContainChinese(orgName)) {
-                orgName = new String(orgName.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
-            }
             orgName = CommonUtils.getFileName(orgName);
             if(orgName.indexOf(SymbolConstant.SPOT)!=-1){
                 fileName = orgName.substring(0, orgName.lastIndexOf(".")) + "_" + System.currentTimeMillis() + orgName.substring(orgName.lastIndexOf("."));
@@ -189,10 +184,11 @@ public class CommonUtils {
             return dbpath;
         } catch (IOException e) {
             log.error(e.getMessage(), e);
-        }catch (Exception e) {
+            throw new JeecgBootException("文件上传失败: " + e.getMessage());
+        } catch (Exception e) {
             log.error(e.getMessage(), e);
+            throw new JeecgBootException("文件上传失败: " + e.getMessage());
         }
-        return "";
     }
 
     /**
