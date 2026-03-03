@@ -431,6 +431,7 @@ import { useGlobSetting } from '/@/hooks/setting';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
 import { createImgPreview } from '/@/components/Preview';
 import EmojiPicker from '../components/EmojiPicker.vue';
+import { computeFileMd5 } from '../utils/fileHash';
 
 const globSetting = useGlobSetting();
 const silentRequestOptions = { successMessageMode: 'none' as const };
@@ -726,9 +727,8 @@ async function handleFileSelected(e: Event, fileType: 'image' | 'video' | 'pdf')
   const input = e.target as HTMLInputElement;
   const file = input.files?.[0];
   if (!file) return;
-  input.value = ''; // 重置以允许重新选择
+  input.value = '';
 
-  // 前端预校验文件大小和格式
   const validationError = validateFile(file, fileType);
   if (validationError) {
     message.warning(validationError);
@@ -748,13 +748,36 @@ async function handleFileSelected(e: Event, fileType: 'image' | 'video' | 'pdf')
   attachmentList.value.push(att);
   const idx = attachmentList.value.length - 1;
 
+  const hideLoading = file.size > 5 * 1024 * 1024
+    ? message.loading('正在校验文件...', 0)
+    : null;
+
   try {
+    const md5 = await computeFileMd5(file);
+    hideLoading?.();
+
+    const { apiUrl, urlPrefix } = globSetting;
+    const authHeaders = buildAuthHeaders({});
+
+    // 秒传检测
+    const checkHashUrl = `${apiUrl}${urlPrefix || ''}/cs/message/visitor/checkHash`;
+    const checkRes = await axios.post(checkHashUrl, null, {
+      params: { md5, fileSize: file.size },
+      headers: authHeaders,
+    });
+
+    if (checkRes.data?.result?.exists) {
+      message.success('文件秒传成功');
+      attachmentList.value[idx].url = checkRes.data.result.url;
+      attachmentList.value[idx].uploading = false;
+      return;
+    }
+
+    // 正常上传，FormData 追加 md5
     const formData = new FormData();
     formData.append('file', file);
-    // 使用独立 axios 实例上传文件，避免 defHttp 全局拦截器干扰 Content-Type boundary
-    const { apiUrl, urlPrefix } = globSetting;
+    formData.append('md5', md5);
     const uploadApiUrl = `${apiUrl}${urlPrefix || ''}/cs/message/visitor/upload`;
-    const authHeaders = buildAuthHeaders({});
     const { data: res } = await axios.post(uploadApiUrl, formData, {
       headers: authHeaders,
     });
@@ -772,8 +795,8 @@ async function handleFileSelected(e: Event, fileType: 'image' | 'video' | 'pdf')
     attachmentList.value[idx].url = uploadedUrl;
     attachmentList.value[idx].uploading = false;
   } catch (err: any) {
+    hideLoading?.();
     console.error('文件上传失败', err);
-    // 提取后端返回的具体错误信息
     const serverMsg = err?.response?.data?.message;
     if (serverMsg) {
       message.error(serverMsg);
@@ -3246,6 +3269,7 @@ watch(messages, () => {
   margin-top: 6px;
   display: grid;
   gap: 4px;
+  max-width: 600px;
 
   .media-item {
     border-radius: 6px;
@@ -3295,6 +3319,7 @@ watch(messages, () => {
   }
   .media-item:nth-child(1) {
     grid-row: span 2;
+    aspect-ratio: auto;
   }
 }
 
@@ -3323,8 +3348,8 @@ watch(messages, () => {
 
 .media-viewer-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 10px;
 }
 
 .media-viewer-item {
@@ -3332,6 +3357,7 @@ watch(messages, () => {
   overflow: hidden;
   background: #f5f5f5;
   border: 1px solid #f0f0f0;
+  aspect-ratio: 16 / 9;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
   img,
   video {

@@ -491,7 +491,6 @@
                     >
                       <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview(msg, item)" />
                       <video v-else :src="getAttachmentUrl(item)" controls playsinline />
-                      <span v-if="item.type === 'video'" class="play-badge">▶</span>
                       <div
                         v-if="index === getMediaGridData(msg).items.length - 1 && getMediaGridData(msg).extraCount > 0"
                         class="media-more"
@@ -552,7 +551,6 @@
                     >
                       <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview(msg, item)" />
                       <video v-else :src="getAttachmentUrl(item)" controls playsinline />
-                      <span v-if="item.type === 'video'" class="play-badge">▶</span>
                       <div
                         v-if="index === getMediaGridData(msg).items.length - 1 && getMediaGridData(msg).extraCount > 0"
                         class="media-more"
@@ -608,13 +606,11 @@
             <SmileOutlined class="toolbar-icon" @click="toggleEmojiPanel" />
           </a-tooltip>
           <a-upload
-            :action="uploadUrl"
-            :headers="uploadHeaders"
             :showUploadList="false"
             :multiple="true"
             :accept="ALLOWED_UPLOAD_EXTS.join(',')"
             :beforeUpload="beforeUploadAttachment"
-            @change="handleAttachmentChange"
+            :customRequest="handleCustomUpload"
           >
             <a-tooltip title="上传附件">
               <PaperClipOutlined class="toolbar-icon" />
@@ -1021,17 +1017,16 @@ import {
 } from '@ant-design/icons-vue';
 import { defHttp } from '/@/utils/http/axios';
 import { useGlobSetting } from '/@/hooks/setting';
-import { getFileAccessHttpUrl, getHeaders } from '/@/utils/common/compUtils';
+import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
 import { createImgPreview } from '/@/components/Preview';
 import EmojiPicker from '../components/EmojiPicker.vue';
+import { computeFileMd5 } from '../utils/fileHash';
 // ★ 为回复建议保留Markdown渲染能力
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
 
 const silentRequestOptions = { successMessageMode: 'none' as const };
 const globSetting = useGlobSetting();
-const uploadUrl = `${globSetting.uploadUrl}/airag/chat/upload`;
-const uploadHeaders = getHeaders();
 
 // ==================== 皮肤主题系统 ====================
 interface ThemeConfig {
@@ -1830,47 +1825,62 @@ function beforeUploadAttachment(file: File) {
   return true;
 }
 
-function handleAttachmentChange(info: any) {
-  const { file, fileList } = info;
-  uploadFileList.value = fileList;
-  if (file.status === 'error' || (file.response && file.response.code === 500)) {
-    message.error(file.response?.message || `${file.name} 上传失败`);
-    return;
-  }
-  if (file.status === 'done') {
-    const url = file.response?.message;
-    if (!url) return;
-    attachmentList.value.push({
-      name: file.name,
-      url,
-      size: file.size,
-      type: getAttachmentType(file),
-    });
-  }
+function handleCustomUpload(options: any) {
+  const file = options.file as File;
+  uploadAttachmentFile(file);
 }
 
 async function uploadAttachmentFile(file: File) {
-  const isReturn = (fileInfo: any) => {
-    try {
-      if (fileInfo.code === 0) {
-        const url = fileInfo.message;
-        if (!url) return;
-        attachmentList.value.push({
-          name: file.name || 'image',
-          url,
-          size: file.size,
-          type: getAttachmentType(file),
-        });
-        uploadFileList.value.push(file);
-      } else {
-        message.error(fileInfo.message || `${file.name} 上传失败`);
-      }
-    } catch (error) {
-      console.error('上传处理失败', error);
-      message.error(`${file.name} 上传失败`);
+  const hideLoading = file.size > 5 * 1024 * 1024
+    ? message.loading('正在校验文件...', 0)
+    : null;
+
+  try {
+    const md5 = await computeFileMd5(file);
+    hideLoading?.();
+
+    const checkRes = await defHttp.post(
+      { url: '/airag/chat/checkHash', params: { md5, fileSize: file.size } },
+      { joinParamsToUrl: true },
+    );
+
+    if (checkRes?.exists) {
+      message.success('文件秒传成功');
+      attachmentList.value.push({
+        name: file.name || 'image',
+        url: checkRes.url,
+        size: file.size,
+        type: getAttachmentType(file),
+      });
+      return;
     }
-  };
-  await defHttp.uploadFile({ url: '/airag/chat/upload' }, { file }, { success: isReturn });
+
+    const isReturn = (fileInfo: any) => {
+      try {
+        if (fileInfo.code === 0) {
+          const url = fileInfo.message;
+          if (!url) return;
+          attachmentList.value.push({
+            name: file.name || 'image',
+            url,
+            size: file.size,
+            type: getAttachmentType(file),
+          });
+          uploadFileList.value.push(file);
+        } else {
+          message.error(fileInfo.message || `${file.name} 上传失败`);
+        }
+      } catch (error) {
+        console.error('上传处理失败', error);
+        message.error(`${file.name} 上传失败`);
+      }
+    };
+    await defHttp.uploadFile({ url: '/airag/chat/upload' }, { file, data: { md5 } }, { success: isReturn });
+  } catch (e) {
+    hideLoading?.();
+    console.error('上传失败', e);
+    message.error(`${file.name} 上传失败`);
+  }
 }
 
 function handlePasteUpload(event: ClipboardEvent) {
@@ -5450,22 +5460,6 @@ function restoreMessageScroll() {
 
     &:hover { transform: scale(1.02); }
 
-    .play-badge {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      background: rgba(0, 0, 0, 0.5);
-      color: #fff;
-      font-size: 16px;
-      width: 36px;
-      height: 36px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
     .media-more {
       position: absolute;
       inset: 0;
@@ -5492,7 +5486,7 @@ function restoreMessageScroll() {
   grid-template-columns: repeat(2, 1fr);
   grid-template-rows: repeat(2, 1fr);
   .media-item { aspect-ratio: 1 / 1; }
-  .media-item:nth-child(1) { grid-row: span 2; }
+  .media-item:nth-child(1) { grid-row: span 2; aspect-ratio: auto; }
 }
 .media-grid--4 {
   grid-template-columns: repeat(2, 1fr);
@@ -5523,8 +5517,8 @@ function restoreMessageScroll() {
 
 .media-viewer-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 10px;
 }
 
 .media-viewer-item {
@@ -5532,6 +5526,7 @@ function restoreMessageScroll() {
   overflow: hidden;
   background: var(--cs-bg-card);
   border: 1px solid var(--cs-border);
+  aspect-ratio: 16 / 9;
   transition: transform 0.15s @ease-smooth, box-shadow 0.15s @ease-smooth;
   img, video {
     width: 100%;

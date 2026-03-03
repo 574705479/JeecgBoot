@@ -6,16 +6,23 @@ import lombok.extern.slf4j.Slf4j;
 import org.jeecg.common.api.vo.Result;
 import org.jeecg.common.constant.CommonConstant;
 import org.jeecg.common.util.CommonUtils;
+import org.jeecg.common.util.oConvertUtils;
 import org.jeecg.config.shiro.IgnoreAuth;
 import org.jeecg.modules.airag.app.service.IAiragChatService;
 import org.jeecg.modules.airag.app.vo.ChatConversation;
 import org.jeecg.modules.airag.app.vo.ChatSendParams;
+import org.jeecg.modules.airag.cs.entity.CsFileHash;
+import org.jeecg.modules.airag.cs.service.ICsFileHashService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.multipart.MultipartHttpServletRequest;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
+import java.io.File;
+import java.util.HashMap;
+import java.util.Map;
 
 
 
@@ -32,6 +39,9 @@ public class AiragChatController {
 
     @Autowired
     IAiragChatService chatService;
+
+    @Autowired
+    ICsFileHashService fileHashService;
 
     @Value(value = "${jeecg.path.upload}")
     private String uploadpath;
@@ -201,23 +211,60 @@ public class AiragChatController {
      * @date 2025/4/25 11:04
      */
     @IgnoreAuth
+    @PostMapping(value = "/checkHash")
+    public Result<?> checkHash(@RequestParam String md5, @RequestParam Long fileSize) {
+        CsFileHash record = fileHashService.findByMd5AndSize(md5, fileSize);
+        Map<String, Object> data = new HashMap<>();
+        if (record != null) {
+            boolean fileExists = verifyFileExists(record.getFilePath());
+            if (fileExists) {
+                data.put("exists", true);
+                data.put("url", record.getFilePath());
+                return Result.OK(data);
+            } else {
+                fileHashService.removeById(record.getId());
+            }
+        }
+        data.put("exists", false);
+        return Result.OK(data);
+    }
+
+    @IgnoreAuth
     @PostMapping(value = "/upload")
     public Result<?> upload(HttpServletRequest request, HttpServletResponse response) throws Exception {
         String bizPath = "airag";
 
         MultipartHttpServletRequest multipartRequest = (MultipartHttpServletRequest) request;
-        // 获取上传文件对象
         MultipartFile file = multipartRequest.getFile("file");
+        String md5 = request.getParameter("md5");
+
         String savePath;
         if (CommonConstant.UPLOAD_TYPE_LOCAL.equals(uploadType)) {
             savePath = CommonUtils.uploadLocal(file, bizPath, uploadpath);
         } else {
             savePath = CommonUtils.upload(file, bizPath, uploadType);
         }
+
+        try {
+            if (oConvertUtils.isEmpty(md5)) {
+                md5 = CommonUtils.computeMd5(file);
+            }
+            fileHashService.saveFileHashIgnoreDuplicate(md5, savePath, file.getSize(), file.getOriginalFilename(), bizPath);
+        } catch (Exception e) {
+            log.warn("保存文件哈希失败，不影响上传: {}", e.getMessage());
+        }
+
         Result<?> result = new Result<>();
         result.setMessage(savePath);
         result.setSuccess(true);
         return result;
+    }
+
+    private boolean verifyFileExists(String filePath) {
+        if (CommonConstant.UPLOAD_TYPE_LOCAL.equals(uploadType)) {
+            return new File(uploadpath + File.separator + filePath).exists();
+        }
+        return true;
     }
 
 }

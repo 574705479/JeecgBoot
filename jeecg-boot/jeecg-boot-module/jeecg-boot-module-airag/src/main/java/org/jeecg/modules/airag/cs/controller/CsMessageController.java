@@ -25,9 +25,13 @@ import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import org.jeecg.common.constant.CommonConstant;
 import org.jeecg.common.util.CommonUtils;
+import org.jeecg.modules.airag.cs.entity.CsFileHash;
+import org.jeecg.modules.airag.cs.service.ICsFileHashService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.multipart.MultipartFile;
+
+import java.io.File;
 
 
 /**
@@ -53,6 +57,9 @@ public class CsMessageController {
 
     @Autowired
     private StringRedisTemplate redisTemplate;
+
+    @Autowired
+    private ICsFileHashService fileHashService;
 
     @Value(value = "${jeecg.path.upload}")
     private String uploadpath;
@@ -92,6 +99,53 @@ public class CsMessageController {
     }
 
     /**
+     * 访客秒传哈希检测接口
+     */
+    @Operation(summary = "访客文件秒传检测")
+    @org.jeecg.config.shiro.IgnoreAuth
+    @PostMapping("/visitor/checkHash")
+    public Result<?> visitorCheckHash(@RequestParam String md5, @RequestParam Long fileSize, HttpServletRequest request) {
+        boolean isAdmin = visitorTokenService.isAdminRequest(request);
+        if (!isAdmin) {
+            CsVisitorTokenPayload tokenPayload = resolveVisitorPayload(request);
+            if (tokenPayload == null) {
+                if (visitorTokenService.isTokenRequired()) {
+                    return Result.error("访客凭证无效或已过期");
+                }
+                if (!visitorTokenService.validateAppKey(request)) {
+                    return Result.error("接入密钥无效");
+                }
+                String devId = visitorTokenService.extractDeviceId(request);
+                if (oConvertUtils.isEmpty(devId)) {
+                    return Result.error("缺少设备码");
+                }
+                if (visitorTokenService.isBlacklisted(devId)) {
+                    return Result.error("访客已被拉黑");
+                }
+            } else {
+                if (visitorTokenService.isBlacklisted(tokenPayload.getExternalUserId())) {
+                    return Result.error("访客已被拉黑");
+                }
+            }
+        }
+
+        CsFileHash record = fileHashService.findByMd5AndSize(md5, fileSize);
+        Map<String, Object> data = new HashMap<>();
+        if (record != null) {
+            boolean fileExists = verifyFileExists(record.getFilePath());
+            if (fileExists) {
+                data.put("exists", true);
+                data.put("url", record.getFilePath());
+                return Result.OK(data);
+            } else {
+                fileHashService.removeById(record.getId());
+            }
+        }
+        data.put("exists", false);
+        return Result.OK(data);
+    }
+
+    /**
      * 访客文件上传接口
      */
     @Operation(summary = "访客文件上传")
@@ -127,13 +181,11 @@ public class CsMessageController {
             if (file == null || file.isEmpty()) {
                 return Result.error("请选择文件");
             }
-            // 校验文件大小（从聊天窗口配置读取限制）
             long maxFileSize = getConfiguredMaxFileSize();
             if (file.getSize() > maxFileSize) {
                 long maxMb = maxFileSize / (1024 * 1024);
                 return Result.error("文件大小不能超过" + maxMb + "MB");
             }
-            // 校验文件类型
             String originalFilename = file.getOriginalFilename();
             if (originalFilename == null) {
                 return Result.error("文件名无效");
@@ -144,12 +196,23 @@ public class CsMessageController {
             }
 
             String bizPath = "cs-visitor";
+            String md5 = request.getParameter("md5");
             String savePath;
             if (CommonConstant.UPLOAD_TYPE_LOCAL.equals(uploadType)) {
                 savePath = CommonUtils.uploadLocal(file, bizPath, uploadpath);
             } else {
                 savePath = CommonUtils.upload(file, bizPath, uploadType);
             }
+
+            try {
+                if (oConvertUtils.isEmpty(md5)) {
+                    md5 = CommonUtils.computeMd5(file);
+                }
+                fileHashService.saveFileHashIgnoreDuplicate(md5, savePath, file.getSize(), file.getOriginalFilename(), bizPath);
+            } catch (Exception e) {
+                log.warn("保存文件哈希失败，不影响上传: {}", e.getMessage());
+            }
+
             Result<String> result = new Result<>();
             result.setMessage(savePath);
             result.setSuccess(true);
@@ -158,6 +221,13 @@ public class CsMessageController {
             log.error("[CS-Message] 访客文件上传失败", e);
             return Result.error("文件上传失败: " + e.getMessage());
         }
+    }
+
+    private boolean verifyFileExists(String filePath) {
+        if (CommonConstant.UPLOAD_TYPE_LOCAL.equals(uploadType)) {
+            return new File(uploadpath + File.separator + filePath).exists();
+        }
+        return true;
     }
 
     /**

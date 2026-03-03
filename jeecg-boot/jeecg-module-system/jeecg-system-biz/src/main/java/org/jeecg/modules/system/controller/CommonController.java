@@ -212,9 +212,8 @@ public class CommonController {
             // 根据文件扩展名设置正确的Content-Type（图片等可直接预览，其他走下载）
             String contentType = resolveContentType(file.getName());
             response.setContentType(contentType);
-            if (contentType.startsWith("image/")) {
+            if (contentType.startsWith("image/") || contentType.startsWith("video/") || contentType.startsWith("audio/")) {
                 response.addHeader("Content-Disposition", "inline;fileName=" + new String(file.getName().getBytes("UTF-8"),"iso-8859-1"));
-                // 允许浏览器缓存图片资源（7天）
                 response.setHeader("Cache-Control", "public, max-age=604800");
             } else {
                 response.addHeader("Content-Disposition", "attachment;fileName=" + new String(file.getName().getBytes("UTF-8"),"iso-8859-1"));
@@ -255,6 +254,14 @@ public class CommonController {
         if (lower.endsWith(".bmp")) return "image/bmp";
         if (lower.endsWith(".ico")) return "image/x-icon";
         if (lower.endsWith(".pdf")) return "application/pdf";
+        if (lower.endsWith(".mp4")) return "video/mp4";
+        if (lower.endsWith(".webm")) return "video/webm";
+        if (lower.endsWith(".ogg")) return "video/ogg";
+        if (lower.endsWith(".mov")) return "video/quicktime";
+        if (lower.endsWith(".avi")) return "video/x-msvideo";
+        if (lower.endsWith(".mkv")) return "video/x-matroska";
+        if (lower.endsWith(".mp3")) return "audio/mpeg";
+        if (lower.endsWith(".wav")) return "audio/wav";
         return "application/octet-stream";
     }
 

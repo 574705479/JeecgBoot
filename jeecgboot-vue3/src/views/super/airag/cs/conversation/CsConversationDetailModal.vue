@@ -73,6 +73,19 @@
                         <span class="msg-time">{{ formatTime(msg.createTime) }}</span>
                       </div>
                       <div class="msg-bubble user-bubble">{{ msg.content }}</div>
+                      <div v-if="getMediaAttachments(msg).length" class="msg-media-grid" :class="`media-grid--${Math.min(getMediaGridData(msg).total, 4)}`">
+                        <div class="media-item" v-for="(item, idx) in getMediaGridData(msg).items" :key="idx">
+                          <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview(msg, item)" />
+                          <video v-else :src="getAttachmentUrl(item)" controls playsinline />
+                          <div v-if="idx === getMediaGridData(msg).items.length - 1 && getMediaGridData(msg).extraCount > 0" class="media-more" @click.stop="openMediaViewer(msg)">+{{ getMediaGridData(msg).extraCount }}</div>
+                        </div>
+                      </div>
+                      <div v-if="getFileAttachments(msg).length" class="msg-file-list">
+                        <div class="file-item" v-for="(item, idx) in getFileAttachments(msg)" :key="idx" @click="openFilePreview(item)">
+                          <span class="file-icon">📄</span>
+                          <span class="file-name">{{ item.name || item.url }}</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </template>
@@ -92,6 +105,19 @@
                       <div class="msg-bubble agent-bubble" :class="{ 'ai-bubble': msg.senderType === 1 }">
                         {{ msg.content }}
                       </div>
+                      <div v-if="getMediaAttachments(msg).length" class="msg-media-grid" :class="`media-grid--${Math.min(getMediaGridData(msg).total, 4)}`">
+                        <div class="media-item" v-for="(item, idx) in getMediaGridData(msg).items" :key="idx">
+                          <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview(msg, item)" />
+                          <video v-else :src="getAttachmentUrl(item)" controls playsinline />
+                          <div v-if="idx === getMediaGridData(msg).items.length - 1 && getMediaGridData(msg).extraCount > 0" class="media-more" @click.stop="openMediaViewer(msg)">+{{ getMediaGridData(msg).extraCount }}</div>
+                        </div>
+                      </div>
+                      <div v-if="getFileAttachments(msg).length" class="msg-file-list">
+                        <div class="file-item" v-for="(item, idx) in getFileAttachments(msg)" :key="idx" @click="openFilePreview(item)">
+                          <span class="file-icon">📄</span>
+                          <span class="file-name">{{ item.name || item.url }}</span>
+                        </div>
+                      </div>
                     </div>
                     <a-avatar :size="32" class="msg-avatar agent-avatar">
                       {{ msg.senderType === 1 ? 'AI' : (msg.senderName || '客').charAt(0) }}
@@ -105,6 +131,19 @@
         </a-spin>
       </div>
     </div>
+
+    <a-modal v-model:open="mediaViewerVisible" :footer="null" width="820px" title="媒体预览">
+      <div class="media-viewer-header">
+        <span>共 {{ mediaViewerList.length }} 项</span>
+        <span class="media-viewer-tip">点击图片可放大，视频可播放</span>
+      </div>
+      <div class="media-viewer-grid">
+        <div class="media-viewer-item" v-for="(item, index) in mediaViewerList" :key="`${item.url}_${index}`">
+          <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreviewFromList(mediaViewerList, item)" />
+          <video v-else :src="getAttachmentUrl(item)" controls />
+        </div>
+      </div>
+    </a-modal>
   </BasicModal>
 </template>
 
@@ -114,8 +153,79 @@ import { BasicModal, useModalInner } from '/@/components/Modal';
 import { defHttp } from '/@/utils/http/axios';
 import { MessageOutlined } from '@ant-design/icons-vue';
 import { Typography } from 'ant-design-vue';
+import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
+import { createImgPreview } from '/@/components/Preview';
 
 const { Text: ATypographyText } = Typography;
+
+// ==================== 附件解析辅助函数 ====================
+
+function parseExtra(extra: any) {
+  if (!extra) return null;
+  if (typeof extra === 'string') {
+    try {
+      return JSON.parse(extra);
+    } catch {
+      return null;
+    }
+  }
+  return extra;
+}
+
+function getMessageAttachments(msg: any): any[] {
+  return parseExtra(msg?.extra)?.attachments || [];
+}
+
+function getMediaAttachments(msg: any): any[] {
+  return getMessageAttachments(msg).filter(item => item.type === 'image' || item.type === 'video');
+}
+
+function getFileAttachments(msg: any): any[] {
+  return getMessageAttachments(msg).filter(item => item.type === 'file');
+}
+
+function getMediaGridData(msg: any) {
+  const media = getMediaAttachments(msg);
+  const maxItems = 4;
+  const items = media.slice(0, maxItems);
+  const extraCount = Math.max(0, media.length - maxItems);
+  return { items, extraCount, total: media.length };
+}
+
+function getAttachmentUrl(attachment: any) {
+  return getFileAccessHttpUrl(attachment?.url);
+}
+
+function openImagePreview(msg: any, item: any) {
+  const images = getMessageAttachments(msg).filter(att => att.type === 'image');
+  const imageList = images.map(att => getAttachmentUrl(att));
+  if (!imageList.length) return;
+  const targetUrl = getAttachmentUrl(item);
+  const index = imageList.findIndex(url => url === targetUrl);
+  createImgPreview({ imageList, index: index >= 0 ? index : 0, defaultWidth: 700, rememberState: true });
+}
+
+function openFilePreview(item: any) {
+  const url = getAttachmentUrl(item);
+  if (url) window.open(url, '_blank');
+}
+
+const mediaViewerVisible = ref(false);
+const mediaViewerList = ref<any[]>([]);
+
+function openMediaViewer(msg: any) {
+  mediaViewerList.value = getMediaAttachments(msg);
+  mediaViewerVisible.value = true;
+}
+
+function openImagePreviewFromList(list: any[], item: any) {
+  const images = (list || []).filter(att => att.type === 'image');
+  const imageList = images.map(att => getAttachmentUrl(att));
+  if (!imageList.length) return;
+  const targetUrl = getAttachmentUrl(item);
+  const index = imageList.findIndex(url => url === targetUrl);
+  createImgPreview({ imageList, index: index >= 0 ? index : 0, defaultWidth: 700, rememberState: true });
+}
 
 const record = ref<any>(null);
 const messages = ref<any[]>([]);
@@ -495,6 +605,137 @@ function formatDateSeparator(time: string | Date) {
     line-height: 1.6;
     word-break: break-word;
     white-space: pre-wrap;
+  }
+
+  .msg-media-grid {
+    display: grid;
+    gap: 4px;
+    margin-top: 6px;
+    max-width: 360px;
+
+    .media-item {
+      position: relative;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #f0f0f0;
+      cursor: pointer;
+      transition: transform 0.15s ease;
+
+      img, video {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      &:hover { transform: scale(1.02); }
+
+      .media-more {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.55);
+        color: #fff;
+        font-size: 18px;
+        font-weight: 600;
+      }
+    }
+  }
+
+  .media-grid--1 {
+    grid-template-columns: 1fr;
+    .media-item { aspect-ratio: 3 / 2; }
+  }
+  .media-grid--2 {
+    grid-template-columns: repeat(2, 1fr);
+    .media-item { aspect-ratio: 1 / 1; }
+  }
+  .media-grid--3 {
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: repeat(2, 1fr);
+    .media-item { aspect-ratio: 1 / 1; }
+    .media-item:nth-child(1) { grid-row: span 2; aspect-ratio: auto; }
+  }
+  .media-grid--4 {
+    grid-template-columns: repeat(2, 1fr);
+    .media-item { aspect-ratio: 1 / 1; }
+  }
+
+  .msg-file-list {
+    margin-top: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+
+    .file-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 10px;
+      background: rgba(24, 144, 255, 0.04);
+      border-left: 3px solid #1890ff;
+      border-radius: 0 8px 8px 0;
+      cursor: pointer;
+      font-size: 12px;
+      transition: all 0.15s ease;
+
+      &:hover {
+        background: rgba(24, 144, 255, 0.08);
+        box-shadow: 0 1px 4px rgba(24, 144, 255, 0.15);
+      }
+
+      .file-icon {
+        flex-shrink: 0;
+      }
+
+      .file-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+    }
+  }
+}
+
+.media-viewer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: #666;
+
+  .media-viewer-tip {
+    color: #999;
+    font-size: 12px;
+  }
+}
+
+.media-viewer-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 10px;
+}
+
+.media-viewer-item {
+  border-radius: 10px;
+  overflow: hidden;
+  background: #f5f5f5;
+  border: 1px solid #e8e8e8;
+  aspect-ratio: 16 / 9;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+
+  img, video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    cursor: pointer;
+  }
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
   }
 }
 </style>

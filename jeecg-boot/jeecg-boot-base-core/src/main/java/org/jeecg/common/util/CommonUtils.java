@@ -492,4 +492,23 @@ public class CommonUtils {
         }
     }
 
+    /**
+     * 流式计算文件 MD5，避免大文件一次性加载到堆内存
+     */
+    public static String computeMd5(MultipartFile file) throws Exception {
+        try (java.io.InputStream is = file.getInputStream()) {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("MD5");
+            byte[] buf = new byte[8192];
+            int len;
+            while ((len = is.read(buf)) != -1) {
+                md.update(buf, 0, len);
+            }
+            StringBuilder sb = new StringBuilder();
+            for (byte b : md.digest()) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        }
+    }
+
 }
