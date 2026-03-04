@@ -17,8 +17,10 @@ export function configHtmlPlugin(env: ViteEnv, isBuild: boolean, isQiankunMicro:
   };
 
   // 【JEECG作为乾坤子应用】补充静态资源前缀
-  const {VITE_GLOB_QIANKUN_MICRO_APP_ENTRY} = env;
-  const basePublicPath = isQiankunMicro ? VITE_GLOB_QIANKUN_MICRO_APP_ENTRY : '';
+  // 【Electron桌面应用】使用相对路径，避免 file:// 下根路径解析到磁盘根目录
+  const {VITE_GLOB_QIANKUN_MICRO_APP_ENTRY, VITE_GLOB_RUN_PLATFORM} = env;
+  const isElectron = VITE_GLOB_RUN_PLATFORM === 'electron';
+  const basePublicPath = isQiankunMicro ? VITE_GLOB_QIANKUN_MICRO_APP_ENTRY : (isElectron ? '.' : '');
 
   const htmlPlugin: PluginOption[] = createHtmlPlugin({
     minify: isBuild,

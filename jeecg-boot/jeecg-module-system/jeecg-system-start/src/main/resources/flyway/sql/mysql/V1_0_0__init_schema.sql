@@ -648,18 +648,6 @@ CREATE TABLE `flyway_schema_history`  (
 -- Records of flyway_schema_history
 -- ----------------------------
 INSERT INTO `flyway_schema_history` VALUES (1, '1', '<< Flyway Baseline >>', 'BASELINE', '<< Flyway Baseline >>', NULL, 'root', '2024-01-03 21:58:35', 0, 1);
-INSERT INTO `flyway_schema_history` VALUES (2, '3.8.0.1', 'airag add menu', 'SQL', 'V3.8.0_1__airag_add_menu.sql', -177373739, 'root', '2025-04-03 10:54:32', 114, 1);
-INSERT INTO `flyway_schema_history` VALUES (3, '3.8.0.2', 'airag init db', 'SQL', 'V3.8.0_2__airag_init_db.sql', 874980827, 'root', '2025-04-07 14:35:13', 60, 1);
-INSERT INTO `flyway_schema_history` VALUES (4, '3.8.1.1', 'all upgrade', 'SQL', 'V3.8.1_1__all_upgrade.sql', 670374510, 'root', '2025-06-25 15:09:03', 25, 1);
-INSERT INTO `flyway_schema_history` VALUES (5, '3.8.1.2', 'openapi', 'SQL', 'V3.8.1_2__openapi.sql', 453642872, 'root', '2025-07-02 10:11:50', 245, 1);
-INSERT INTO `flyway_schema_history` VALUES (6, '3.8.2.1', 'all upgrade', 'SQL', 'V3.8.2_1__all_upgrade.sql', 1279027750, 'root', '2025-07-30 18:13:06', 23, 1);
-INSERT INTO `flyway_schema_history` VALUES (7, '3.8.3.0', 'all upgrade', 'SQL', 'V3.8.3_0__all_upgrade.sql', 1420195670, 'root', '2025-09-13 17:06:41', 22, 1);
-INSERT INTO `flyway_schema_history` VALUES (8, '3.8.3.1', 'upgrade jimubi', 'SQL', 'V3.8.3_1__upgrade_jimubi.sql', -1274458791, 'root', '2025-11-25 15:42:34', 13, 1);
-INSERT INTO `flyway_schema_history` VALUES (9, '3.9.0.0', 'all upgrade', 'SQL', 'V3.9.0_0__all_upgrade.sql', -758666487, 'root', '2025-11-26 13:40:20', 48, 1);
-INSERT INTO `flyway_schema_history` VALUES (10, '3.9.0.1', 'mcp demo', 'SQL', 'V3.9.0_1__mcp_demo.sql', -790563395, 'root', '2025-11-27 18:16:00', 18, 1);
-INSERT INTO `flyway_schema_history` VALUES (11, '3.9.0.2', 'upd dep category', 'SQL', 'V3.9.0_2__upd_dep_category.sql', -71250240, 'root', '2025-11-27 18:45:48', 19, 1);
-INSERT INTO `flyway_schema_history` VALUES (12, '3.9.0.3', 'add aiflow permission', 'SQL', 'V3.9.0_3__add_aiflow_permission.sql', 1502182637, 'root', '2025-12-01 15:13:59', 9, 1);
-
 -- ----------------------------
 -- Table structure for oauth2_registered_client
 -- ----------------------------

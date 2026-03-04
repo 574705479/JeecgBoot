@@ -1,6 +1,7 @@
 import { defHttp } from '/@/utils/http/axios';
 import { BRAND_STORAGE_KEY } from '/@/settings/brandSetting';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
+import { useGlobSetting } from '/@/hooks/setting';
 
 type BrandConfig = {
   appTitle?: string;
@@ -54,7 +55,19 @@ export async function loadBrandConfig(): Promise<BrandConfig | null> {
 export function resolveBrandUrl(url?: string) {
   if (!url) return '';
   if (/^https?:\/\//i.test(url)) return url;
-  if (url.startsWith('/')) return url;
+  if (url.startsWith('/')) {
+    const { isElectronPlatform, domainUrl } = useGlobSetting();
+    if (isElectronPlatform) {
+      // Electron file:// 下根路径会解析到磁盘根目录
+      // 简单文件名（如 /logo.svg）转为相对路径，API 路径拼接后端地址
+      const segments = url.split('/').filter(Boolean);
+      if (segments.length === 1) {
+        return '.' + url;
+      }
+      return domainUrl + url;
+    }
+    return url;
+  }
   return getFileAccessHttpUrl(url);
 }
 
