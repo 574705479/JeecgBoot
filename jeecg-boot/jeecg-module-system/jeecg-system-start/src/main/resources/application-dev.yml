@@ -348,7 +348,7 @@ license:
   enabled: false
   server-url: http://localhost:8090
   app-id: jeecg-boot
-  app-secret: ${LICENSE_APP_SECRET:aff2a84cb689091555be1f4db2f70966da736a9fa9c8ba4ae5cd4d7671095ea0}
+  app-secret: ${LICENSE_APP_SECRET:05f0e932bf1bc4e8fdab297352952ca05d1e1fc0cd209439f3ba7d68eb5b50d8}
   public-key: |
     -----BEGIN PUBLIC KEY-----
     MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2EIgjzuA9G55nOieh076
