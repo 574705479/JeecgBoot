@@ -104,6 +104,20 @@ import { message } from 'ant-design-vue';
 import { DeleteOutlined, PlusOutlined, MessageOutlined } from '@ant-design/icons-vue';
 import { Tinymce } from '/@/components/Tinymce/index';
 import { defHttp } from '/@/utils/http/axios';
+import { useGlobSetting } from '/@/hooks/setting';
+
+const globSetting = useGlobSetting();
+
+function normalizeImgUrls(html: string): string {
+  if (!html) return html;
+  try {
+    const origin = new URL(globSetting.domainUrl).origin;
+    return html.replace(
+      /(<img[^>]*?\ssrc=["'])(\/[^"']+)(["'])/gi,
+      (_match, pre, path, suf) => `${pre}${origin}${path}${suf}`
+    );
+  } catch { return html; }
+}
 
 const loading = ref(false);
 const saving = ref(false);
@@ -150,13 +164,13 @@ async function loadConfig() {
         if (config.languages[key]) {
           config.languages[key].label = data.languages[key].label || config.languages[key].label;
           config.languages[key].messages = (data.languages[key].messages || []).map((m: any) => ({
-            content: m.content || '',
+            content: normalizeImgUrls(m.content || ''),
           }));
         } else {
           config.languages[key] = {
             label: data.languages[key].label || key,
             messages: (data.languages[key].messages || []).map((m: any) => ({
-              content: m.content || '',
+              content: normalizeImgUrls(m.content || ''),
             })),
           };
         }

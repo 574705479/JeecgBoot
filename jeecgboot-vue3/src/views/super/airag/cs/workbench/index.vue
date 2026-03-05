@@ -4233,10 +4233,22 @@ const md = new MarkdownIt({
   }
 });
 
+// 将 <img src="/path/..."> 中的路径型 URL 补全为绝对 URL（兼容 Electron 环境）
+function normalizeImgUrls(html: string): string {
+  try {
+    const origin = new URL(globSetting.domainUrl).origin;
+    return html.replace(
+      /(<img[^>]*?\ssrc=["'])(\/[^"']+)(["'])/gi,
+      (_match, pre, path, suf) => `${pre}${origin}${path}${suf}`
+    );
+  } catch { return html; }
+}
+
 // 渲染消息内容（支持富文本HTML、Markdown、纯文本）
 function renderMessage(content: string) {
   if (!content) return '';
   content = content.replace(/#\s*\{\s*domainURL\s*\}/g, globSetting.domainUrl);
+  content = normalizeImgUrls(content);
   const cached = renderCache.get(content);
   if (cached) {
     return cached;

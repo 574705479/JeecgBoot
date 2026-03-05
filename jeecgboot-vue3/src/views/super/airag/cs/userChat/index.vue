@@ -1883,13 +1883,13 @@ function getWsBaseUrl() {
     base = domainUrl;
   }
   if (!base) {
-    base = window.location.origin;
+    base = globSetting.apiUrl || window.location.origin;
   }
   let parsed: URL;
   try {
     parsed = new URL(base);
   } catch {
-    parsed = new URL(window.location.origin);
+    parsed = new URL(globSetting.apiUrl || window.location.origin);
   }
   const wsProtocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
   let prefix = urlPrefix || parsed.pathname || '';
@@ -2599,10 +2599,22 @@ function renderUserMessage(content: string) {
   return escaped.replace(emojiRegex, '<span class="emoji">$1</span>');
 }
 
+// 将 <img src="/path/..."> 中的路径型 URL 补全为绝对 URL（兼容 Electron 环境）
+function normalizeImgUrls(html: string): string {
+  try {
+    const origin = new URL(globSetting.domainUrl).origin;
+    return html.replace(
+      /(<img[^>]*?\ssrc=["'])(\/[^"']+)(["'])/gi,
+      (_match, pre, path, suf) => `${pre}${origin}${path}${suf}`
+    );
+  } catch { return html; }
+}
+
 // 渲染消息内容（支持富文本HTML、Markdown、纯文本）
 function renderMessage(content: string) {
   if (!content) return '';
   content = content.replace(/#\s*\{\s*domainURL\s*\}/g, globSetting.domainUrl);
+  content = normalizeImgUrls(content);
   // 1. 检测是否为完整HTML（TinyMCE富文本，如FAQ答案）— 直接返回，不经markdown-it二次处理
   const isRichHtml = /^\s*<(?:p|div|ul|ol|h[1-6]|table|blockquote)\b/i.test(content.trim());
   if (isRichHtml) {

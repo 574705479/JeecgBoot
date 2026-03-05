@@ -444,8 +444,21 @@ import { DeleteOutlined, EditOutlined, PlusOutlined, QuestionCircleOutlined } fr
 import { Tinymce } from '/@/components/Tinymce/index';
 import { CropperUpload } from '/@/components/Cropper';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
+import { useGlobSetting } from '/@/hooks/setting';
 
 defineOptions({ name: 'ChatWindowSettingsPage' });
+const globSetting = useGlobSetting();
+
+function normalizeImgUrls(html: string): string {
+  if (!html) return html;
+  try {
+    const origin = new URL(globSetting.domainUrl).origin;
+    return html.replace(
+      /(<img[^>]*?\ssrc=["'])(\/[^"']+)(["'])/gi,
+      (_match, pre, path, suf) => `${pre}${origin}${path}${suf}`
+    );
+  } catch { return html; }
+}
 
 const { createMessage } = useMessage();
 const saving = ref(false);
@@ -593,10 +606,13 @@ async function fetchConfig() {
       if (!Array.isArray(config.faqList)) {
         config.faqList = [];
       }
-      // 旧数据兼容：确保每个FAQ项都有keywords字段
+      // 旧数据兼容：确保每个FAQ项都有keywords字段，并标准化答案中的图片URL
       config.faqList.forEach((faq: any) => {
         if (!Array.isArray(faq.keywords)) {
           faq.keywords = [];
+        }
+        if (faq.answer) {
+          faq.answer = normalizeImgUrls(faq.answer);
         }
       });
       if (!Array.isArray(config.headerIcons)) {

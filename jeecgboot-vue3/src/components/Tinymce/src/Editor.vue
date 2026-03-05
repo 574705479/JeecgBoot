@@ -149,6 +149,7 @@
           toolbar,
           menubar: false,
           plugins,
+          convert_urls: false,
           // 添加以下粘贴相关配置
           paste_data_images: true, // 允许粘贴图片
           paste_as_text: false, // 不以纯文本粘贴
