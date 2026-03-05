@@ -116,6 +116,8 @@ public class CsWebSocketMessage {
     public static final String TYPE_USER_OFFLINE = "user_offline";
     /** 黑名单变更（拉黑/解封） */
     public static final String TYPE_BLACKLIST_CHANGED = "blacklist_changed";
+    /** 访客被拉黑（通知访客端） */
+    public static final String TYPE_VISITOR_BLOCKED = "visitor_blocked";
 
     /**
      * 创建消息

@@ -117,10 +117,11 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         Map<String, String> uaInfo = CsUserAgentUtil.parse(userAgent);
         Map<String, String> geoInfo = ipGeoService.queryGeoByIp(userIp);
 
-        // 默认用户名逻辑：基于地理位置+IP生成
+        // 默认用户名逻辑：基于地理位置+IP+设备码后4位生成
+        // 前端默认传 "访客"，视为未设置昵称
         String finalUserName = userName;
-        if (oConvertUtils.isEmpty(finalUserName)) {
-            finalUserName = generateDefaultUserName(geoInfo, userIp);
+        if (oConvertUtils.isEmpty(finalUserName) || "访客".equals(finalUserName)) {
+            finalUserName = generateDefaultUserName(geoInfo, userIp, deviceId);
         }
 
         CsConversation conversation = new CsConversation();
@@ -210,17 +211,22 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
     }
 
     /**
-     * 根据地理位置信息和IP生成默认用户名
-     * 格式: "省份城市 (IP)"，例如: "广东深圳 (120.24.35.12)"、"北京 (10.0.0.1)"、"访客 (127.0.0.1)"
+     * 根据地理位置信息、IP和设备码生成默认用户名
+     * 格式: "省份·城市 (IP) #设备码后4位"
+     * 示例: "广东·深圳 (120.24.35.12) #a3f2"、"北京 (10.0.0.1) #b7e1"、"访客 (127.0.0.1) #f1a8"
      */
-    private String generateDefaultUserName(Map<String, String> geoInfo, String userIp) {
+    private String generateDefaultUserName(Map<String, String> geoInfo, String userIp, String deviceId) {
         StringBuilder sb = new StringBuilder();
         if (geoInfo != null && !geoInfo.isEmpty()) {
             String province = geoInfo.get("province");
             String city = geoInfo.get("city");
             String country = geoInfo.get("country");
             if (oConvertUtils.isNotEmpty(province) && oConvertUtils.isNotEmpty(city)) {
-                sb.append(province).append(city);
+                if (province.equals(city)) {
+                    sb.append(city);
+                } else {
+                    sb.append(province).append("·").append(city);
+                }
             } else if (oConvertUtils.isNotEmpty(province)) {
                 sb.append(province);
             } else if (oConvertUtils.isNotEmpty(city)) {
@@ -234,6 +240,9 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         }
         if (oConvertUtils.isNotEmpty(userIp)) {
             sb.append(" (").append(userIp).append(")");
+        }
+        if (oConvertUtils.isNotEmpty(deviceId) && deviceId.length() >= 4) {
+            sb.append(" #").append(deviceId.substring(deviceId.length() - 4));
         }
         return sb.toString();
     }
@@ -1111,5 +1120,111 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         }
         
         return result;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void retryAssignAgent(String conversationId, String preferredAgentId) {
+        CsConversation conversation = getById(conversationId);
+        if (conversation == null || conversation.getStatus() != CsConversation.STATUS_UNASSIGNED) {
+            return;
+        }
+
+        boolean aiEnabled = isAiEnabled();
+        JSONObject assignConfig = getConversationAssignConfig();
+        CsAgent assignedAgent = null;
+
+        if (oConvertUtils.isNotEmpty(preferredAgentId)) {
+            CsAgent preferred = agentService.getById(preferredAgentId);
+            if (preferred != null && preferred.getStatus() != null && preferred.getStatus() == 1) {
+                assignedAgent = preferred;
+            }
+        }
+
+        if (assignedAgent == null) {
+            String lastAgentId = null;
+            if (assignConfig != null) {
+                JSONObject inherit = assignConfig.getJSONObject("inheritLastAgent");
+                if (inherit != null && inherit.getBooleanValue("enabled")) {
+                    int expireMinutes = inherit.getIntValue("expireMinutes");
+                    lastAgentId = findLastAgentForUser(conversation.getUserId(), expireMinutes);
+                }
+            }
+            assignedAgent = agentService.assignAgent(lastAgentId);
+        }
+
+        if (assignedAgent != null) {
+            conversation.setOwnerAgentId(assignedAgent.getId());
+            conversation.setStatus(CsConversation.STATUS_ASSIGNED);
+            conversation.setAssignTime(new Date());
+            conversation.setReplyMode(aiEnabled ? CsConversation.REPLY_MODE_AI_AUTO : CsConversation.REPLY_MODE_MANUAL);
+            conversation.setLastMessageTime(new Date());
+            updateById(conversation);
+
+            CsCollaborator collaborator = new CsCollaborator();
+            collaborator.setConversationId(conversationId);
+            collaborator.setAgentId(assignedAgent.getId());
+            collaborator.setRole(CsCollaborator.ROLE_OWNER);
+            collaborator.setJoinTime(new Date());
+            collaboratorMapper.insert(collaborator);
+
+            Map<String, Object> assignData = new HashMap<>();
+            assignData.put("conversationId", conversationId);
+            assignData.put("agentId", assignedAgent.getId());
+            assignData.put("agentName", assignedAgent.getNickname());
+            assignData.put("agentAvatar", assignedAgent.getAvatar());
+            assignData.put("assignTime", new Date());
+            broadcastToAllAgents("conversation_assigned", assignData);
+
+            Map<String, Object> extra = new HashMap<>();
+            extra.put("replyMode", conversation.getReplyMode());
+            extra.put("agentName", assignedAgent.getNickname());
+            extra.put("agentId", assignedAgent.getId());
+            extra.put("agentAvatar", assignedAgent.getAvatar());
+            notifyUser(conversationId, "agent_connected",
+                    "客服 " + assignedAgent.getNickname() + " 为您服务", extra);
+
+            log.info("[CS-Conversation] 重新分配客服成功: conversationId={}, agentId={}", conversationId, assignedAgent.getId());
+        } else {
+            conversation.setLastMessageTime(new Date());
+            updateById(conversation);
+            log.info("[CS-Conversation] 重新分配客服失败(无在线客服): conversationId={}", conversationId);
+        }
+    }
+
+    @Override
+    public void refreshDefaultUserName(CsConversation conversation, String userIp, String deviceId) {
+        if (conversation == null) {
+            return;
+        }
+        String currentName = conversation.getUserName();
+        if (oConvertUtils.isNotEmpty(currentName) && !"访客".equals(currentName)) {
+            return;
+        }
+        Map<String, String> geoInfo = ipGeoService.queryGeoByIp(userIp);
+        String newName = generateDefaultUserName(geoInfo, userIp, deviceId);
+        if (!newName.equals(currentName)) {
+            conversation.setUserName(newName);
+            updateById(conversation);
+            log.info("[CS-Conversation] 更新默认用户名: conversationId={}, newName={}", conversation.getId(), newName);
+        }
+    }
+
+    @Override
+    public void closeOtherActiveConversations(String userId, String appId, String keepConversationId) {
+        LambdaQueryWrapper<CsConversation> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(CsConversation::getUserId, userId)
+               .ne(CsConversation::getStatus, CsConversation.STATUS_CLOSED)
+               .ne(CsConversation::getId, keepConversationId);
+        if (oConvertUtils.isNotEmpty(appId)) {
+            wrapper.eq(CsConversation::getAppId, appId);
+        }
+        List<CsConversation> others = list(wrapper);
+        for (CsConversation conv : others) {
+            closeConversation(conv.getId(), "系统清理：用户已有其他活跃会话");
+        }
+        if (!others.isEmpty()) {
+            log.info("[CS-Conversation] 清理用户多余会话: userId={}, 关闭{}个", userId, others.size());
+        }
     }
 }

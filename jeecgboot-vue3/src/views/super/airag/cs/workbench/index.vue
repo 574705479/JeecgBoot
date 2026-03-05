@@ -959,7 +959,7 @@
             class="agent-card"
             @click="doTransfer(agent.id)"
           >
-            <a-avatar :size="48" :src="agent.avatar" class="agent-avatar">
+            <a-avatar :size="48" :src="getAgentItemAvatarUrl(agent)" class="agent-avatar">
               {{ agent.nickname?.charAt(0) || '客' }}
             </a-avatar>
             <div class="agent-info">
@@ -1015,8 +1015,10 @@ import {
   TeamOutlined, CaretRightOutlined, CaretDownOutlined, DownOutlined, SearchOutlined,
   CheckCircleOutlined, BgColorsOutlined
 } from '@ant-design/icons-vue';
+import { useRoute, useRouter } from 'vue-router';
 import { defHttp } from '/@/utils/http/axios';
 import { useGlobSetting } from '/@/hooks/setting';
+import { ElectronEnum } from '/@/enums/jeecgEnum';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
 import { createImgPreview } from '/@/components/Preview';
 import EmojiPicker from '../components/EmojiPicker.vue';
@@ -1027,6 +1029,8 @@ import hljs from 'highlight.js';
 
 const silentRequestOptions = { successMessageMode: 'none' as const };
 const globSetting = useGlobSetting();
+const route = useRoute();
+const router = useRouter();
 
 // ==================== 皮肤主题系统 ====================
 interface ThemeConfig {
@@ -1639,6 +1643,17 @@ const filteredQuickReplies = computed(() => {
     const content = (item.content || '').toLowerCase();
     return title.includes(keyword) || content.includes(keyword);
   });
+});
+
+// Electron 通知点击后通过 route query 定位会话
+watch(() => route.query.conversationId, (newId) => {
+  if (newId && typeof newId === 'string') {
+    const targetConv = conversations.value.find(c => c.id === newId);
+    if (targetConv) {
+      selectConversation(targetConv);
+    }
+    router.replace({ query: {} });
+  }
 });
 
 // 初始化
@@ -3399,13 +3414,13 @@ function getWsBaseUrl() {
     base = domainUrl;
   }
   if (!base) {
-    base = window.location.origin;
+    base = globSetting.apiUrl || window.location.origin;
   }
   let parsed: URL;
   try {
     parsed = new URL(base);
   } catch {
-    parsed = new URL(window.location.origin);
+    parsed = new URL(globSetting.apiUrl || window.location.origin);
   }
   const wsProtocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
   let prefix = urlPrefix || parsed.pathname || '';
@@ -4013,7 +4028,6 @@ function handleWsMessage(data: any) {
 
 function notifyNewMessage(conv: any, data: any) {
   if (!document.hidden) return;
-  if (typeof Notification === 'undefined') return;
 
   const conversationId = data.conversationId;
   const now = Date.now();
@@ -4025,6 +4039,16 @@ function notifyNewMessage(conv: any, data: any) {
   const attachments = getMessageAttachments({ extra: data.extra });
   const body = buildMessagePreview(data.content || '', attachments) || '收到一条新消息';
 
+  if (globSetting.isElectronPlatform && window[ElectronEnum.ELECTRON_API]) {
+    const api = window[ElectronEnum.ELECTRON_API];
+    api.sendNotifyFlash();
+    api.trayFlash();
+    const convId = data.conversationId || conv?.id || '';
+    api.sendNotification(title, body, route.path + '?conversationId=' + convId);
+    return;
+  }
+
+  if (typeof Notification === 'undefined') return;
   const showNotification = () => {
     try {
       const notification = new Notification(title, { body, tag: conversationId });
@@ -5063,6 +5087,7 @@ function restoreMessageScroll() {
   flex-direction: column;
   max-width: 65%;
   margin: 0 10px;
+  min-width: 0;
 }
 
 .msg-info {
@@ -5111,7 +5136,12 @@ function restoreMessageScroll() {
   .msg-text {
     font-size: 14px;
     line-height: 1.6;
-    word-wrap: break-word;
+    overflow-wrap: anywhere;
+
+    :deep(a) {
+      overflow-wrap: anywhere;
+      word-break: break-all;
+    }
 
     :deep(p) {
       margin: 0 0 8px;
@@ -5122,7 +5152,10 @@ function restoreMessageScroll() {
       background: rgba(0, 0, 0, 0.04);
       padding: 8px 12px;
       border-radius: 8px;
-      overflow-x: auto;
+      max-width: 100%;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-all;
     }
 
     :deep(code) {
@@ -5130,6 +5163,15 @@ function restoreMessageScroll() {
       padding: 2px 6px;
       border-radius: 4px;
       font-size: 13px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-all;
+    }
+
+    :deep(table) {
+      max-width: 100%;
+      overflow-x: auto;
+      display: block;
     }
 
     :deep(ul), :deep(ol) {

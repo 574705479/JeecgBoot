@@ -47,7 +47,7 @@ function hookNavigate() {
     return;
   }
   nav((path) => {
-    router.push({ path });
+    router.push(path);
   });
 }
 function hookWindowOpen() {

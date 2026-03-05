@@ -120,6 +120,20 @@ public class CsConversationController extends JeecgController<CsConversation, IC
         }
 
         String agentId = params.get("agentId");
+
+        // 复用活跃会话：检查该用户是否已有未结束的会话
+        CsConversation active = conversationService.getActiveConversation(userId, appId);
+        if (active != null) {
+            if (active.getStatus() == CsConversation.STATUS_UNASSIGNED) {
+                conversationService.retryAssignAgent(active.getId(), agentId);
+                active = conversationService.getById(active.getId());
+            }
+            // 如果 userName 是默认的"访客"，用新格式重新生成
+            conversationService.refreshDefaultUserName(active, userIp, deviceId);
+            conversationService.closeOtherActiveConversations(userId, appId, active.getId());
+            return Result.OK(active);
+        }
+
         CsConversation conversation = conversationService.createConversation(
                 appId, userId, userName, source, userIp, userAgent, deviceId, userLang, agentId);
         return Result.OK(conversation);

@@ -372,10 +372,15 @@ import { defHttp } from '/@/utils/http/axios';
 import { uploadImg } from '/@/api/sys/upload';
 import { CropperUpload } from '/@/components/Cropper';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
+import { useGlobSetting } from '/@/hooks/setting';
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
 
-const baseUrl = ref(window.location.origin);
+const globSetting = useGlobSetting();
+function getOriginUrl() {
+  return globSetting.isElectronPlatform ? globSetting.apiUrl : window.location.origin;
+}
+const baseUrl = ref(getOriginUrl());
 const domainOptions = ref<string[]>([]);
 // 安全配置（从后端加载，可编辑）
 const visitorTokenRequired = ref(true); // Token验证开关
@@ -439,13 +444,13 @@ async function loadDomainOptions() {
         if (!/^https?:\/\//i.test(d)) return 'https://' + d;
         return d;
       });
-      const allOptions = [window.location.origin, ...normalized];
+      const allOptions = [getOriginUrl(), ...normalized];
       domainOptions.value = [...new Set(allOptions)];
     } else {
-      domainOptions.value = [window.location.origin];
+      domainOptions.value = [getOriginUrl()];
     }
   } catch {
-    domainOptions.value = [window.location.origin];
+    domainOptions.value = [getOriginUrl()];
   }
 }
 

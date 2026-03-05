@@ -37,7 +37,7 @@ ipcMain.on('notify-with-path', (event: IpcMainInvokeEvent, options: Notification
     if (win.isMinimized()) win.restore();
     win.show();
     win.focus();
-    // win.webContents.send('navigate-to', options.path);
+    win.webContents.send('navigate-to', options.path);
   });
   notification.show();
 });

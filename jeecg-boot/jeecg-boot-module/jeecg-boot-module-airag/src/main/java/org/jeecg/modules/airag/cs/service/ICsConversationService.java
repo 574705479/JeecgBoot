@@ -296,4 +296,32 @@ public interface ICsConversationService extends IService<CsConversation> {
      * @return 会话列表
      */
     IPage<CsConversation> getAllActiveConversations(Page<CsConversation> page);
+
+    /**
+     * 对未分配的会话重新尝试分配客服
+     * 与 assignToAgent 不同：根据 AI 开关设置 replyMode，支持 preferredAgentId，
+     * 使用 conversation_assigned 广播
+     *
+     * @param conversationId   会话ID
+     * @param preferredAgentId 指定客服ID（可选）
+     */
+    void retryAssignAgent(String conversationId, String preferredAgentId);
+
+    /**
+     * 复用会话时，如果 userName 是默认的"访客"，则根据 IP 和设备码重新生成
+     *
+     * @param conversation 会话对象
+     * @param userIp       用户IP
+     * @param deviceId     设备码
+     */
+    void refreshDefaultUserName(CsConversation conversation, String userIp, String deviceId);
+
+    /**
+     * 关闭指定用户的其他多余活跃会话（保留 keepConversationId）
+     *
+     * @param userId             用户ID
+     * @param appId              应用ID
+     * @param keepConversationId 保留的会话ID
+     */
+    void closeOtherActiveConversations(String userId, String appId, String keepConversationId);
 }

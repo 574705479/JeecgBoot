@@ -9,7 +9,7 @@
       <div v-if="showLeaveMessageBoard" class="leave-message-board">
         <div class="board-header" :style="headerStyle">
           <div class="header-info">
-            <img class="app-avatar" :src="chatWindowConfig.logo ? resolveFileUrl(chatWindowConfig.logo) : (appInfo.avatar || defaultAvatar)" />
+            <img class="app-avatar" :src="chatWindowConfig.logo ? resolveFileUrl(chatWindowConfig.logo) : (appInfo.avatar ? resolveFileUrl(appInfo.avatar) : defaultAvatar)" />
             <div class="app-info">
               <span class="app-name">{{ chatWindowConfig.pageTitle || appInfo.name || '在线客服' }}</span>
               <span class="board-subtitle">{{ messageBoardConfig.subtitle || '客服不在线，请留言' }}</span>
@@ -68,7 +68,7 @@
       <!-- 全宽头部（在 chat-main-layout 之上） -->
       <div class="chat-header" v-if="chatWindowConfig.headerVisible !== false" :style="headerStyle">
         <div class="header-info">
-          <img class="app-avatar" :src="chatWindowConfig.logo ? resolveFileUrl(chatWindowConfig.logo) : (appInfo.avatar || defaultAvatar)" />
+          <img class="app-avatar" :src="chatWindowConfig.logo ? resolveFileUrl(chatWindowConfig.logo) : (appInfo.avatar ? resolveFileUrl(appInfo.avatar) : defaultAvatar)" />
           <div class="app-info">
             <span class="app-name">{{ chatWindowConfig.pageTitle || appInfo.name || '在线客服' }}</span>
             <span class="status-text">
@@ -1161,10 +1161,11 @@ onMounted(async () => {
   // 加载未读留言回复
   await loadUnreadReplies();
 
-  // 加载历史消息（根据 visitorHistory 开关决定）
+  // 始终加载当前会话消息（当前会话不属于"历史记录"）
+  await loadMessages();
+
+  // 仅在 visitorHistory 开启时加载历史（已关闭）会话列表
   if (chatWindowConfig.visitorHistory !== false) {
-    await loadMessages();
-    // 加载历史会话ID列表（为滚动加载准备）
     await loadHistoryConvIds();
   }
 
@@ -1274,16 +1275,20 @@ async function checkAppKey() {
 }
 
 async function checkUserBlocked() {
-  if (!visitorToken.value && !sessionToken.value) {
+  const headers: Record<string, string> = {};
+  if (sessionToken.value) {
+    headers['X-Visitor-Session'] = sessionToken.value;
+  } else if (visitorToken.value) {
+    headers['X-Visitor-Token'] = visitorToken.value;
+  } else if (!tokenRequired.value && userId.value) {
+    headers['X-Device-Id'] = userId.value;
+    if (appKey.value) {
+      headers['X-App-Secret'] = appKey.value;
+    }
+  } else {
     return;
   }
   try {
-    const headers: Record<string, string> = {};
-    if (sessionToken.value) {
-      headers['X-Visitor-Session'] = sessionToken.value;
-    } else if (visitorToken.value) {
-      headers['X-Visitor-Token'] = visitorToken.value;
-    }
     const res = await defHttp.get({
       url: '/airag/cs/visitor/blacklist/check-self',
       headers,
@@ -1860,12 +1865,11 @@ async function loadHistoryConvMessages() {
 function handleMessageScroll(event?: Event) {
   const el = (event?.target as HTMLElement) || messagesRef.value;
   if (!el) return;
-  if (chatWindowConfig.visitorHistory === false) return;
   if (loadingHistory.value) return;
   if (el.scrollTop <= 20) {
     if (hasMoreHistory.value) {
       loadMoreMessages();
-    } else if (hasMoreHistoryConv.value) {
+    } else if (chatWindowConfig.visitorHistory !== false && hasMoreHistoryConv.value) {
       loadHistoryConvMessages();
     }
   }
@@ -2203,7 +2207,13 @@ function handleWsMessage(data: any) {
       break;
 
     case 'pong':
-      // 心跳响应
+      break;
+
+    case 'visitor_blocked':
+      fatalError.value = true;
+      fatalErrorMessage.value = '访问已被禁止，请联系管理员';
+      disconnectWebSocket();
+      stopFallbackPoll();
       break;
 
     default:
@@ -3149,6 +3159,7 @@ watch(messages, () => {
     flex-direction: column;
     align-items: flex-end;
     max-width: 70%;
+    min-width: 0;
   }
 
   .message-text {
@@ -3159,7 +3170,7 @@ watch(messages, () => {
     border-radius: 20px 20px 4px 20px;
     font-size: 14px;
     line-height: 1.6;
-    word-break: break-word;
+    overflow-wrap: anywhere;
 
     :deep(.emoji) {
       color: initial;
@@ -3198,6 +3209,7 @@ watch(messages, () => {
   .message-content {
     width: fit-content;
     max-width: 70%;
+    min-width: 0;
   }
 
   .sender-info {
@@ -3221,7 +3233,12 @@ watch(messages, () => {
     border-radius: 20px 20px 20px 4px;
     font-size: 14px;
     line-height: 1.6;
-    word-break: break-word;
+    overflow-wrap: anywhere;
+
+    :deep(a) {
+      overflow-wrap: anywhere;
+      word-break: break-all;
+    }
 
     :deep(p) {
       margin: 0 0 8px;
@@ -3234,7 +3251,10 @@ watch(messages, () => {
       background: #f0f0f0;
       padding: 8px 12px;
       border-radius: 8px;
-      overflow-x: auto;
+      max-width: 100%;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-all;
     }
 
     :deep(img) {
@@ -3250,6 +3270,15 @@ watch(messages, () => {
       padding: 2px 6px;
       border-radius: 4px;
       font-size: 13px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-all;
+    }
+
+    :deep(table) {
+      max-width: 100%;
+      overflow-x: auto;
+      display: block;
     }
 
     :deep(ul), :deep(ol) {
