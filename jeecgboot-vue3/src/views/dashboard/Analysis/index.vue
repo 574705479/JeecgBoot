@@ -100,7 +100,7 @@
         <template #bodyCell="{ column, record }">
           <template v-if="column.dataIndex === 'status'">
             <a-badge
-              :status="record.status === 1 ? 'success' : record.status === 2 ? 'warning' : 'default'"
+              :status="record.status === 1 ? 'success' : record.status === 2 ? 'warning' : record.status === 0 ? 'error' : 'default'"
               :text="getStatusText(record.status)"
             />
           </template>
@@ -256,7 +256,7 @@ const agentColumns = [
 ];
 
 function getStatusText(status: number) {
-  const map: Record<number, string> = { 0: '离线', 1: '在线', 2: '忙碌' };
+  const map: Record<number, string> = { 0: '离线', 1: '在线', 2: '忙碌', 3: '隐身' };
   return map[status] || '未知';
 }
 

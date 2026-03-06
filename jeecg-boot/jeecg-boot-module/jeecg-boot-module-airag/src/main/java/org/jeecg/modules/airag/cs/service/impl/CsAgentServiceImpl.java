@@ -12,7 +12,9 @@ import org.jeecg.modules.airag.cs.entity.CsAgent;
 import org.jeecg.modules.airag.cs.entity.CsGlobalConfig;
 import org.jeecg.modules.airag.cs.mapper.CsAgentMapper;
 import org.jeecg.modules.airag.cs.mapper.CsGlobalConfigMapper;
+import org.jeecg.modules.airag.cs.entity.CsAgentStatusLog;
 import org.jeecg.modules.airag.cs.service.ICsAgentService;
+import org.jeecg.modules.airag.cs.service.ICsAgentStatusLogService;
 import org.jeecg.modules.airag.cs.websocket.CsWebSocketMessage;
 import org.jeecg.modules.airag.cs.websocket.CsWebSocketSessionManager;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -45,6 +47,9 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
 
     @Autowired
     private CsGlobalConfigMapper csGlobalConfigMapper;
+
+    @Autowired
+    private ICsAgentStatusLogService agentStatusLogService;
 
     @Override
     public CsAgent getByUserId(String userId) {
@@ -96,22 +101,36 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
         
         // ★ 广播客服状态变化
         broadcastAgentStatusChanged(agentId, CsAgent.STATUS_ONLINE, "在线");
+
+        agentStatusLogService.logStatusChange(agentId, CsAgentStatusLog.STATUS_ONLINE, CsAgentStatusLog.TRIGGER_MANUAL);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void goOffline(String agentId) {
+        goOffline(agentId, CsAgentStatusLog.TRIGGER_MANUAL);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void goOffline(String agentId, String triggerSource) {
         if (oConvertUtils.isEmpty(agentId)) {
             return;
         }
+        boolean isManual = CsAgentStatusLog.TRIGGER_MANUAL.equals(triggerSource);
+        int newStatus = isManual ? CsAgent.STATUS_INVISIBLE : CsAgent.STATUS_OFFLINE;
+        String statusText = isManual ? "隐身" : "离线";
+
         update(new LambdaUpdateWrapper<CsAgent>()
                 .eq(CsAgent::getId, agentId)
-                .set(CsAgent::getStatus, CsAgent.STATUS_OFFLINE)
+                .set(CsAgent::getStatus, newStatus)
                 .set(CsAgent::getCurrentSessions, 0));
-        log.info("[CS-Agent] 客服下线: agentId={}", agentId);
+        log.info("[CS-Agent] 客服{}: agentId={}, triggerSource={}", statusText, agentId, triggerSource);
         
         // ★ 广播客服状态变化
-        broadcastAgentStatusChanged(agentId, CsAgent.STATUS_OFFLINE, "离线");
+        broadcastAgentStatusChanged(agentId, newStatus, statusText);
+
+        agentStatusLogService.logStatusChange(agentId, newStatus, triggerSource);
     }
 
     @Override
@@ -127,6 +146,8 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
         
         // ★ 广播客服状态变化
         broadcastAgentStatusChanged(agentId, CsAgent.STATUS_BUSY, "忙碌");
+
+        agentStatusLogService.logStatusChange(agentId, CsAgentStatusLog.STATUS_BUSY, CsAgentStatusLog.TRIGGER_SYSTEM);
     }
     
     /**

@@ -36,11 +36,19 @@ public interface ICsAgentService extends IService<CsAgent> {
     void goOnline(String agentId);
 
     /**
-     * 客服下线
+     * 客服下线（默认 triggerSource = manual，即隐身）
      * 
      * @param agentId 客服ID
      */
     void goOffline(String agentId);
+
+    /**
+     * 客服下线（指定触发来源）
+     *
+     * @param agentId       客服ID
+     * @param triggerSource 触发来源: manual-隐身, websocket_disconnect-离线
+     */
+    void goOffline(String agentId, String triggerSource);
 
     /**
      * 设置客服忙碌

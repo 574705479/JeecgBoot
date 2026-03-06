@@ -176,6 +176,11 @@ public class CsConversation implements Serializable {
     @Schema(description = "客服超时未回复是否已通知访客")
     private Boolean agentTimeoutNotified;
 
+    // ==================== 及时回复统计 ====================
+
+    @Schema(description = "及时回复计数")
+    private Integer timelyReplyCount;
+
     // ==================== 逻辑删除 ====================
 
     @TableLogic(value = "0", delval = "1")

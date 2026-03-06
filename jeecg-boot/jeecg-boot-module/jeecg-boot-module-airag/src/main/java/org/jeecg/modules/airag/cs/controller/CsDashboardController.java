@@ -68,35 +68,29 @@ public class CsDashboardController {
                         .ne(CsConversation::getStatus, CsConversation.STATUS_CLOSED));
         stats.put("activeConversations", activeConversations);
 
-        // 2. 平均响应时长（秒）：今日 assignTime - createTime 的平均值
-        List<CsConversation> todayAssigned = conversationService.list(
+        // 2. 平均响应时长（秒）：今日客服首次回复的平均时长
+        List<CsConversation> todayResponded = conversationService.list(
                 new LambdaQueryWrapper<CsConversation>()
-                        .isNotNull(CsConversation::getAssignTime)
+                        .isNotNull(CsConversation::getFirstResponseSeconds)
+                        .gt(CsConversation::getFirstResponseSeconds, 0)
                         .ge(CsConversation::getCreateTime, todayStart)
                         .lt(CsConversation::getCreateTime, todayEnd));
         double avgResponseTime = 0;
-        if (!todayAssigned.isEmpty()) {
-            long totalSeconds = 0;
-            int validCount = 0;
-            for (CsConversation c : todayAssigned) {
-                if (c.getAssignTime() != null && c.getCreateTime() != null) {
-                    long diff = (c.getAssignTime().getTime() - c.getCreateTime().getTime()) / 1000;
-                    if (diff >= 0) {
-                        totalSeconds += diff;
-                        validCount++;
-                    }
-                }
-            }
-            avgResponseTime = validCount > 0 ? (double) totalSeconds / validCount : 0;
+        if (!todayResponded.isEmpty()) {
+            long total = todayResponded.stream()
+                    .mapToLong(c -> c.getFirstResponseSeconds())
+                    .sum();
+            avgResponseTime = (double) total / todayResponded.size();
         }
         stats.put("avgResponseTime", Math.round(avgResponseTime * 10) / 10.0);
 
-        // 3. 今日有效对话量（有消息交互的，messageCount > 0）
+        // 3. 今日有效对话量（双方都有消息交互）
         long todayEffective = conversationService.count(
                 new LambdaQueryWrapper<CsConversation>()
                         .ge(CsConversation::getCreateTime, todayStart)
                         .lt(CsConversation::getCreateTime, todayEnd)
-                        .gt(CsConversation::getMessageCount, 0));
+                        .gt(CsConversation::getAgentMessageCount, 0)
+                        .gt(CsConversation::getVisitorMessageCount, 0));
         stats.put("todayEffectiveConversations", todayEffective);
 
         // 4. 今日访客量

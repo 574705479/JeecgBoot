@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.jeecg.modules.airag.cs.mapper.CsStatisticsMapper">
+
+    <!-- 1. 客服对话统计 -->
+    <select id="selectAgentConversationStats" resultType="java.util.Map">
+        SELECT
+            a.id AS agentId,
+            a.nickname AS agentName,
+            a.nickname AS agentNickName,
+            IFNULL(conv.total_count, 0) AS totalCount,
+            IFNULL(conv.effective_count, 0) AS effectiveCount,
+            IFNULL(conv.total_duration, 0) AS totalDuration,
+            IFNULL(online.online_duration, 0) AS onlineDuration
+        FROM cs_agent a
+        LEFT JOIN (
+            SELECT agent_id,
+                   COUNT(*) AS total_count,
+                   SUM(CASE WHEN agent_message_count > 0 AND visitor_message_count > 0 THEN 1 ELSE 0 END) AS effective_count,
+                   SUM(TIMESTAMPDIFF(SECOND, create_time, COALESCE(end_time, NOW()))) AS total_duration
+            FROM cs_conversation
+            WHERE deleted = 0
+              AND agent_id IS NOT NULL
+              AND create_time >= #{startDate}
+              AND create_time &lt;= CONCAT(#{endDate}, ' 23:59:59')
+            GROUP BY agent_id
+        ) conv ON a.id = conv.agent_id
+        LEFT JOIN (
+            SELECT agent_id,
+                   SUM(
+                       TIMESTAMPDIFF(SECOND,
+                           GREATEST(start_time, #{startDate}),
+                           LEAST(COALESCE(end_time, NOW()), CONCAT(#{endDate}, ' 23:59:59'))
+                       )
+                   ) AS online_duration
+            FROM cs_agent_status_log
+            WHERE status IN (1, 2)
+              AND start_time &lt;= CONCAT(#{endDate}, ' 23:59:59')
+              AND (end_time IS NULL OR end_time >= #{startDate})
+            GROUP BY agent_id
+        ) online ON a.id = online.agent_id
+        WHERE (conv.total_count > 0 OR online.online_duration > 0)
+        ORDER BY conv.total_count DESC
+    </select>
+
+    <!-- 2. 访客区域统计 -->
+    <select id="selectVisitorRegionStats" resultType="java.util.Map">
+        SELECT
+            CONCAT(IFNULL(user_province, '未知'), ' ', IFNULL(user_city, '')) AS region,
+            COUNT(DISTINCT user_id) AS visitorCount
+        FROM cs_conversation
+        WHERE deleted = 0
+          AND create_time >= #{startDate}
+          AND create_time &lt;= CONCAT(#{endDate}, ' 23:59:59')
+        GROUP BY user_province, user_city
+        ORDER BY visitorCount DESC
+    </select>
+
+    <!-- 3. 出勤记录统计 -->
+    <select id="selectAttendanceStats" resultType="java.util.Map">
+        SELECT
+            a.id AS agentId,
+            a.nickname AS agentName,
+            IFNULL(SUM(CASE WHEN sl.status IN (1, 2) THEN
+                TIMESTAMPDIFF(SECOND,
+                    GREATEST(sl.start_time, CONCAT(#{queryDate}, ' 00:00:00')),
+                    LEAST(COALESCE(sl.end_time, NOW()), CONCAT(#{queryDate}, ' 23:59:59'))
+                ) ELSE 0 END), 0) AS onlineDuration,
+            IFNULL(SUM(CASE WHEN sl.status = 0 THEN
+                TIMESTAMPDIFF(SECOND,
+                    GREATEST(sl.start_time, CONCAT(#{queryDate}, ' 00:00:00')),
+                    LEAST(COALESCE(sl.end_time, NOW()), CONCAT(#{queryDate}, ' 23:59:59'))
+                ) ELSE 0 END), 0) AS offlineDuration,
+            IFNULL(SUM(CASE WHEN sl.status = 3 THEN
+                TIMESTAMPDIFF(SECOND,
+                    GREATEST(sl.start_time, CONCAT(#{queryDate}, ' 00:00:00')),
+                    LEAST(COALESCE(sl.end_time, NOW()), CONCAT(#{queryDate}, ' 23:59:59'))
+                ) ELSE 0 END), 0) AS invisibleDuration,
+            MIN(CASE WHEN sl.status IN (1, 2) THEN sl.start_time END) AS earliestLogin,
+            MAX(CASE WHEN sl.status = 0 THEN sl.start_time END) AS latestLogout
+        FROM cs_agent a
+        INNER JOIN cs_agent_status_log sl ON a.id = sl.agent_id
+        WHERE sl.start_time &lt;= CONCAT(#{queryDate}, ' 23:59:59')
+          AND (sl.end_time IS NULL OR sl.end_time >= CONCAT(#{queryDate}, ' 00:00:00'))
+        GROUP BY a.id, a.nickname
+        ORDER BY a.nickname
+    </select>
+
+    <!-- 4. 出勤详情 -->
+    <select id="selectAttendanceDetail" resultType="java.util.Map">
+        SELECT
+            CASE
+                WHEN status IN (1, 2) THEN '在线'
+                WHEN status = 3 THEN '隐身'
+                ELSE '离线'
+            END AS statusText,
+            GREATEST(start_time, CONCAT(#{queryDate}, ' 00:00:00')) AS startTime,
+            LEAST(COALESCE(end_time, NOW()), CONCAT(#{queryDate}, ' 23:59:59')) AS endTime,
+            TIMESTAMPDIFF(SECOND,
+                GREATEST(start_time, CONCAT(#{queryDate}, ' 00:00:00')),
+                LEAST(COALESCE(end_time, NOW()), CONCAT(#{queryDate}, ' 23:59:59'))
+            ) AS durationSeconds
+        FROM cs_agent_status_log
+        WHERE agent_id = #{agentId}
+          AND start_time &lt;= CONCAT(#{queryDate}, ' 23:59:59')
+          AND (end_time IS NULL OR end_time >= CONCAT(#{queryDate}, ' 00:00:00'))
+        ORDER BY start_time ASC
+    </select>
+
+    <!-- 5. 客服对话效率 -->
+    <select id="selectAgentEfficiencyStats" resultType="java.util.Map">
+        SELECT
+            a.id AS agentId,
+            a.nickname AS agentName,
+            IFNULL(conv.effective_count, 0) AS effectiveCount,
+            IFNULL(conv.no_response_count, 0) AS noResponseCount,
+            IFNULL(conv.total_count, 0) AS totalCount,
+            IFNULL(invisible.invisible_duration, 0) AS invisibleDuration,
+            IFNULL(offline.offline_duration, 0) AS offlineDuration,
+            CASE
+                WHEN IFNULL(conv.total_visitor_msg, 0) = 0 THEN 0
+                ELSE ROUND(IFNULL(conv.timely_count, 0) * 100.0 / conv.total_visitor_msg, 2)
+            END AS timelyReplyRate
+        FROM cs_agent a
+        LEFT JOIN (
+            SELECT agent_id,
+                   COUNT(*) AS total_count,
+                   SUM(CASE WHEN agent_message_count > 0 AND visitor_message_count > 0 THEN 1 ELSE 0 END) AS effective_count,
+                   SUM(CASE WHEN status = 2 AND agent_message_count = 0 THEN 1 ELSE 0 END) AS no_response_count,
+                   SUM(IFNULL(timely_reply_count, 0)) AS timely_count,
+                   SUM(IFNULL(visitor_message_count, 0)) AS total_visitor_msg
+            FROM cs_conversation
+            WHERE deleted = 0
+              AND agent_id IS NOT NULL
+              AND create_time >= #{startDate}
+              AND create_time &lt;= CONCAT(#{endDate}, ' 23:59:59')
+            GROUP BY agent_id
+        ) conv ON a.id = conv.agent_id
+        LEFT JOIN (
+            SELECT agent_id,
+                   SUM(TIMESTAMPDIFF(SECOND,
+                       GREATEST(start_time, #{startDate}),
+                       LEAST(COALESCE(end_time, NOW()), CONCAT(#{endDate}, ' 23:59:59'))
+                   )) AS invisible_duration
+            FROM cs_agent_status_log
+            WHERE status = 3
+              AND start_time &lt;= CONCAT(#{endDate}, ' 23:59:59')
+              AND (end_time IS NULL OR end_time >= #{startDate})
+            GROUP BY agent_id
+        ) invisible ON a.id = invisible.agent_id
+        LEFT JOIN (
+            SELECT agent_id,
+                   SUM(TIMESTAMPDIFF(SECOND,
+                       GREATEST(start_time, #{startDate}),
+                       LEAST(COALESCE(end_time, NOW()), CONCAT(#{endDate}, ' 23:59:59'))
+                   )) AS offline_duration
+            FROM cs_agent_status_log
+            WHERE status = 0
+              AND start_time &lt;= CONCAT(#{endDate}, ' 23:59:59')
+              AND (end_time IS NULL OR end_time >= #{startDate})
+            GROUP BY agent_id
+        ) offline ON a.id = offline.agent_id
+        WHERE (conv.total_count > 0 OR invisible.invisible_duration > 0 OR offline.offline_duration > 0)
+        ORDER BY conv.total_count DESC
+    </select>
+
+</mapper>

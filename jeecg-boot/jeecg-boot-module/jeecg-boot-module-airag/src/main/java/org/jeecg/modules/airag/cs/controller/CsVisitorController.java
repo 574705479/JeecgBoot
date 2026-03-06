@@ -573,10 +573,10 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
         if (id == null || id.isEmpty()) {
             return Result.error("id不能为空");
         }
-        if (level == null || level < 1 || level > 3) {
+        if (level == null || level < 0 || level > 3) {
             return Result.error("等级值无效");
         }
-        boolean success = visitorService.updateLevel(id, level);
+        boolean success = visitorService.updateLevel(id, level == 0 ? null : level);
         if (success) {
             CsVisitor updated = visitorService.getById(id);
             visitorService.notifyVisitorUpdated(updated);

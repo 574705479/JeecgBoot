@@ -57,9 +57,10 @@ const [registerTable, { reload }] = useTable({
       { field: 'status', label: '状态', component: 'Select', colProps: { span: 6 },
         componentProps: {
           options: [
-            { label: '隐身', value: 0 },
+            { label: '离线', value: 0 },
             { label: '在线', value: 1 },
             { label: '忙碌', value: 2 },
+            { label: '隐身', value: 3 },
           ]
         }
       },
@@ -88,6 +89,7 @@ function getStatusBadge(status: number) {
   switch (status) {
     case 1: return 'success';
     case 2: return 'warning';
+    case 0: return 'error';
     default: return 'default';
   }
 }
@@ -96,7 +98,8 @@ function getStatusText(status: number) {
   switch (status) {
     case 1: return '在线';
     case 2: return '忙碌';
-    default: return '隐身';
+    case 3: return '隐身';
+    default: return '离线';
   }
 }
 

@@ -93,8 +93,8 @@ public interface CsConversationMapper extends BaseMapper<CsConversation> {
             "COUNT(c.id) AS conversationCount, " +
             "IFNULL(SUM(c.message_count), 0) AS messageCount, " +
             "ROUND(AVG(c.satisfaction), 1) AS avgSatisfaction, " +
-            "ROUND(AVG(CASE WHEN c.assign_time IS NULL THEN NULL " +
-            "ELSE TIMESTAMPDIFF(SECOND, c.create_time, c.assign_time) END), 0) AS avgFirstResponseSeconds " +
+            "ROUND(AVG(CASE WHEN c.first_response_seconds IS NULL OR c.first_response_seconds = 0 THEN NULL " +
+            "ELSE c.first_response_seconds END), 0) AS avgFirstResponseSeconds " +
             "FROM cs_conversation c " +
             "LEFT JOIN cs_agent a ON c.agent_id = a.id " +
             "WHERE c.agent_id IS NOT NULL " +

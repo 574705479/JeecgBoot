@@ -414,7 +414,7 @@ public class CsWebSocketHandler implements WebSocketHandler {
         if (code == 4001) {
             log.info("[CS-WebSocket] Token过期，客服立即下线: agentId={}", agentId);
             try {
-                agentService.goOffline(agentId);
+                agentService.goOffline(agentId, "websocket_disconnect");
             } catch (Exception e) {
                 if (!isShutdownError(e)) {
                     log.error("[CS-WebSocket] 处理客服离线失败: {}", e.getMessage());
@@ -440,7 +440,7 @@ public class CsWebSocketHandler implements WebSocketHandler {
             try {
                 if (!sessionManager.isAgentOnline(agentId)) {
                     log.info("[CS-WebSocket] 客服确认离线: agentId={}", agentId);
-                    agentService.goOffline(agentId);
+                    agentService.goOffline(agentId, "websocket_disconnect");
                 } else {
                     log.info("[CS-WebSocket] 客服已重连，取消离线: agentId={}", agentId);
                 }

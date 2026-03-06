@@ -981,8 +981,8 @@
               <div class="agent-name">{{ agent.nickname || '客服' }}</div>
               <div class="agent-stats">
                 <span>
-                  <a-badge :status="agent.status === 1 ? 'success' : 'default'" />
-                  {{ agent.status === 1 ? '在线' : '隐身' }}
+                  <a-badge :status="agent.status === 1 ? 'success' : agent.status === 2 ? 'warning' : 'default'" />
+                  {{ getAgentStatusText(agent.status) }}
                 </span>
                 <span>当前接待: {{ agent.currentSessions || 0 }}/{{ agent.maxSessions || 10 }}</span>
               </div>
@@ -1364,7 +1364,7 @@ const monitorGroups = computed(() => {
   
   // 排序：在线优先，然后按对话数量降序
   groups.sort((a, b) => {
-    const statusOrder = (s: number) => s === 1 ? 0 : s === 0 ? 1 : 2;
+    const statusOrder = (s: number) => s === 1 ? 0 : s === 2 ? 1 : s === 3 ? 2 : 3;
     const sa = statusOrder(a.agent.status);
     const sb = statusOrder(b.agent.status);
     if (sa !== sb) return sa - sb;
@@ -1385,7 +1385,12 @@ function toggleAgentExpand(agentId: string) {
 }
 
 function getAgentStatusText(status: number) {
-  return status === 1 ? '在线' : status === 0 ? '离线' : '隐身';
+  switch (status) {
+    case 1: return '在线';
+    case 2: return '忙碌';
+    case 3: return '隐身';
+    default: return '离线';
+  }
 }
 
 // 消息
@@ -1796,8 +1801,11 @@ async function loadAgentInfo() {
           await httpPost({ url: `/cs/agent/online/${agentId.value}` });
           agentStatus.value = 1;
           isOnline.value = true;
+        } else {
+          // 隐身进入，确保状态从离线(0)更新为隐身(3)
+          await httpPost({ url: `/cs/agent/offline/${agentId.value}` });
+          agentStatus.value = 3;
         }
-        // 否则隐身进入，不调用上线接口
       }
     }
   } catch (e) {
@@ -2289,7 +2297,7 @@ async function toggleOnline(checked: boolean) {
     } else {
       await httpPost({ url: `/cs/agent/offline/${agentId.value}` });
     }
-    agentStatus.value = checked ? 1 : 0;
+    agentStatus.value = checked ? 1 : 3;
     // 同步到 localStorage，刷新页面后保持当前状态
     localStorage.setItem('CS_ONLINE_LOGIN', String(checked));
   } catch (e) {
@@ -3919,11 +3927,12 @@ function handleWsMessage(data: any) {
         // 显示提示（仅当其他客服状态变化时）
         if (changedAgentId !== agentId.value) {
           const agentName = statusData.agentName || '客服';
-          // 只在上线/隐身时提示，忙碌状态不提示
           if (newStatus === 1) {
             console.log('[Workbench] 客服已上线:', agentName);
-          } else if (newStatus === 0) {
+          } else if (newStatus === 3) {
             console.log('[Workbench] 客服已隐身:', agentName);
+          } else if (newStatus === 0) {
+            console.log('[Workbench] 客服已离线:', agentName);
           }
         }
       }
@@ -4792,6 +4801,15 @@ function restoreMessageScroll() {
       color: #52c41a;
       background: rgba(82, 196, 26, 0.1);
       box-shadow: 0 0 0 1px rgba(82, 196, 26, 0.2);
+    }
+    &.status-2 {
+      color: #faad14;
+      background: rgba(250, 173, 20, 0.1);
+      box-shadow: 0 0 0 1px rgba(250, 173, 20, 0.2);
+    }
+    &.status-3 {
+      color: #999;
+      background: rgba(0, 0, 0, 0.04);
     }
     &.status-0 {
       color: #ff4d4f;

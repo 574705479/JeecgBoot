@@ -116,7 +116,7 @@ public class ChatMessageServiceImpl implements IChatMessageService {
             // 确保会话存在 (如果不存在则创建)
             csConversationService.getOrCreateConversation(conversationId, appId, visitorId, visitorName);
             // 更新最后消息
-            csConversationService.updateLastMessage(conversationId, content);
+            csConversationService.updateLastMessage(conversationId, content, 0);
             log.info("[ChatMessage] ★ 同步客服会话成功: conversationId={}", conversationId);
         } catch (Exception e) {
             // 同步失败不影响主流程

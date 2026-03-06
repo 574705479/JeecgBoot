@@ -163,7 +163,6 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             conversation.setOwnerAgentId(assignedAgent.getId());
             conversation.setStatus(CsConversation.STATUS_ASSIGNED);
             conversation.setAssignTime(new Date());
-            conversation.setFirstResponseSeconds(0);
             // AI开关决定回复模式
             conversation.setReplyMode(aiEnabled ? CsConversation.REPLY_MODE_AI_AUTO : CsConversation.REPLY_MODE_MANUAL);
             
@@ -517,10 +516,6 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             conversation.setUpdateTime(new Date());
             // ★ 客服接入后切换为手动模式，终止AI自动回复
             conversation.setReplyMode(CsConversation.REPLY_MODE_MANUAL);
-            if (conversation.getFirstResponseSeconds() == null && conversation.getCreateTime() != null) {
-                long seconds = (System.currentTimeMillis() - conversation.getCreateTime().getTime()) / 1000;
-                conversation.setFirstResponseSeconds((int) seconds);
-            }
             updateById(conversation);
         }
         
@@ -996,6 +991,11 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         } else if (senderType == 1 || senderType == 2) {
             updateWrapper.setSql("agent_message_count = IFNULL(agent_message_count, 0) + 1");
         }
+        if (senderType == 2) {
+            updateWrapper.setSql("first_response_seconds = IF(" +
+                "(first_response_seconds IS NULL OR first_response_seconds = 0) AND IFNULL(visitor_message_count, 0) > 0, " +
+                "TIMESTAMPDIFF(SECOND, create_time, NOW()), first_response_seconds)");
+        }
         update(updateWrapper);
     }
 
@@ -1038,10 +1038,33 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void clearVisitorLastMsgTime(String conversationId) {
+        boolean timelyReply = false;
+        try {
+            CsConversation conv = getById(conversationId);
+            if (conv != null && conv.getVisitorLastMsgTime() != null) {
+                long responseSeconds = (System.currentTimeMillis() - conv.getVisitorLastMsgTime().getTime()) / 1000;
+                JSONObject config = getConversationAssignConfig();
+                if (config != null) {
+                    JSONObject notifyConfig = config.getJSONObject("agentTimeoutVisitorNotify");
+                    if (notifyConfig != null) {
+                        int threshold = notifyConfig.getIntValue("seconds");
+                        if (threshold > 0 && responseSeconds <= threshold) {
+                            timelyReply = true;
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[CS-Conversation] 计算及时回复失败: conversationId={}", conversationId, e);
+        }
+
         LambdaUpdateWrapper<CsConversation> updateWrapper = new LambdaUpdateWrapper<>();
         updateWrapper.eq(CsConversation::getId, conversationId)
                 .set(CsConversation::getVisitorLastMsgTime, null)
                 .set(CsConversation::getAgentTimeoutNotified, false);
+        if (timelyReply) {
+            updateWrapper.setSql("timely_reply_count = IFNULL(timely_reply_count, 0) + 1");
+        }
         update(updateWrapper);
     }
 
@@ -1231,10 +1254,6 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             conversation.setAssignTime(new Date());
             conversation.setReplyMode(aiEnabled ? CsConversation.REPLY_MODE_AI_AUTO : CsConversation.REPLY_MODE_MANUAL);
             conversation.setLastMessageTime(new Date());
-            if (conversation.getFirstResponseSeconds() == null && conversation.getCreateTime() != null) {
-                long seconds = (System.currentTimeMillis() - conversation.getCreateTime().getTime()) / 1000;
-                conversation.setFirstResponseSeconds((int) seconds);
-            }
             updateById(conversation);
 
             CsCollaborator collaborator = new CsCollaborator();

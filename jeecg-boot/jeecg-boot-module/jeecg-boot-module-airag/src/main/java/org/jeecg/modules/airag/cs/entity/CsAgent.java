@@ -54,7 +54,7 @@ public class CsAgent implements Serializable {
     private String welcomeMessage;
 
     @Excel(name = "状态", width = 10)
-    @Schema(description = "状态: 0-离线 1-在线 2-忙碌")
+    @Schema(description = "状态: 0-离线 1-在线 2-忙碌 3-隐身")
     private Integer status;
 
     @Excel(name = "当前接待数", width = 10)
@@ -115,6 +115,8 @@ public class CsAgent implements Serializable {
     public static final int STATUS_ONLINE = 1;
     /** 忙碌 */
     public static final int STATUS_BUSY = 2;
+    /** 隐身 */
+    public static final int STATUS_INVISIBLE = 3;
 
     // ==================== 客服角色常量 ====================
     
