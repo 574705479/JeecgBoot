@@ -120,6 +120,8 @@ public class CsConversationController extends JeecgController<CsConversation, IC
         }
 
         String agentId = params.get("agentId");
+        String landingPage = params.get("landingPage");
+        String referrerPage = params.get("referrerPage");
 
         // 复用活跃会话：检查该用户是否已有未结束的会话
         CsConversation active = conversationService.getActiveConversation(userId, appId);
@@ -135,7 +137,8 @@ public class CsConversationController extends JeecgController<CsConversation, IC
         }
 
         CsConversation conversation = conversationService.createConversation(
-                appId, userId, userName, source, userIp, userAgent, deviceId, userLang, agentId);
+                appId, userId, userName, source, userIp, userAgent, deviceId, userLang, agentId,
+                landingPage, referrerPage);
         return Result.OK(conversation);
     }
 
@@ -410,7 +413,18 @@ public class CsConversationController extends JeecgController<CsConversation, IC
             @RequestParam(defaultValue = "all") String filter,
             @RequestParam(defaultValue = "false") Boolean supervisorMode,
             @RequestParam(required = false) Boolean includeDeleted,
-            @RequestParam(required = false) String filterAgentId) {
+            @RequestParam(required = false) String filterAgentId,
+            @RequestParam(required = false) String id,
+            @RequestParam(required = false) String userId,
+            @RequestParam(required = false) Integer endType,
+            @RequestParam(required = false) Integer satisfaction,
+            @RequestParam(required = false) String source,
+            @RequestParam(required = false) String landingPage,
+            @RequestParam(required = false) String referrerPage,
+            @RequestParam(required = false) String createTimeBegin,
+            @RequestParam(required = false) String createTimeEnd,
+            @RequestParam(required = false) String endTimeBegin,
+            @RequestParam(required = false) String endTimeEnd) {
         
         Page<CsConversation> page = new Page<>(pageNo, pageSize);
         
@@ -429,7 +443,9 @@ public class CsConversationController extends JeecgController<CsConversation, IC
         // 会话记录模式：使用高级查询（支持包含已删除记录和按客服筛选）
         if ("history".equals(filter) || Boolean.TRUE.equals(includeDeleted) || oConvertUtils.isNotEmpty(filterAgentId)) {
             IPage<CsConversation> result = conversationService.getConversationListAdvanced(
-                    page, agentId, status, filter, includeDeleted, filterAgentId);
+                    page, agentId, status, filter, includeDeleted, filterAgentId,
+                    id, userId, endType, satisfaction, source, landingPage, referrerPage,
+                    createTimeBegin, createTimeEnd, endTimeBegin, endTimeEnd);
             return Result.OK(result);
         }
         

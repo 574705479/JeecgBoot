@@ -124,6 +124,12 @@ public class CsConversation implements Serializable {
     @Schema(description = "总消息数")
     private Integer messageCount;
 
+    @Schema(description = "客服消息数(含AI)")
+    private Integer agentMessageCount;
+
+    @Schema(description = "访客消息数")
+    private Integer visitorMessageCount;
+
     // ==================== 时间信息 ====================
 
     @JsonFormat(timezone = "GMT+8", pattern = "yyyy-MM-dd HH:mm:ss")
@@ -146,10 +152,29 @@ public class CsConversation implements Serializable {
     @Schema(description = "更新时间")
     private Date updateTime;
 
+    @Schema(description = "首次响应时长(秒)")
+    private Integer firstResponseSeconds;
+
+    // ==================== 结束方式 ====================
+
+    @Schema(description = "结束方式: 0-客服主动 1-超时自动 2-访客结束 3-系统清理")
+    private Integer endType;
+
+    // ==================== 来源页面 ====================
+
+    @Schema(description = "着陆页URL")
+    private String landingPage;
+
+    @Schema(description = "来源页URL")
+    private String referrerPage;
+
     // ==================== 超时管理 ====================
 
     @Schema(description = "是否已发送超时提醒")
     private Boolean timeoutWarned;
+
+    @Schema(description = "客服超时未回复是否已通知访客")
+    private Boolean agentTimeoutNotified;
 
     // ==================== 逻辑删除 ====================
 
@@ -200,4 +225,15 @@ public class CsConversation implements Serializable {
     public static final int REPLY_MODE_MANUAL = 1;
     /** AI辅助 - AI生成建议，客服确认后发送 */
     public static final int REPLY_MODE_AI_ASSIST = 2;
+
+    // ==================== 结束方式常量 ====================
+
+    /** 客服主动结束 */
+    public static final int END_TYPE_AGENT_CLOSE = 0;
+    /** 超时自动结束 */
+    public static final int END_TYPE_TIMEOUT = 1;
+    /** 访客结束 */
+    public static final int END_TYPE_VISITOR_CLOSE = 2;
+    /** 系统清理 */
+    public static final int END_TYPE_SYSTEM_CLEAN = 3;
 }

@@ -4,11 +4,11 @@
     @register="registerModal"
     title="会话详情"
     :footer="null"
-    width="900px"
+    width="1200px"
   >
     <div class="conversation-detail">
       <!-- 基本信息 -->
-      <a-descriptions :column="3" bordered size="small" class="info-section">
+      <a-descriptions :column="3" bordered size="small" class="top-info">
         <a-descriptions-item label="会话ID" :span="2">
           <ATypographyText copyable>{{ record?.id }}</ATypographyText>
         </a-descriptions-item>
@@ -34,101 +34,201 @@
             "{{ record.satisfactionComment }}"
           </span>
         </a-descriptions-item>
-        <a-descriptions-item label="消息总数">{{ record?.messageCount || 0 }} 条</a-descriptions-item>
+        <a-descriptions-item label="结束方式">
+          {{ endTypeText }}
+        </a-descriptions-item>
+        <a-descriptions-item label="消息统计">
+          共{{ record?.messageCount || 0 }}条 (客服{{ record?.agentMessageCount || 0 }} / 访客{{ record?.visitorMessageCount || 0 }})
+        </a-descriptions-item>
+        <a-descriptions-item label="首次响应">{{ formatResponseTime(record?.firstResponseSeconds) }}</a-descriptions-item>
         <a-descriptions-item label="创建时间">{{ record?.createTime }}</a-descriptions-item>
         <a-descriptions-item label="接入时间">{{ record?.assignTime || '-' }}</a-descriptions-item>
         <a-descriptions-item label="结束时间">{{ record?.endTime || '-' }}</a-descriptions-item>
       </a-descriptions>
 
-      <!-- 消息记录 -->
-      <div class="message-section">
-        <div class="section-header">
-          <span class="section-title">
-            <MessageOutlined /> 消息记录
-          </span>
-          <span class="message-count">共 {{ messages.length }} 条</span>
-        </div>
-        
-        <a-spin :spinning="loading">
-          <div class="message-list" ref="messageListRef" @scroll.passive="handleMessageScroll">
-            <template v-if="messages.length > 0">
-              <div v-for="msg in displayMessages" :key="msg.id" :class="['message-item', getMsgClass(msg)]">
-                <!-- 系统消息 -->
-                <template v-if="msg.senderType === 3">
-                  <div class="system-message">
-                    <span class="system-text">{{ msg.content }}</span>
-                    <span class="system-time">{{ formatTime(msg.createTime) }}</span>
+      <!-- 左右分栏 -->
+      <div class="split-layout">
+        <!-- 左侧：消息记录 -->
+        <div class="split-left">
+          <div class="message-section">
+            <div class="section-header">
+              <span class="section-title">
+                <MessageOutlined /> 消息记录
+              </span>
+              <span class="message-count">共 {{ messages.length }} 条</span>
+            </div>
+
+            <a-spin :spinning="loading">
+              <div class="message-list" ref="messageListRef" @scroll.passive="handleMessageScroll">
+                <template v-if="messages.length > 0">
+                  <div v-for="msg in displayMessages" :key="msg.id" :class="['message-item', getMsgClass(msg)]">
+                    <template v-if="msg.senderType === 3">
+                      <div class="system-message">
+                        <span class="system-text">{{ msg.content }}</span>
+                        <span class="system-time">{{ formatTime(msg.createTime) }}</span>
+                      </div>
+                    </template>
+
+                    <template v-else-if="msg.senderType === 0">
+                      <div class="user-message">
+                        <a-avatar :size="32" class="msg-avatar user-avatar">
+                          {{ (msg.senderName || '访').charAt(0) }}
+                        </a-avatar>
+                        <div class="msg-content">
+                          <div class="msg-header">
+                            <span class="sender-name">{{ msg.senderName || '访客' }}</span>
+                            <span class="msg-time">{{ formatTime(msg.createTime) }}</span>
+                          </div>
+                          <div class="msg-bubble user-bubble" v-html="renderMessage(msg.content)"></div>
+                          <div v-if="getMediaAttachments(msg).length" class="msg-media-grid" :class="`media-grid--${Math.min(getMediaGridData(msg).total, 4)}`">
+                            <div class="media-item" v-for="(item, idx) in getMediaGridData(msg).items" :key="idx">
+                              <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview(msg, item)" />
+                              <video v-else :src="getAttachmentUrl(item)" controls playsinline />
+                              <div v-if="idx === getMediaGridData(msg).items.length - 1 && getMediaGridData(msg).extraCount > 0" class="media-more" @click.stop="openMediaViewer(msg)">+{{ getMediaGridData(msg).extraCount }}</div>
+                            </div>
+                          </div>
+                          <div v-if="getFileAttachments(msg).length" class="msg-file-list">
+                            <div class="file-item" v-for="(item, idx) in getFileAttachments(msg)" :key="idx" @click="openFilePreview(item)">
+                              <span class="file-icon">📄</span>
+                              <span class="file-name">{{ item.name || item.url }}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </template>
+
+                    <template v-else>
+                      <div class="agent-message">
+                        <div class="msg-content">
+                          <div class="msg-header">
+                            <span class="msg-time">{{ formatTime(msg.createTime) }}</span>
+                            <span class="sender-name">
+                              {{ msg.senderName || (msg.senderType === 1 ? 'AI客服' : '客服') }}
+                            </span>
+                            <a-tag v-if="msg.senderType === 1" color="purple" size="small">AI</a-tag>
+                            <a-tag v-else color="green" size="small">客服</a-tag>
+                          </div>
+                          <div class="msg-bubble agent-bubble" :class="{ 'ai-bubble': msg.senderType === 1 }" v-html="renderMessage(msg.content)"></div>
+                          <div v-if="getMediaAttachments(msg).length" class="msg-media-grid" :class="`media-grid--${Math.min(getMediaGridData(msg).total, 4)}`">
+                            <div class="media-item" v-for="(item, idx) in getMediaGridData(msg).items" :key="idx">
+                              <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview(msg, item)" />
+                              <video v-else :src="getAttachmentUrl(item)" controls playsinline />
+                              <div v-if="idx === getMediaGridData(msg).items.length - 1 && getMediaGridData(msg).extraCount > 0" class="media-more" @click.stop="openMediaViewer(msg)">+{{ getMediaGridData(msg).extraCount }}</div>
+                            </div>
+                          </div>
+                          <div v-if="getFileAttachments(msg).length" class="msg-file-list">
+                            <div class="file-item" v-for="(item, idx) in getFileAttachments(msg)" :key="idx" @click="openFilePreview(item)">
+                              <span class="file-icon">📄</span>
+                              <span class="file-name">{{ item.name || item.url }}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <a-avatar :size="32" class="msg-avatar agent-avatar">
+                          {{ msg.senderType === 1 ? 'AI' : (msg.senderName || '客').charAt(0) }}
+                        </a-avatar>
+                      </div>
+                    </template>
                   </div>
                 </template>
-                
-                <!-- 用户消息 -->
-                <template v-else-if="msg.senderType === 0">
-                  <div class="user-message">
-                    <a-avatar :size="32" class="msg-avatar user-avatar">
-                      {{ (msg.senderName || '访').charAt(0) }}
-                    </a-avatar>
-                    <div class="msg-content">
-                      <div class="msg-header">
-                        <span class="sender-name">{{ msg.senderName || '访客' }}</span>
-                        <span class="msg-time">{{ formatTime(msg.createTime) }}</span>
-                      </div>
-                      <div class="msg-bubble user-bubble">{{ msg.content }}</div>
-                      <div v-if="getMediaAttachments(msg).length" class="msg-media-grid" :class="`media-grid--${Math.min(getMediaGridData(msg).total, 4)}`">
-                        <div class="media-item" v-for="(item, idx) in getMediaGridData(msg).items" :key="idx">
-                          <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview(msg, item)" />
-                          <video v-else :src="getAttachmentUrl(item)" controls playsinline />
-                          <div v-if="idx === getMediaGridData(msg).items.length - 1 && getMediaGridData(msg).extraCount > 0" class="media-more" @click.stop="openMediaViewer(msg)">+{{ getMediaGridData(msg).extraCount }}</div>
-                        </div>
-                      </div>
-                      <div v-if="getFileAttachments(msg).length" class="msg-file-list">
-                        <div class="file-item" v-for="(item, idx) in getFileAttachments(msg)" :key="idx" @click="openFilePreview(item)">
-                          <span class="file-icon">📄</span>
-                          <span class="file-name">{{ item.name || item.url }}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </template>
-                
-                <!-- AI/客服消息 -->
-                <template v-else>
-                  <div class="agent-message">
-                    <div class="msg-content">
-                      <div class="msg-header">
-                        <span class="msg-time">{{ formatTime(msg.createTime) }}</span>
-                        <span class="sender-name">
-                          {{ msg.senderName || (msg.senderType === 1 ? 'AI客服' : '客服') }}
-                        </span>
-                        <a-tag v-if="msg.senderType === 1" color="purple" size="small">AI</a-tag>
-                        <a-tag v-else color="green" size="small">客服</a-tag>
-                      </div>
-                      <div class="msg-bubble agent-bubble" :class="{ 'ai-bubble': msg.senderType === 1 }">
-                        {{ msg.content }}
-                      </div>
-                      <div v-if="getMediaAttachments(msg).length" class="msg-media-grid" :class="`media-grid--${Math.min(getMediaGridData(msg).total, 4)}`">
-                        <div class="media-item" v-for="(item, idx) in getMediaGridData(msg).items" :key="idx">
-                          <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview(msg, item)" />
-                          <video v-else :src="getAttachmentUrl(item)" controls playsinline />
-                          <div v-if="idx === getMediaGridData(msg).items.length - 1 && getMediaGridData(msg).extraCount > 0" class="media-more" @click.stop="openMediaViewer(msg)">+{{ getMediaGridData(msg).extraCount }}</div>
-                        </div>
-                      </div>
-                      <div v-if="getFileAttachments(msg).length" class="msg-file-list">
-                        <div class="file-item" v-for="(item, idx) in getFileAttachments(msg)" :key="idx" @click="openFilePreview(item)">
-                          <span class="file-icon">📄</span>
-                          <span class="file-name">{{ item.name || item.url }}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <a-avatar :size="32" class="msg-avatar agent-avatar">
-                      {{ msg.senderType === 1 ? 'AI' : (msg.senderName || '客').charAt(0) }}
-                    </a-avatar>
-                  </div>
-                </template>
+                <a-empty v-else description="暂无消息记录" />
               </div>
-            </template>
-            <a-empty v-else description="暂无消息记录" />
+            </a-spin>
           </div>
-        </a-spin>
+        </div>
+
+        <!-- 右侧：访客信息 -->
+        <div class="split-right">
+          <div class="panel-header">访客信息</div>
+          <div class="panel-body">
+            <a-spin :spinning="visitorLoading">
+              <template v-if="visitorInfo">
+                <div class="info-section">
+                  <div class="section-title">基本信息</div>
+                  <div class="info-item">
+                    <label>访客ID</label>
+                    <span class="info-value">{{ record?.userId || '-' }}</span>
+                  </div>
+                  <div class="info-item">
+                    <label>备注昵称</label>
+                    <span class="info-value">{{ visitorInfo.nickname || '-' }}</span>
+                  </div>
+                  <div class="info-item">
+                    <label>真实姓名</label>
+                    <span class="info-value">{{ visitorInfo.realName || '-' }}</span>
+                  </div>
+                  <div class="info-item">
+                    <label>手机号</label>
+                    <span class="info-value">{{ visitorInfo.phone || '-' }}</span>
+                  </div>
+                  <div class="info-item">
+                    <label>客户等级</label>
+                    <a-rate :value="visitorInfo.level || 0" disabled :count="3" />
+                  </div>
+                  <div class="info-item">
+                    <label>星标</label>
+                    <span class="info-value">{{ visitorInfo.star ? '★' : '-' }}</span>
+                  </div>
+                </div>
+
+                <div class="info-section">
+                  <div class="section-title">访问信息</div>
+                  <div class="info-item">
+                    <label>IP地址</label>
+                    <span class="info-value">{{ record?.userIp || '-' }}</span>
+                  </div>
+                  <div class="info-item">
+                    <label>IP归属地</label>
+                    <span class="info-value">{{ formatGeoLocation() }}</span>
+                  </div>
+                  <div class="info-item">
+                    <label>操作系统</label>
+                    <span class="info-value">{{ record?.userOs || '-' }}{{ record?.userOsVersion ? ' ' + record.userOsVersion : '' }}</span>
+                  </div>
+                  <div class="info-item">
+                    <label>浏览器</label>
+                    <span class="info-value">{{ record?.userBrowser || '-' }}{{ record?.userBrowserVersion ? ' ' + record.userBrowserVersion : '' }}</span>
+                  </div>
+                  <div class="info-item" v-if="record?.userDeviceId">
+                    <label>设备码</label>
+                    <span class="info-value" style="font-family: monospace; font-size: 12px;">{{ record.userDeviceId }}</span>
+                  </div>
+                  <div class="info-item">
+                    <label>浏览器语言</label>
+                    <span class="info-value">{{ record?.userLang || '-' }}</span>
+                  </div>
+                  <div class="info-item">
+                    <label>来源</label>
+                    <span class="info-value">{{ record?.source || '直接访问' }}</span>
+                  </div>
+                  <div class="info-item">
+                    <label>首次访问</label>
+                    <span class="info-value">{{ visitorInfo.firstVisitTime || '-' }}</span>
+                  </div>
+                  <div class="info-item">
+                    <label>访问次数</label>
+                    <span class="info-value">{{ visitorInfo.visitCount || 1 }} 次</span>
+                  </div>
+                </div>
+
+                <div class="info-section">
+                  <div class="section-title">标签</div>
+                  <div class="tags-wrapper">
+                    <template v-if="visitorTags.length">
+                      <a-tag v-for="tag in visitorTags" :key="tag" color="blue">{{ tag }}</a-tag>
+                    </template>
+                    <span v-else class="no-data">暂无标签</span>
+                  </div>
+                </div>
+
+                <div class="info-section">
+                  <div class="section-title">备注</div>
+                  <div class="notes-content">{{ visitorInfo.notes || '暂无备注' }}</div>
+                </div>
+              </template>
+              <a-empty v-else description="暂无访客信息" />
+            </a-spin>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -155,8 +255,51 @@ import { MessageOutlined } from '@ant-design/icons-vue';
 import { Typography } from 'ant-design-vue';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
 import { createImgPreview } from '/@/components/Preview';
+import { useGlobSetting } from '/@/hooks/setting';
+import MarkdownIt from 'markdown-it';
+import hljs from 'highlight.js';
 
 const { Text: ATypographyText } = Typography;
+const globSetting = useGlobSetting();
+
+const md = new MarkdownIt({
+  html: true,
+  linkify: true,
+  typographer: true,
+  highlight: function (str: string, lang: string) {
+    if (lang && hljs.getLanguage(lang)) {
+      try { return hljs.highlight(str, { language: lang }).value; } catch (__) {}
+    }
+    return '';
+  },
+});
+
+function normalizeImgUrls(html: string): string {
+  try {
+    const origin = new URL(globSetting.domainUrl).origin;
+    return html.replace(
+      /(<img[^>]*?\ssrc=["'])(\/[^"']+)(["'])/gi,
+      (_match, pre, path, suf) => `${pre}${origin}${path}${suf}`,
+    );
+  } catch { return html; }
+}
+
+function renderMessage(content: string) {
+  if (!content) return '';
+  content = content.replace(/#\s*\{\s*domainURL\s*\}/g, globSetting.domainUrl);
+  content = normalizeImgUrls(content);
+  const isRichHtml = /^\s*<(?:p|div|ul|ol|h[1-6]|table|blockquote)\b/i.test(content.trim());
+  if (isRichHtml) return content;
+  const hasMarkdown = /!\[[^\]]*]\([^)]*\)|\*\*[^*]+\*\*|```|^\s*#/m.test(content);
+  if (hasMarkdown) return md.render(content);
+  const hasInlineHtml = /<([a-z][\s\S]*?)>/i.test(content);
+  if (hasInlineHtml) return md.render(content);
+  return content
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br>');
+}
 
 // ==================== 附件解析辅助函数 ====================
 
@@ -231,6 +374,37 @@ const record = ref<any>(null);
 const messages = ref<any[]>([]);
 const loading = ref(false);
 const messageListRef = ref<HTMLElement | null>(null);
+const visitorInfo = ref<any>(null);
+const visitorLoading = ref(false);
+
+const endTypeText = computed(() => {
+  const map: Record<number, string> = { 0: '客服结束', 1: '超时结束', 2: '访客结束', 3: '系统清理' };
+  return record.value?.endType != null ? (map[record.value.endType] || '-') : '-';
+});
+
+const visitorTags = computed(() => {
+  if (!visitorInfo.value?.tags) return [];
+  try {
+    const tags = typeof visitorInfo.value.tags === 'string'
+      ? JSON.parse(visitorInfo.value.tags)
+      : visitorInfo.value.tags;
+    return Array.isArray(tags) ? tags : [];
+  } catch {
+    return [];
+  }
+});
+
+function formatResponseTime(seconds: number | null | undefined) {
+  if (seconds == null) return '-';
+  if (seconds === 0) return '立即响应';
+  if (seconds < 60) return `${seconds}秒`;
+  return `${Math.floor(seconds / 60)}分${seconds % 60}秒`;
+}
+
+function formatGeoLocation() {
+  const parts = [record.value?.userCountry, record.value?.userProvince, record.value?.userCity].filter(Boolean);
+  return parts.length ? parts.join('/') : '-';
+}
 const historyPageSize = 100;
 const loadingHistory = ref(false);
 const hasMoreHistory = ref(true);
@@ -259,11 +433,33 @@ const [registerModal] = useModalInner(async (data) => {
   messages.value = [];
   historyBeforeId.value = null;
   hasMoreHistory.value = true;
+  visitorInfo.value = null;
   
   if (record.value?.id) {
     await loadMessages(record.value.id);
+    loadVisitorInfo();
   }
 });
+
+async function loadVisitorInfo() {
+  if (!record.value?.userId) return;
+  visitorLoading.value = true;
+  try {
+    const params: any = { userId: record.value.userId };
+    if (record.value.appId) {
+      params.appId = record.value.appId;
+    }
+    const res = await defHttp.get({
+      url: '/airag/cs/visitor/getByUser',
+      params,
+    });
+    visitorInfo.value = res || null;
+  } catch {
+    visitorInfo.value = null;
+  } finally {
+    visitorLoading.value = false;
+  }
+}
 
 async function loadMessages(conversationId: string) {
   loading.value = true;
@@ -433,15 +629,15 @@ function formatDateSeparator(time: string | Date) {
 
 <style lang="less" scoped>
 .conversation-detail {
-  .info-section {
+  .top-info {
     margin-bottom: 20px;
-    
+
     .user-info {
       display: flex;
       align-items: center;
       gap: 8px;
     }
-    
+
     .satisfaction-comment {
       margin-left: 8px;
       color: #999;
@@ -449,7 +645,101 @@ function formatDateSeparator(time: string | Date) {
       font-style: italic;
     }
   }
-  
+
+  .split-layout {
+    display: flex;
+    gap: 16px;
+    margin-top: 16px;
+    min-height: 500px;
+  }
+
+  .split-left {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .split-right {
+    width: 320px;
+    flex-shrink: 0;
+    border: 1px solid #f0f0f0;
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+
+    .panel-header {
+      padding: 12px 16px;
+      font-size: 14px;
+      font-weight: 600;
+      background: #fafafa;
+      border-bottom: 1px solid #f0f0f0;
+    }
+
+    .panel-body {
+      flex: 1;
+      overflow-y: auto;
+      max-height: 530px;
+      padding: 0 16px 16px;
+    }
+
+    .info-section {
+      padding-top: 14px;
+
+      &:not(:last-child) {
+        padding-bottom: 10px;
+        border-bottom: 1px solid #f0f0f0;
+      }
+
+      .section-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: #333;
+        margin-bottom: 10px;
+        padding-left: 8px;
+        border-left: 3px solid #1890ff;
+      }
+    }
+
+    .info-item {
+      display: flex;
+      align-items: baseline;
+      padding: 4px 0;
+      font-size: 13px;
+      line-height: 1.6;
+
+      label {
+        width: 80px;
+        flex-shrink: 0;
+        color: #999;
+      }
+
+      .info-value {
+        flex: 1;
+        color: #333;
+        word-break: break-all;
+      }
+    }
+
+    .tags-wrapper {
+      padding: 4px 0;
+
+      .no-data {
+        color: #999;
+        font-size: 13px;
+      }
+    }
+
+    .notes-content {
+      padding: 8px 10px;
+      background: #fafafa;
+      border-radius: 4px;
+      color: #555;
+      font-size: 13px;
+      min-height: 36px;
+      white-space: pre-wrap;
+    }
+  }
+
   .message-section {
     .section-header {
       display: flex;
@@ -458,7 +748,7 @@ function formatDateSeparator(time: string | Date) {
       padding: 12px 0;
       border-bottom: 1px solid #f0f0f0;
       margin-bottom: 12px;
-      
+
       .section-title {
         font-size: 15px;
         font-weight: 500;
@@ -466,7 +756,7 @@ function formatDateSeparator(time: string | Date) {
         align-items: center;
         gap: 8px;
       }
-      
+
       .message-count {
         color: #999;
         font-size: 13px;
@@ -475,7 +765,7 @@ function formatDateSeparator(time: string | Date) {
   }
 
   .message-list {
-    max-height: 450px;
+    max-height: 480px;
     overflow-y: auto;
     padding: 16px;
     background: linear-gradient(180deg, #f8f9fa 0%, #f0f2f5 100%);
@@ -484,17 +774,16 @@ function formatDateSeparator(time: string | Date) {
 
   .message-item {
     margin-bottom: 16px;
-    
+
     &:last-child {
       margin-bottom: 0;
     }
   }
-  
-  // 系统消息
+
   .system-message {
     text-align: center;
     padding: 8px 0;
-    
+
     .system-text {
       display: inline-block;
       padding: 4px 16px;
@@ -503,7 +792,7 @@ function formatDateSeparator(time: string | Date) {
       color: #999;
       font-size: 12px;
     }
-    
+
     .system-time {
       display: block;
       margin-top: 4px;
@@ -511,100 +800,127 @@ function formatDateSeparator(time: string | Date) {
       color: #bbb;
     }
   }
-  
-  // 用户消息（左侧）
+
   .user-message {
     display: flex;
     align-items: flex-start;
     gap: 10px;
-    
+
     .user-avatar {
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: #fff;
       flex-shrink: 0;
     }
-    
+
     .msg-content {
       max-width: 70%;
     }
-    
+
     .msg-header {
       display: flex;
       align-items: center;
       gap: 8px;
       margin-bottom: 4px;
-      
+
       .sender-name {
         font-size: 12px;
         color: #666;
         font-weight: 500;
       }
-      
+
       .msg-time {
         font-size: 11px;
         color: #bbb;
       }
     }
-    
+
     .user-bubble {
       background: #fff;
       border: 1px solid #e8e8e8;
       border-radius: 0 12px 12px 12px;
     }
   }
-  
-  // 客服/AI消息（右侧）
+
   .agent-message {
     display: flex;
     align-items: flex-start;
     gap: 10px;
     justify-content: flex-end;
-    
+
     .agent-avatar {
       background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
       color: #fff;
       flex-shrink: 0;
     }
-    
+
     .msg-content {
       max-width: 70%;
     }
-    
+
     .msg-header {
       display: flex;
       align-items: center;
       gap: 8px;
       margin-bottom: 4px;
       justify-content: flex-end;
-      
+
       .sender-name {
         font-size: 12px;
         color: #666;
         font-weight: 500;
       }
-      
+
       .msg-time {
         font-size: 11px;
         color: #bbb;
       }
     }
-    
+
     .agent-bubble {
       background: #e6f7ff;
       border-radius: 12px 0 12px 12px;
-      
+
       &.ai-bubble {
         background: #f9f0ff;
       }
     }
   }
-  
+
   .msg-bubble {
     padding: 10px 14px;
     font-size: 14px;
     line-height: 1.6;
     word-break: break-word;
-    white-space: pre-wrap;
+
+    :deep(p) {
+      margin: 0 0 0.5em;
+      &:last-child { margin-bottom: 0; }
+    }
+
+    :deep(img) {
+      max-width: 100%;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    :deep(pre) {
+      background: #f5f5f5;
+      border-radius: 6px;
+      padding: 10px;
+      overflow-x: auto;
+      margin: 6px 0;
+      font-size: 13px;
+    }
+
+    :deep(code) {
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 13px;
+    }
+
+    :deep(a) {
+      color: #1890ff;
+      text-decoration: underline;
+    }
   }
 
   .msg-media-grid {

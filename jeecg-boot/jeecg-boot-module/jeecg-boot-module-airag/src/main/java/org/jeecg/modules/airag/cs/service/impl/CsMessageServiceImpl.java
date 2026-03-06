@@ -150,7 +150,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
         saveToMongo(userMessage);
         
         // 更新会话最后消息
-        conversationService.updateLastMessage(conversationId, content);
+        conversationService.updateLastMessage(conversationId, content, 0);
         
         // 重置超时提醒标记（用户活跃，取消超时倒计时）
         conversationService.resetTimeoutWarning(conversationId);
@@ -207,7 +207,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
         saveToMongo(userMessage);
 
         // 更新会话最后消息
-        conversationService.updateLastMessage(conversationId, content);
+        conversationService.updateLastMessage(conversationId, content, 0);
 
         // 重置超时提醒标记
         conversationService.resetTimeoutWarning(conversationId);
@@ -250,7 +250,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
         saveToMongo(userMessage);
 
         // 更新会话最后消息
-        conversationService.updateLastMessage(conversationId, content);
+        conversationService.updateLastMessage(conversationId, content, 0);
 
         // 重置超时提醒标记
         conversationService.resetTimeoutWarning(conversationId);
@@ -388,7 +388,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
         // 更新会话最后消息 + 清除未读 + 清除访客等待标记（异步）
         String lastMessage = buildMessagePreview(content, msgType, extra);
         asyncTaskExecutor.submitConversation(() -> {
-            conversationService.updateLastMessage(conversationId, lastMessage);
+            conversationService.updateLastMessage(conversationId, lastMessage, 2);
             conversationService.clearUnread(conversationId);
             // 客服回复后清除访客等待标记（FAQ自动回复也算已回复）
             conversationService.clearVisitorLastMsgTime(conversationId);
@@ -470,7 +470,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
         CsMessage aiMessage = CsMessage.createAiMessage(conversationId, displayName, app.getPrologue());
 
         saveToMongo(aiMessage);
-        conversationService.updateLastMessage(conversationId, app.getPrologue());
+        conversationService.updateLastMessage(conversationId, app.getPrologue(), 1);
 
         pushToUser(conversationId, aiMessage);
 
@@ -484,11 +484,38 @@ public class CsMessageServiceImpl implements ICsMessageService {
 
     @Override
     public void sendAutoMessages(String conversationId, String agentId, String agentName, String userLang) {
+        sendConfiguredAutoMessages(conversationId, agentId, agentName, userLang, true);
+    }
+
+    @Override
+    public void sendVisitorAutoMessagesAsAgent(String conversationId, String agentId, String agentName, String userLang) {
+        sendConfiguredAutoMessages(conversationId, agentId, agentName, userLang, false);
+    }
+
+    private void sendConfiguredAutoMessages(String conversationId, String agentId, String agentName, String userLang,
+                                            boolean switchToManualMode) {
         if (oConvertUtils.isEmpty(conversationId) || oConvertUtils.isEmpty(agentId)) {
             return;
         }
 
-        // 从配置读取自动消息
+        List<String> contents = resolveAutoMessageContents(userLang);
+        if (contents.isEmpty()) {
+            return;
+        }
+
+        for (String content : contents) {
+            if (switchToManualMode) {
+                sendAgentMessage(conversationId, agentId, agentName, content, null, null);
+            } else {
+                sendAgentWelcomeMessage(conversationId, agentId, agentName, content);
+            }
+        }
+
+        log.info("[CS-Message] 自动消息已发送: conversationId={}, agentId={}, lang={}, count={}, switchToManual={}",
+                conversationId, agentId, mapUserLang(userLang), contents.size(), switchToManualMode);
+    }
+
+    private List<String> resolveAutoMessageContents(String userLang) {
         String autoMsgRedisKey = "cs:global:auto_messages";
         String autoMsgConfigKey = "auto_messages";
         String json = redisTemplate.opsForValue().get(autoMsgRedisKey);
@@ -500,7 +527,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
             }
         }
         if (json == null || json.isEmpty()) {
-            return;
+            return Collections.emptyList();
         }
 
         try {
@@ -508,7 +535,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
             String defaultLang = autoConfig.getString("defaultLang");
             JSONObject languages = autoConfig.getJSONObject("languages");
             if (languages == null || languages.isEmpty()) {
-                return;
+                return Collections.emptyList();
             }
 
             // 语言映射：将浏览器语言映射到配置中的语言key
@@ -530,23 +557,67 @@ public class CsMessageServiceImpl implements ICsMessageService {
             }
 
             if (messages == null || messages.isEmpty()) {
-                return;
+                return Collections.emptyList();
             }
 
-            // 依次发送自动消息
+            List<String> contents = new ArrayList<>();
             for (int i = 0; i < messages.size(); i++) {
                 JSONObject msgObj = messages.getJSONObject(i);
                 String content = msgObj.getString("content");
                 if (oConvertUtils.isNotEmpty(content)) {
-                    sendAgentMessage(conversationId, agentId, agentName, content, null, null);
+                    contents.add(content);
                 }
             }
-
-            log.info("[CS-Message] 自动消息已发送: conversationId={}, agentId={}, lang={}, count={}",
-                    conversationId, agentId, mappedLang, messages.size());
+            return contents;
         } catch (Exception e) {
-            log.warn("[CS-Message] 发送自动消息失败: conversationId={}, error={}", conversationId, e.getMessage());
+            log.warn("[CS-Message] 解析自动消息失败: userLang={}, error={}", userLang, e.getMessage());
+            return Collections.emptyList();
         }
+    }
+
+    private CsMessage sendAgentWelcomeMessage(String conversationId, String agentId, String agentName, String content) {
+        log.info("[CS-Message] 发送客服欢迎消息: conversationId={}, agentId={}", conversationId, agentId);
+
+        CsConversation conversation = conversationService.getConversation(conversationId);
+        if (conversation == null) {
+            return null;
+        }
+
+        CsMessage agentMessage = CsMessage.createAgentMessage(conversationId, agentId, agentName, content);
+        agentMessage.setSenderAvatar(resolveAgentAvatar(agentId));
+        agentMessage.setSenderName(agentName);
+
+        asyncTaskExecutor.submitMongo(() -> saveToMongo(agentMessage));
+
+        String lastMessage = buildMessagePreview(content, null, null);
+        asyncTaskExecutor.submitConversation(() -> {
+            conversationService.updateLastMessage(conversationId, lastMessage, 2);
+            conversationService.clearUnread(conversationId);
+        });
+
+        CsConversation conversationSnapshot = conversation;
+        asyncTaskExecutor.submitWs(() -> {
+            boolean delivered = pushToUser(conversationId, agentMessage);
+            if (!delivered) {
+                String userId = conversationSnapshot.getUserId();
+                Map<String, Object> notifyExtra = new HashMap<>();
+                notifyExtra.put("reason", "USER_OFFLINE");
+                notifyExtra.put("userId", userId);
+                notifyExtra.put("messageId", agentMessage.getId());
+                CsWebSocketMessage deliveryFailed = CsWebSocketMessage.builder()
+                        .type("delivery_failed")
+                        .conversationId(conversationId)
+                        .content("用户不在线，消息未送达")
+                        .extra(notifyExtra)
+                        .timestamp(agentMessage.getCreateTime())
+                        .build();
+                sessionManager.sendToAgent(agentId, deliveryFailed);
+            }
+            pushToOtherAgents(conversationId, agentId, agentMessage);
+        });
+
+        aiSuggestionCache.remove(conversationId);
+        return agentMessage;
     }
 
     /**
@@ -577,7 +648,8 @@ public class CsMessageServiceImpl implements ICsMessageService {
         saveToMongo(message);
         
         // 更新会话
-        conversationService.updateLastMessage(message.getConversationId(), message.getContent());
+        conversationService.updateLastMessage(message.getConversationId(), message.getContent(),
+                message.getSenderType() != null ? message.getSenderType() : 3);
         
         return message;
     }
@@ -726,7 +798,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
         saveToMongo(message);
         
         // 更新会话
-        conversationService.updateLastMessage(conversationId, content);
+        conversationService.updateLastMessage(conversationId, content, 2);
         
         // 推送给用户
         pushToUser(conversationId, message);
@@ -1150,7 +1222,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
             saveToMongo(aiMessage);
             
             // 更新会话
-            conversationService.updateLastMessage(conversationId, aiReply);
+            conversationService.updateLastMessage(conversationId, aiReply, 1);
             
             // 发送完成消息
             CsWebSocketMessage completeMsg = CsWebSocketMessage.builder()

@@ -57,6 +57,8 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     /** AI开关配置 */
     private static final String AI_ENABLED_REDIS_KEY = "cs:global:ai_enabled";
     private static final String AI_ENABLED_CONFIG_KEY = "ai_enabled";
+    private static final String AI_PROLOGUE_ENABLED_REDIS_KEY = "cs:global:ai_prologue_enabled";
+    private static final String AI_PROLOGUE_ENABLED_CONFIG_KEY = "ai_prologue_enabled";
 
     /** 对话分配配置 */
     private static final String CONVERSATION_ASSIGN_REDIS_KEY = "cs:global:conversation_assign";
@@ -575,6 +577,42 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
         saveGlobalConfigValue(AI_ENABLED_CONFIG_KEY, value);
         redisTemplate.opsForValue().set(AI_ENABLED_REDIS_KEY, value);
         log.info("[CS-Agent] AI开关已更新: enabled={}", enabled);
+        return Result.OK("设置成功");
+    }
+
+    /**
+     * 获取AI开场白开关状态（全局）
+     */
+    @Operation(summary = "获取AI开场白开关状态（全局）")
+    @GetMapping("/global/ai-prologue-enabled")
+    public Result<java.util.Map<String, Object>> getAiPrologueEnabled() {
+        String value = redisTemplate.opsForValue().get(AI_PROLOGUE_ENABLED_REDIS_KEY);
+        if (value == null) {
+            value = getGlobalConfigValue(AI_PROLOGUE_ENABLED_CONFIG_KEY);
+            if (value != null) {
+                redisTemplate.opsForValue().set(AI_PROLOGUE_ENABLED_REDIS_KEY, value);
+            }
+        }
+        boolean enabled = value == null || "true".equalsIgnoreCase(value);
+        java.util.Map<String, Object> result = new java.util.HashMap<>();
+        result.put("enabled", enabled);
+        return Result.OK(result);
+    }
+
+    /**
+     * 设置AI开场白开关（全局）
+     */
+    @Operation(summary = "设置AI开场白开关（全局）")
+    @PutMapping("/global/ai-prologue-enabled")
+    public Result<String> setAiPrologueEnabled(@RequestBody java.util.Map<String, Object> params) {
+        Boolean enabled = (Boolean) params.get("enabled");
+        if (enabled == null) {
+            enabled = true;
+        }
+        String value = enabled.toString();
+        saveGlobalConfigValue(AI_PROLOGUE_ENABLED_CONFIG_KEY, value);
+        redisTemplate.opsForValue().set(AI_PROLOGUE_ENABLED_REDIS_KEY, value);
+        log.info("[CS-Agent] AI开场白开关已更新: enabled={}", enabled);
         return Result.OK("设置成功");
     }
 

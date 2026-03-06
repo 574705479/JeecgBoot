@@ -102,6 +102,16 @@ public interface ICsMessageService {
     void sendAutoMessages(String conversationId, String agentId, String agentName, String userLang);
 
     /**
+     * 发送自动消息作为会话欢迎消息（客服身份，但不切换会话回复模式）
+     *
+     * @param conversationId 会话ID
+     * @param agentId        客服ID
+     * @param agentName      客服名称
+     * @param userLang       用户浏览器语言
+     */
+    void sendVisitorAutoMessagesAsAgent(String conversationId, String agentId, String agentName, String userLang);
+
+    /**
      * 发送消息（通用）
      * 
      * @param message 消息实体

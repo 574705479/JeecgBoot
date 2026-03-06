@@ -68,6 +68,21 @@
               @change="onAiEnabledChange"
             />
           </div>
+
+          <div class="setting-item" v-if="aiEnabled">
+            <div class="setting-label">
+              <RobotOutlined />
+              <span>使用AI开场白</span>
+              <a-tag color="orange" size="small">全局</a-tag>
+            </div>
+            <div class="setting-desc">开启时使用AI应用中的开场白作为欢迎语；关闭则使用自动消息内容作为欢迎语</div>
+            <a-switch
+              v-model:checked="aiPrologueEnabled"
+              checked-children="开启"
+              un-checked-children="关闭"
+              @change="onAiPrologueEnabledChange"
+            />
+          </div>
           
           <!-- 访客AI应用（全局配置，仅AI开启时显示） -->
           <div class="setting-item" v-if="aiEnabled">
@@ -1251,6 +1266,7 @@ const visitorAppId = ref<string | undefined>(undefined);   // 访客AI应用
 const aiAppList = ref<any[]>([]);
 const showSettingsDrawer = ref(false);
 const aiEnabled = ref(true);  // AI自动回复开关
+const aiPrologueEnabled = ref(true); // AI开场白开关
 
 // 客服超时未回复配置
 const agentTimeoutConfig = ref({ enabled: false, seconds: 20 });
@@ -1665,6 +1681,7 @@ onMounted(async () => {
   await Promise.all([
     loadAiAppList(),
     loadAiEnabled(),              // 加载AI开关状态
+    loadAiPrologueEnabled(),      // 加载AI开场白开关状态
     loadGlobalVisitorApp(),       // 加载全局访客AI应用配置
     loadAgentTimeoutConfig(),     // 加载客服超时未回复配置
     loadConversations(),
@@ -2219,6 +2236,16 @@ async function loadAiEnabled() {
   }
 }
 
+// 加载AI开场白开关状态
+async function loadAiPrologueEnabled() {
+  try {
+    const res = await httpGet({ url: '/cs/agent/global/ai-prologue-enabled' });
+    aiPrologueEnabled.value = res?.enabled !== false;
+  } catch (e) {
+    console.error('加载AI开场白开关状态失败', e);
+  }
+}
+
 // AI开关切换
 async function onAiEnabledChange(checked: boolean) {
   try {
@@ -2234,6 +2261,23 @@ async function onAiEnabledChange(checked: boolean) {
     message.error('设置失败');
     // 恢复状态
     aiEnabled.value = !checked;
+  }
+}
+
+// AI开场白开关切换
+async function onAiPrologueEnabledChange(checked: boolean) {
+  try {
+    await httpPut({
+      url: '/cs/agent/global/ai-prologue-enabled',
+      data: { enabled: checked }
+    });
+    aiPrologueEnabled.value = checked;
+    message.success(checked ? 'AI开场白已开启' : 'AI开场白已关闭');
+    console.log('[Workbench] AI开场白开关已更新:', checked);
+  } catch (e) {
+    console.error('设置AI开场白开关失败', e);
+    message.error('设置失败');
+    aiPrologueEnabled.value = !checked;
   }
 }
 
@@ -3866,7 +3910,6 @@ function handleWsMessage(data: any) {
         const statusData = data.extra || data;
         const changedAgentId = statusData.agentId;
         const newStatus = statusData.status;
-        const statusText = statusData.statusText;
         
         // 如果转接列表正在显示，刷新可用客服列表
         if (showTransferModal.value) {

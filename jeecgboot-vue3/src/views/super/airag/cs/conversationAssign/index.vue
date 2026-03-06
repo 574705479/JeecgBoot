@@ -114,6 +114,50 @@
             </div>
           </div>
         </div>
+
+        <a-divider />
+
+        <!-- 客服超时未回复，访客端提示设置 -->
+        <div class="config-section">
+          <div class="section-title">客服超时未回复，访客端提示设置</div>
+          <div class="section-body">
+            <div class="inline-setting">
+              <span class="setting-label">功能开启：</span>
+              <a-switch 
+                v-model:checked="config.agentTimeoutVisitorNotify.enabled" 
+                @change="saveConfig"
+              />
+            </div>
+            <div class="inline-setting" style="margin-top: 12px;">
+              <span class="setting-label">客服回复超时阈值：</span>
+              <a-button size="small" @click="decrementVisitorNotifyTimeout">-</a-button>
+              <a-input-number 
+                v-model:value="config.agentTimeoutVisitorNotify.seconds" 
+                :min="1" 
+                :max="999"
+                size="small"
+                style="width: 80px; margin: 0 4px;"
+                @change="saveConfig"
+              />
+              <a-button size="small" @click="incrementVisitorNotifyTimeout">+</a-button>
+              <span class="setting-unit">秒</span>
+            </div>
+            <div class="inline-setting" style="margin-top: 12px;">
+              <span class="setting-label">客服超时未回复提示语：</span>
+            </div>
+            <a-textarea
+              v-model:value="config.agentTimeoutVisitorNotify.message"
+              :rows="3"
+              placeholder="请输入超时未回复提示语"
+              style="margin-top: 8px; max-width: 500px;"
+              @change="saveConfig"
+            />
+            <div class="setting-tips">
+              <span class="desc-icon">●</span>
+              超时时长在1-999秒之间。功能开关开启后，有填写超时未回复提示语，则访客端客服超时未回复后，系统以通知格式发送提示语给访客
+            </div>
+          </div>
+        </div>
       </a-spin>
     </a-card>
   </div>
@@ -142,6 +186,11 @@ const config = ref({
     enabled: false,
     seconds: 20,
   },
+  agentTimeoutVisitorNotify: {
+    enabled: false,
+    seconds: 30,
+    message: '',
+  },
 });
 
 onMounted(async () => {
@@ -166,6 +215,11 @@ async function loadConfig() {
         agentTimeoutReminder: {
           enabled: data.agentTimeoutReminder?.enabled === true,
           seconds: data.agentTimeoutReminder?.seconds ?? 20,
+        },
+        agentTimeoutVisitorNotify: {
+          enabled: data.agentTimeoutVisitorNotify?.enabled === true,
+          seconds: data.agentTimeoutVisitorNotify?.seconds ?? 30,
+          message: data.agentTimeoutVisitorNotify?.message ?? '',
         },
       };
     }
@@ -217,6 +271,20 @@ function decrementTimeout() {
 function incrementTimeout() {
   if (config.value.agentTimeoutReminder.seconds < 999) {
     config.value.agentTimeoutReminder.seconds++;
+    saveConfig();
+  }
+}
+
+function decrementVisitorNotifyTimeout() {
+  if (config.value.agentTimeoutVisitorNotify.seconds > 1) {
+    config.value.agentTimeoutVisitorNotify.seconds--;
+    saveConfig();
+  }
+}
+
+function incrementVisitorNotifyTimeout() {
+  if (config.value.agentTimeoutVisitorNotify.seconds < 999) {
+    config.value.agentTimeoutVisitorNotify.seconds++;
     saveConfig();
   }
 }

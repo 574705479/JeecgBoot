@@ -1574,6 +1574,8 @@ async function initConversation() {
       source: visitorSource.value || undefined,
       deviceId: generateDeviceId(),
       lang: navigator.language || navigator.userLanguage || 'en',
+      landingPage: window.location.href,
+      referrerPage: document.referrer || undefined,
     };
     if (preferredAgentId.value) {
       createData.agentId = preferredAgentId.value;

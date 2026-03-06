@@ -91,6 +91,16 @@ public class CsConversationTimeoutTask {
                     checkAgentTimeoutReminder(timeoutSeconds);
                 }
             }
+
+            // 客服超时未回复，访客端提示
+            JSONObject visitorNotifyConfig = config.getJSONObject("agentTimeoutVisitorNotify");
+            if (visitorNotifyConfig != null && visitorNotifyConfig.getBooleanValue("enabled")) {
+                int timeoutSeconds = visitorNotifyConfig.getIntValue("seconds");
+                String notifyMessage = visitorNotifyConfig.getString("message");
+                if (timeoutSeconds > 0 && notifyMessage != null && !notifyMessage.isEmpty()) {
+                    checkAgentTimeoutVisitorNotify(timeoutSeconds, notifyMessage);
+                }
+            }
         } catch (Exception e) {
             log.error("[CS-Timeout] 检查超时会话失败", e);
         }
@@ -148,7 +158,7 @@ public class CsConversationTimeoutTask {
         for (CsConversation conv : conversations) {
             try {
                 String reason = String.format("用户%d分钟无响应，会话自动结束", userInactiveTimeout);
-                conversationService.closeConversation(conv.getId(), reason);
+                conversationService.closeConversation(conv.getId(), reason, CsConversation.END_TYPE_TIMEOUT);
                 
                 log.info("[CS-Timeout] 自动结束超时会话: conversationId={}, lastMessageTime={}", 
                         conv.getId(), conv.getLastMessageTime());
@@ -221,5 +231,35 @@ public class CsConversationTimeoutTask {
             log.warn("[CS-Timeout] 读取对话分配配置失败", e);
         }
         return null;
+    }
+
+    /**
+     * 检查客服超时未回复并向访客端发送系统消息
+     */
+    private void checkAgentTimeoutVisitorNotify(int timeoutSeconds, String notifyMessage) {
+        Date timeoutTime = new Date(System.currentTimeMillis() - (long)timeoutSeconds * 1000L);
+        
+        LambdaQueryWrapper<CsConversation> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(CsConversation::getStatus, CsConversation.STATUS_ASSIGNED)
+                .isNotNull(CsConversation::getVisitorLastMsgTime)
+                .lt(CsConversation::getVisitorLastMsgTime, timeoutTime)
+                .and(w -> w.isNull(CsConversation::getAgentTimeoutNotified)
+                        .or()
+                        .eq(CsConversation::getAgentTimeoutNotified, false));
+        
+        List<CsConversation> conversations = conversationService.list(queryWrapper);
+        
+        for (CsConversation conv : conversations) {
+            try {
+                messageService.sendSystemMessage(conv.getId(), notifyMessage, true);
+                
+                conv.setAgentTimeoutNotified(true);
+                conversationService.updateById(conv);
+                
+                log.info("[CS-Timeout] 向访客发送客服超时提醒: conversationId={}", conv.getId());
+            } catch (Exception e) {
+                log.warn("[CS-Timeout] 向访客发送客服超时提醒失败: conversationId={}", conv.getId(), e);
+            }
+        }
     }
 }

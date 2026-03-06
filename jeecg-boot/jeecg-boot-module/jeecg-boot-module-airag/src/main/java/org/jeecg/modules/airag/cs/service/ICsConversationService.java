@@ -36,11 +36,13 @@ public interface ICsConversationService extends IService<CsConversation> {
      * @param deviceId  设备指纹
      * @param userLang          浏览器语言
      * @param preferredAgentId  指定客服ID（可选，为null时自动分配）
+     * @param landingPage       着陆页URL（可选）
+     * @param referrerPage      来源页URL（可选）
      * @return 会话
      */
     CsConversation createConversation(String appId, String userId, String userName, String source,
                                       String userIp, String userAgent, String deviceId, String userLang,
-                                      String preferredAgentId);
+                                      String preferredAgentId, String landingPage, String referrerPage);
 
     /**
      * 获取或创建会话 (用户发消息时调用)
@@ -84,6 +86,15 @@ public interface ICsConversationService extends IService<CsConversation> {
      * @param reason         结束原因（如："客服主动结束"、"会话超时自动结束"等）
      */
     void closeConversation(String conversationId, String reason);
+
+    /**
+     * 结束会话（带原因和结束方式）
+     * 
+     * @param conversationId 会话ID
+     * @param reason         结束原因
+     * @param endType        结束方式: 0-客服主动 1-超时自动 2-访客结束 3-系统清理
+     */
+    void closeConversation(String conversationId, String reason, Integer endType);
 
     // ==================== 回复模式管理 ====================
 
@@ -141,9 +152,14 @@ public interface ICsConversationService extends IService<CsConversation> {
      * @param filterAgentId  按指定客服筛选（用于会话记录查询）
      * @return 会话列表
      */
-    IPage<CsConversation> getConversationListAdvanced(Page<CsConversation> page, String agentId, 
+    IPage<CsConversation> getConversationListAdvanced(Page<CsConversation> page, String agentId,
                                                        Integer status, String filter,
-                                                       Boolean includeDeleted, String filterAgentId);
+                                                       Boolean includeDeleted, String filterAgentId,
+                                                       String id, String userId, Integer endType,
+                                                       Integer satisfaction, String source,
+                                                       String landingPage, String referrerPage,
+                                                       String createTimeBegin, String createTimeEnd,
+                                                       String endTimeBegin, String endTimeEnd);
 
     /**
      * 获取会话统计数据
@@ -196,6 +212,15 @@ public interface ICsConversationService extends IService<CsConversation> {
      * @param message        消息内容
      */
     void updateLastMessage(String conversationId, String message);
+
+    /**
+     * 更新最后消息（含角色计数）
+     * 
+     * @param conversationId 会话ID
+     * @param message        消息内容
+     * @param senderType     发送者类型: 0-访客 1-AI 2-客服 3-系统
+     */
+    void updateLastMessage(String conversationId, String message, int senderType);
 
     /**
      * 增加未读消息数

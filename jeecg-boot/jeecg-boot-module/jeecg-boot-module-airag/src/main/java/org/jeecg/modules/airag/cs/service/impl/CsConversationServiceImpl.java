@@ -50,6 +50,8 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
 
     private static final String AI_ENABLED_REDIS_KEY = "cs:global:ai_enabled";
     private static final String AI_ENABLED_CONFIG_KEY = "ai_enabled";
+    private static final String AI_PROLOGUE_ENABLED_REDIS_KEY = "cs:global:ai_prologue_enabled";
+    private static final String AI_PROLOGUE_ENABLED_CONFIG_KEY = "ai_prologue_enabled";
     private static final String CONVERSATION_ASSIGN_REDIS_KEY = "cs:global:conversation_assign";
     private static final String CONVERSATION_ASSIGN_CONFIG_KEY = "conversation_assign";
 
@@ -82,9 +84,10 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
     @Transactional(rollbackFor = Exception.class)
     public CsConversation createConversation(String appId, String userId, String userName, String source,
                                              String userIp, String userAgent, String deviceId, String userLang,
-                                             String preferredAgentId) {
+                                             String preferredAgentId, String landingPage, String referrerPage) {
         // 读取AI开关和对话分配配置
         boolean aiEnabled = isAiEnabled();
+        boolean aiPrologueEnabled = isAiPrologueEnabled();
         JSONObject assignConfig = getConversationAssignConfig();
 
         CsAgent assignedAgent = null;
@@ -151,11 +154,16 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         // 设置浏览器语言
         conversation.setUserLang(userLang);
 
+        // 设置着陆页和来源页
+        conversation.setLandingPage(landingPage);
+        conversation.setReferrerPage(referrerPage);
+
         if (assignedAgent != null) {
             // 有可用客服，直接分配
             conversation.setOwnerAgentId(assignedAgent.getId());
             conversation.setStatus(CsConversation.STATUS_ASSIGNED);
             conversation.setAssignTime(new Date());
+            conversation.setFirstResponseSeconds(0);
             // AI开关决定回复模式
             conversation.setReplyMode(aiEnabled ? CsConversation.REPLY_MODE_AI_AUTO : CsConversation.REPLY_MODE_MANUAL);
             
@@ -190,12 +198,17 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             log.info("[CS-Conversation] 创建会话(无在线客服): id={}, userId={}", conversation.getId(), userId);
         }
 
-        // 仅AI开启时发送AI开场白
+        // AI欢迎消息分支：AI开启时可独立控制是否使用AI开场白
         if (aiEnabled) {
             try {
-                messageService.sendVisitorPrologue(conversation.getId());
+                if (aiPrologueEnabled) {
+                    messageService.sendVisitorPrologue(conversation.getId());
+                } else if (assignedAgent != null) {
+                    messageService.sendVisitorAutoMessagesAsAgent(conversation.getId(),
+                            assignedAgent.getId(), assignedAgent.getNickname(), conversation.getUserLang());
+                }
             } catch (Exception e) {
-                log.warn("[CS-Conversation] 发送开场白失败: {}", e.getMessage());
+                log.warn("[CS-Conversation] 发送欢迎消息失败: {}", e.getMessage());
             }
         } else if (assignedAgent != null) {
             // AI关闭时发送自动消息（如果有配置）
@@ -319,6 +332,26 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
     }
 
     /**
+     * 读取AI开场白开关状态
+     */
+    private boolean isAiPrologueEnabled() {
+        try {
+            String value = redisTemplate.opsForValue().get(AI_PROLOGUE_ENABLED_REDIS_KEY);
+            if (value == null) {
+                CsGlobalConfig config = csGlobalConfigMapper.selectById(AI_PROLOGUE_ENABLED_CONFIG_KEY);
+                value = config != null ? config.getConfigValue() : null;
+                if (value != null) {
+                    redisTemplate.opsForValue().set(AI_PROLOGUE_ENABLED_REDIS_KEY, value);
+                }
+            }
+            return value == null || "true".equalsIgnoreCase(value);
+        } catch (Exception e) {
+            log.warn("[CS-Conversation] 读取AI开场白开关失败", e);
+            return true;
+        }
+    }
+
+    /**
      * 读取对话分配配置
      */
     private JSONObject getConversationAssignConfig() {
@@ -393,7 +426,7 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             
             // 不存在则通过createConversation创建（自动分配）
             // 注意：指定ID的场景已不常见，走统一创建逻辑
-            return createConversation(appId, userId, userName, null, null, null, null, null, null);
+            return createConversation(appId, userId, userName, null, null, null, null, null, null, null, null);
         }
         
         // 没有指定ID，查找用户的活跃会话
@@ -403,7 +436,7 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         }
         
         // 创建新会话 (createConversation内部会广播)
-        return createConversation(appId, userId, userName, null, null, null, null, null, null);
+        return createConversation(appId, userId, userName, null, null, null, null, null, null, null, null);
     }
 
     @Override
@@ -484,6 +517,10 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             conversation.setUpdateTime(new Date());
             // ★ 客服接入后切换为手动模式，终止AI自动回复
             conversation.setReplyMode(CsConversation.REPLY_MODE_MANUAL);
+            if (conversation.getFirstResponseSeconds() == null && conversation.getCreateTime() != null) {
+                long seconds = (System.currentTimeMillis() - conversation.getCreateTime().getTime()) / 1000;
+                conversation.setFirstResponseSeconds((int) seconds);
+            }
             updateById(conversation);
         }
         
@@ -535,13 +572,19 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void closeConversation(String conversationId) {
-        closeConversation(conversationId, "会话已结束");
+        closeConversation(conversationId, "会话已结束", CsConversation.END_TYPE_AGENT_CLOSE);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void closeConversation(String conversationId, String reason) {
-        log.info("[CS-Conversation] 结束会话: conversationId={}, reason={}", conversationId, reason);
+        closeConversation(conversationId, reason, CsConversation.END_TYPE_AGENT_CLOSE);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void closeConversation(String conversationId, String reason, Integer endType) {
+        log.info("[CS-Conversation] 结束会话: conversationId={}, reason={}, endType={}", conversationId, reason, endType);
         
         CsConversation conversation = getById(conversationId);
         if (conversation == null) {
@@ -558,6 +601,9 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         conversation.setStatus(CsConversation.STATUS_CLOSED);
         conversation.setEndTime(new Date());
         conversation.setUpdateTime(new Date());
+        if (endType != null) {
+            conversation.setEndType(endType);
+        }
         updateById(conversation);
         
         // 减少客服会话数 & 增加累计服务数
@@ -827,14 +873,22 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
     public IPage<CsConversation> getConversationList(Page<CsConversation> page, String agentId, 
                                                       Integer status, String filter) {
         // 调用高级版本，不包含已删除记录，不按特定客服筛选
-        return getConversationListAdvanced(page, agentId, status, filter, false, null);
+        return getConversationListAdvanced(page, agentId, status, filter, false, null,
+                null, null, null, null, null, null, null, null, null, null, null);
     }
 
     @Override
-    public IPage<CsConversation> getConversationListAdvanced(Page<CsConversation> page, String agentId, 
+    public IPage<CsConversation> getConversationListAdvanced(Page<CsConversation> page, String agentId,
                                                               Integer status, String filter,
-                                                              Boolean includeDeleted, String filterAgentId) {
-        IPage<CsConversation> result = baseMapper.selectConversationPage(page, agentId, status, filter, includeDeleted, filterAgentId);
+                                                              Boolean includeDeleted, String filterAgentId,
+                                                              String id, String userId, Integer endType,
+                                                              Integer satisfaction, String source,
+                                                              String landingPage, String referrerPage,
+                                                              String createTimeBegin, String createTimeEnd,
+                                                              String endTimeBegin, String endTimeEnd) {
+        IPage<CsConversation> result = baseMapper.selectConversationPage(page, agentId, status, filter,
+                includeDeleted, filterAgentId, id, userId, endType, satisfaction, source,
+                landingPage, referrerPage, createTimeBegin, createTimeEnd, endTimeBegin, endTimeEnd);
         java.util.Set<String> onlineConversationIds = sessionManager.getOnlineConversationIds();
         
         // 补充协作者信息
@@ -930,6 +984,23 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public void updateLastMessage(String conversationId, String message, int senderType) {
+        LambdaUpdateWrapper<CsConversation> updateWrapper = new LambdaUpdateWrapper<>();
+        updateWrapper.eq(CsConversation::getId, conversationId)
+                .set(CsConversation::getLastMessage,
+                        message != null && message.length() > 100 ? message.substring(0, 100) + "..." : message)
+                .set(CsConversation::getLastMessageTime, new Date())
+                .setSql("message_count = IFNULL(message_count, 0) + 1");
+        if (senderType == 0) {
+            updateWrapper.setSql("visitor_message_count = IFNULL(visitor_message_count, 0) + 1");
+        } else if (senderType == 1 || senderType == 2) {
+            updateWrapper.setSql("agent_message_count = IFNULL(agent_message_count, 0) + 1");
+        }
+        update(updateWrapper);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public void incrementUnread(String conversationId) {
         LambdaUpdateWrapper<CsConversation> updateWrapper = new LambdaUpdateWrapper<>();
         updateWrapper.eq(CsConversation::getId, conversationId)
@@ -969,7 +1040,8 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
     public void clearVisitorLastMsgTime(String conversationId) {
         LambdaUpdateWrapper<CsConversation> updateWrapper = new LambdaUpdateWrapper<>();
         updateWrapper.eq(CsConversation::getId, conversationId)
-                .set(CsConversation::getVisitorLastMsgTime, null);
+                .set(CsConversation::getVisitorLastMsgTime, null)
+                .set(CsConversation::getAgentTimeoutNotified, false);
         update(updateWrapper);
     }
 
@@ -1159,6 +1231,10 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             conversation.setAssignTime(new Date());
             conversation.setReplyMode(aiEnabled ? CsConversation.REPLY_MODE_AI_AUTO : CsConversation.REPLY_MODE_MANUAL);
             conversation.setLastMessageTime(new Date());
+            if (conversation.getFirstResponseSeconds() == null && conversation.getCreateTime() != null) {
+                long seconds = (System.currentTimeMillis() - conversation.getCreateTime().getTime()) / 1000;
+                conversation.setFirstResponseSeconds((int) seconds);
+            }
             updateById(conversation);
 
             CsCollaborator collaborator = new CsCollaborator();
@@ -1221,7 +1297,7 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         }
         List<CsConversation> others = list(wrapper);
         for (CsConversation conv : others) {
-            closeConversation(conv.getId(), "系统清理：用户已有其他活跃会话");
+            closeConversation(conv.getId(), "系统清理：用户已有其他活跃会话", CsConversation.END_TYPE_SYSTEM_CLEAN);
         }
         if (!others.isEmpty()) {
             log.info("[CS-Conversation] 清理用户多余会话: userId={}, 关闭{}个", userId, others.size());

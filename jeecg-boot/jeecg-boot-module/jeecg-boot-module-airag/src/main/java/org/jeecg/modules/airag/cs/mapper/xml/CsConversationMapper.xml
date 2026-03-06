@@ -66,10 +66,43 @@
             <if test="status != null">
                 AND c.status = #{status}
             </if>
+
+            <!-- 高级查询条件 -->
+            <if test="id != null and id != ''">
+                AND c.id = #{id}
+            </if>
+            <if test="userId != null and userId != ''">
+                AND c.user_id LIKE CONCAT('%', #{userId}, '%')
+            </if>
+            <if test="endType != null">
+                AND c.end_type = #{endType}
+            </if>
+            <if test="satisfaction != null">
+                AND c.satisfaction = #{satisfaction}
+            </if>
+            <if test="source != null and source != ''">
+                AND c.source LIKE CONCAT('%', #{source}, '%')
+            </if>
+            <if test="landingPage != null and landingPage != ''">
+                AND c.landing_page LIKE CONCAT('%', #{landingPage}, '%')
+            </if>
+            <if test="referrerPage != null and referrerPage != ''">
+                AND c.referrer_page LIKE CONCAT('%', #{referrerPage}, '%')
+            </if>
+            <if test="createTimeBegin != null and createTimeBegin != ''">
+                AND c.create_time &gt;= #{createTimeBegin}
+            </if>
+            <if test="createTimeEnd != null and createTimeEnd != ''">
+                AND c.create_time &lt;= CONCAT(#{createTimeEnd}, ' 23:59:59')
+            </if>
+            <if test="endTimeBegin != null and endTimeBegin != ''">
+                AND c.end_time &gt;= #{endTimeBegin}
+            </if>
+            <if test="endTimeEnd != null and endTimeEnd != ''">
+                AND c.end_time &lt;= CONCAT(#{endTimeEnd}, ' 23:59:59')
+            </if>
         </where>
-        ORDER BY 
-            CASE WHEN IFNULL(c.unread_count, 0) > 0 THEN 0 ELSE 1 END,
-            c.last_message_time DESC
+        ORDER BY c.id DESC
     </select>
 
     <!-- 获取用户进行中的会话ID列表 -->

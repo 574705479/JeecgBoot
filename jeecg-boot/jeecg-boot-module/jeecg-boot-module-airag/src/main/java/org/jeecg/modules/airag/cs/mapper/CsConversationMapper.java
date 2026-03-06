@@ -37,7 +37,18 @@ public interface CsConversationMapper extends BaseMapper<CsConversation> {
                                                   @Param("status") Integer status,
                                                   @Param("filter") String filter,
                                                   @Param("includeDeleted") Boolean includeDeleted,
-                                                  @Param("filterAgentId") String filterAgentId);
+                                                  @Param("filterAgentId") String filterAgentId,
+                                                  @Param("id") String id,
+                                                  @Param("userId") String userId,
+                                                  @Param("endType") Integer endType,
+                                                  @Param("satisfaction") Integer satisfaction,
+                                                  @Param("source") String source,
+                                                  @Param("landingPage") String landingPage,
+                                                  @Param("referrerPage") String referrerPage,
+                                                  @Param("createTimeBegin") String createTimeBegin,
+                                                  @Param("createTimeEnd") String createTimeEnd,
+                                                  @Param("endTimeBegin") String endTimeBegin,
+                                                  @Param("endTimeEnd") String endTimeEnd);
 
     /**
      * 获取用户进行中的会话ID列表
