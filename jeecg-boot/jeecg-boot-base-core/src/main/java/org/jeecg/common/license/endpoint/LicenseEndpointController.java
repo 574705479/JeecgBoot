@@ -80,6 +80,11 @@ public class LicenseEndpointController {
         return Result.OK("刷新完成", data);
     }
 
+    @GetMapping("/plans")
+    public Result<?> plans() {
+        return Result.OK(licenseClientService.fetchPlans());
+    }
+
     @PostMapping("/deactivate")
     public Result<?> deactivate() {
         licenseClientService.deactivate();

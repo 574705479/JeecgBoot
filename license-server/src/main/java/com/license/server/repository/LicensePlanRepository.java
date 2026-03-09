@@ -10,5 +10,7 @@ public interface LicensePlanRepository extends JpaRepository<LicensePlan, Long>,
 
     List<LicensePlan> findByAppPkAndDelFlag(Long appPk, Integer delFlag);
 
+    List<LicensePlan> findByAppPkAndDelFlagAndStatusOrderBySortOrderAsc(Long appPk, Integer delFlag, Integer status);
+
     boolean existsByAppPkAndPlanCodeAndDelFlag(Long appPk, String planCode, Integer delFlag);
 }

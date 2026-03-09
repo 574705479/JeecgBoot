@@ -67,7 +67,7 @@
       :title="editingPlan ? '编辑套餐' : '新建套餐'"
       :confirm-loading="submitting"
       @ok="handleSubmit"
-      width="700px"
+      width="900px"
       destroy-on-close
     >
       <a-form :model="form" :label-col="{ span: 5 }" :wrapper-col="{ span: 18 }">
@@ -132,6 +132,31 @@
           </div>
         </a-form-item>
 
+        <a-form-item label="功能说明">
+          <div style="margin-bottom: 8px;">
+            <a-radio-group v-model:value="editorMode" size="small">
+              <a-radio-button value="visual">可视化编辑</a-radio-button>
+              <a-radio-button value="source">HTML源码</a-radio-button>
+            </a-radio-group>
+          </div>
+          <div v-show="editorMode === 'visual'" style="border: 1px solid #d9d9d9; border-radius: 4px; z-index: 100;">
+            <Toolbar :editor="editorRef" :defaultConfig="toolbarConfig" style="border-bottom: 1px solid #d9d9d9" />
+            <Editor
+              v-model="form.description"
+              :defaultConfig="editorConfig"
+              style="height: 300px; overflow-y: hidden"
+              @onCreated="onEditorCreated"
+            />
+          </div>
+          <a-textarea
+            v-show="editorMode === 'source'"
+            v-model:value="form.description"
+            :rows="12"
+            placeholder="请输入HTML源码"
+            style="font-family: monospace; font-size: 13px;"
+          />
+        </a-form-item>
+
         <a-form-item label="排序">
           <a-input-number v-model:value="form.sortOrder" :min="0" />
         </a-form-item>
@@ -144,10 +169,36 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, computed, shallowRef, onBeforeUnmount, watch } from 'vue'
 import { message } from 'ant-design-vue'
 import { PlusOutlined } from '@ant-design/icons-vue'
 import { request } from '../../utils/request'
+import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
+import '@wangeditor/editor/dist/css/style.css'
+
+const editorRef = shallowRef()
+const editorMode = ref<'visual' | 'source'>('visual')
+
+watch(editorMode, (newMode) => {
+  if (newMode === 'visual' && editorRef.value) {
+    editorRef.value.setHtml(form.description || '')
+  }
+})
+const toolbarConfig = {
+  excludeKeys: [
+    'insertImage', 'uploadImage', 'insertVideo', 'uploadVideo',
+    'insertTable', 'codeBlock', 'code', 'group-image', 'group-video',
+    'fullScreen', 'emotion',
+  ],
+}
+const editorConfig = { placeholder: '请输入套餐功能说明...' }
+
+function onEditorCreated(editor: any) {
+  editorRef.value = editor
+}
+onBeforeUnmount(() => {
+  editorRef.value?.destroy()
+})
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -183,6 +234,7 @@ const form = reactive({
   appPk: undefined as number | undefined,
   planName: '',
   planCode: '',
+  description: '',
   features: [] as string[],
   sortOrder: 0,
   statusBool: true,
@@ -262,6 +314,7 @@ function openModal(plan?: any) {
     form.appPk = plan.appPk
     form.planName = plan.planName
     form.planCode = plan.planCode
+    form.description = plan.description || ''
     form.sortOrder = plan.sortOrder || 0
     form.statusBool = plan.status === 1
     const appDef = getApp(plan.appPk)
@@ -280,10 +333,12 @@ function openModal(plan?: any) {
     form.appPk = appPk.value
     form.planName = ''
     form.planCode = ''
+    form.description = ''
     form.features = []
     form.sortOrder = 0
     form.statusBool = true
   }
+  editorMode.value = 'visual'
   modalVisible.value = true
 }
 
@@ -309,6 +364,7 @@ async function handleSubmit() {
     appPk: form.appPk,
     planName: form.planName,
     planCode: form.planCode,
+    description: form.description || null,
     quotas: Object.keys(quotas).length > 0 ? quotas : null,
     features: filteredFeatures.length > 0 ? filteredFeatures : null,
     sortOrder: form.sortOrder,

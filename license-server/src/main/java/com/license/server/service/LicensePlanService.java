@@ -52,6 +52,7 @@ public class LicensePlanService {
     public LicensePlan update(Long id, LicensePlan updated) {
         LicensePlan plan = getById(id);
         plan.setPlanName(updated.getPlanName());
+        plan.setDescription(updated.getDescription());
         plan.setQuotas(updated.getQuotas());
         plan.setFeatures(updated.getFeatures());
         plan.setSortOrder(updated.getSortOrder());
@@ -65,6 +66,14 @@ public class LicensePlanService {
         LicensePlan plan = getById(id);
         plan.setDelFlag(1);
         planRepository.save(plan);
+    }
+
+    public List<LicensePlan> listActivePlansByAppId(String appId) {
+        Optional<App> appOpt = appRepository.findByAppId(appId);
+        if (appOpt.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return planRepository.findByAppPkAndDelFlagAndStatusOrderBySortOrderAsc(appOpt.get().getId(), 0, 1);
     }
 
     private void filterByDefinitions(LicensePlan plan) {

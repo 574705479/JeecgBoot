@@ -202,6 +202,25 @@ public class LicenseClientService {
         return null;
     }
 
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> fetchPlans() {
+        String url = properties.getServerUrl() + "/api/"
+                + properties.getApiVersion() + "/plans/public?appId=" + properties.getAppId();
+        try {
+            ResponseEntity<Map> resp = restTemplate.getForEntity(url, Map.class);
+            Map<String, Object> body = resp.getBody();
+            if (body != null && Integer.valueOf(200).equals(body.get("code"))) {
+                Object data = body.get("data");
+                if (data instanceof List) {
+                    return (List<Map<String, Object>>) data;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[License] Fetch plans failed: {}", e.getMessage());
+        }
+        return Collections.emptyList();
+    }
+
     public LicenseInfo getLicenseInfo() {
         return this.state.license();
     }

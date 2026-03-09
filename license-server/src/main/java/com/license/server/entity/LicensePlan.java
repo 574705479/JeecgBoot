@@ -35,6 +35,9 @@ public class LicensePlan {
     @Column(name = "features", columnDefinition = "JSON")
     private List<String> features;
 
+    @Column(name = "description", columnDefinition = "TEXT")
+    private String description;
+
     @Column(name = "sort_order")
     private Integer sortOrder = 0;
 

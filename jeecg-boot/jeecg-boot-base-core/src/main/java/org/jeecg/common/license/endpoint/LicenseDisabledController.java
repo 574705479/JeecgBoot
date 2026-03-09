@@ -20,4 +20,9 @@ public class LicenseDisabledController {
     public Result<?> status() {
         return Result.OK(Collections.singletonMap("licensed", false));
     }
+
+    @GetMapping("/plans")
+    public Result<?> plans() {
+        return Result.OK(Collections.emptyList());
+    }
 }
