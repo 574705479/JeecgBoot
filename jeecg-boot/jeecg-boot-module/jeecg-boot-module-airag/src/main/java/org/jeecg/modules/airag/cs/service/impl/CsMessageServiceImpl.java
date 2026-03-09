@@ -817,6 +817,65 @@ public class CsMessageServiceImpl implements ICsMessageService {
         return aiSuggestionCache.get(conversationId);
     }
 
+    // ==================== 消息撤回 ====================
+
+    @Override
+    public boolean recallMessage(String messageId, String agentId) {
+        log.info("[CS-Message] 撤回消息: messageId={}, agentId={}", messageId, agentId);
+
+        ChatMessage message = chatMessageService.findById(messageId);
+        if (message == null) {
+            log.warn("[CS-Message] 撤回失败，消息不存在: messageId={}", messageId);
+            return false;
+        }
+
+        Integer senderType = message.getSenderType();
+        if (senderType == null || (senderType != ChatMessage.SENDER_AI && senderType != ChatMessage.SENDER_AGENT)) {
+            log.warn("[CS-Message] 撤回失败，只能撤回客服/AI消息: messageId={}, senderType={}", messageId, senderType);
+            return false;
+        }
+
+        if (senderType == ChatMessage.SENDER_AGENT) {
+            String senderId = message.getSenderId();
+            if (senderId != null && !agentId.equals(senderId)) {
+                log.warn("[CS-Message] 撤回失败，只能撤回自己发送的消息: messageId={}, senderId={}, agentId={}", messageId, senderId, agentId);
+                return false;
+            }
+            if (senderId == null) {
+                CsConversation conv = conversationService.getById(message.getConversationId());
+                if (conv != null && !agentId.equals(conv.getOwnerAgentId())) {
+                    log.warn("[CS-Message] 撤回失败，senderId为空且不是会话负责客服: messageId={}, ownerAgentId={}, agentId={}", messageId, conv.getOwnerAgentId(), agentId);
+                    return false;
+                }
+            }
+        }
+
+        boolean updated = chatMessageService.updateMessageStatus(messageId, ChatMessage.STATUS_REVOKED);
+        if (!updated) {
+            log.error("[CS-Message] 撤回失败，更新MongoDB状态失败: messageId={}", messageId);
+            return false;
+        }
+
+        String conversationId = message.getConversationId();
+        CsWebSocketMessage wsMessage = CsWebSocketMessage.builder()
+                .type(CsWebSocketMessage.TYPE_MESSAGE_RECALL)
+                .conversationId(conversationId)
+                .messageId(messageId)
+                .senderId(agentId)
+                .timestamp(new java.util.Date())
+                .build();
+
+        CsConversation conversation = conversationService.getById(conversationId);
+        if (conversation != null) {
+            String userId = conversation.getUserId();
+            sessionManager.sendToUserByConversation(conversationId, userId, wsMessage);
+        }
+        sessionManager.sendToAllAgents(wsMessage);
+
+        log.info("[CS-Message] 消息撤回成功: messageId={}, conversationId={}", messageId, conversationId);
+        return true;
+    }
+
     // ==================== 消息查询 ====================
 
     @Override
@@ -877,6 +936,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
     private void saveToMongo(CsMessage message) {
         try {
             ChatMessage chatMessage = new ChatMessage();
+            chatMessage.setId(message.getId());
             chatMessage.setConversationId(message.getConversationId());
             chatMessage.setContent(message.getContent());
             chatMessage.setSenderId(message.getSenderId());
@@ -997,6 +1057,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
             csMsg.setSenderName(msg.getSenderName());
             csMsg.setCreateTime(msg.getCreateTime());
             csMsg.setSenderAvatar(msg.getSenderAvatar());
+            csMsg.setStatus(msg.getStatus() != null ? msg.getStatus() : CsMessage.STATUS_SENT);
             messages.add(csMsg);
         }
         return messages;

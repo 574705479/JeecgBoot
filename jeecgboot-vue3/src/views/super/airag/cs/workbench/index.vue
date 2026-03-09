@@ -586,7 +586,12 @@
                     </div>
                   </div>
                 </div>
-                <div class="msg-meta">{{ formatMessageTime(msg.createTime) }}</div>
+                <div class="msg-meta">
+                  {{ formatMessageTime(msg.createTime) }}
+                  <a-popconfirm v-if="msg.senderType === 1 || msg.senderId === agentId" title="确定撤回这条消息？" ok-text="确定" cancel-text="取消" @confirm="recallMessage(msg)">
+                    <UndoOutlined class="recall-btn" title="撤回" />
+                  </a-popconfirm>
+                </div>
               </div>
             </template>
           </div>
@@ -1028,7 +1033,7 @@ import {
   SmileOutlined, ThunderboltOutlined, RobotOutlined, SettingOutlined,
   MoreOutlined, DeleteOutlined, PaperClipOutlined, EnvironmentOutlined, GlobalOutlined,
   TeamOutlined, CaretRightOutlined, CaretDownOutlined, DownOutlined, SearchOutlined,
-  CheckCircleOutlined, BgColorsOutlined
+  CheckCircleOutlined, BgColorsOutlined, UndoOutlined
 } from '@ant-design/icons-vue';
 import { useRoute, useRouter } from 'vue-router';
 import { defHttp } from '/@/utils/http/axios';
@@ -1403,6 +1408,7 @@ const displayMessages = computed(() => {
   const list: any[] = [];
   let lastDateKey = '';
   for (const msg of messages.value) {
+    if (msg.status === 3) continue;
     const dateKey = getDateKey(msg?.createTime);
     if (dateKey && dateKey !== lastDateKey) {
       list.push({
@@ -3601,11 +3607,21 @@ function handleWsMessage(data: any) {
         if (!newMsg.senderAvatar && Number(newMsg.senderType) === 1) {
           newMsg.senderAvatar = conv?.ownerAgentAvatar || currentConversation.value?.ownerAgentAvatar || '';
         }
-        // 避免重复添加
-        if (!messages.value.find(m => m.id === newMsg.id)) {
+        // 避免重复添加（也检查 local_ 前缀消息以防 WebSocket 先于 HTTP 响应到达）
+        const isDuplicate = messages.value.find(m => m.id === newMsg.id) ||
+          (newMsg.senderId === agentId.value && Number(newMsg.senderType) === 2 &&
+           messages.value.find(m => String(m.id).startsWith('local_') && m.senderId === newMsg.senderId &&
+             m.content === newMsg.content));
+        if (!isDuplicate) {
           messages.value.push(newMsg);
           scrollToBottom();
           scheduleClearUnread();
+        } else if (newMsg.senderId === agentId.value) {
+          // WebSocket 回传自己发的消息，用真实 ID 替换 local_ ID
+          const localIdx = messages.value.findIndex(m => String(m.id).startsWith('local_') && m.senderId === newMsg.senderId && m.content === newMsg.content);
+          if (localIdx > -1) {
+            messages.value[localIdx].id = newMsg.id;
+          }
         }
       }
       
@@ -3678,6 +3694,11 @@ function handleWsMessage(data: any) {
           if (assignedAgentId && assignedAgentId !== agentId.value) {
             console.log('[Workbench] 会话已被接入:', assignedAgentName);
           }
+        } else if (
+          (filter.value === 'mine' && assignedAgentId === agentId.value) ||
+          filter.value === 'all'
+        ) {
+          loadConversations();
         }
         
         // 延迟刷新统计数据（防抖）
@@ -4002,6 +4023,16 @@ function handleWsMessage(data: any) {
         userOnline.value = true;
       }
       break;
+    case 'message_recall': {
+      const recallMsgId = data.messageId;
+      if (recallMsgId) {
+        const idx = messages.value.findIndex((m) => m.id === recallMsgId);
+        if (idx !== -1) {
+          messages.value[idx].status = 3;
+        }
+      }
+      break;
+    }
     case 'conversation_closed':
       if (currentConversation.value?.id === data.conversationId) {
         currentConversation.value.status = 2;
@@ -4173,6 +4204,25 @@ function formatMessageTime(time: string) {
 function formatDateTime(time: string) {
   if (!time) return '-';
   return new Date(time).toLocaleString('zh-CN');
+}
+
+// ==================== 消息撤回 ====================
+
+async function recallMessage(msg: any) {
+  if (String(msg.id).startsWith('local_')) {
+    message.warning('消息正在发送中，请稍后再撤回');
+    return;
+  }
+  try {
+    await defHttp.put({ url: `/cs/message/${msg.id}/recall` });
+    message.success('消息已撤回');
+    const idx = messages.value.findIndex((m) => m.id === msg.id);
+    if (idx !== -1) {
+      messages.value[idx].status = 3;
+    }
+  } catch (e: any) {
+    message.error(e?.message || '撤回失败');
+  }
 }
 
 // ==================== 设备/地理位置展示辅助函数 ====================
@@ -5277,6 +5327,20 @@ function restoreMessageScroll() {
     color: #7c3aed;
     &:hover { color: #6d28d9; }
   }
+
+  .recall-btn {
+    cursor: pointer;
+    color: #ff7875;
+    opacity: 0;
+    transition: opacity 0.2s, color 0.2s;
+    font-size: 14px;
+    margin-left: 2px;
+    &:hover { color: #f5222d; }
+  }
+}
+
+.message-wrapper:hover .recall-btn {
+  opacity: 1;
 }
 
 // ==================== 回到底部按钮 ====================

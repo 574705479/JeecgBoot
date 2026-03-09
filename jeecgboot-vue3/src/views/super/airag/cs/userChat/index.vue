@@ -881,9 +881,9 @@ const displayMessages = computed(() => {
   const list: any[] = [];
   let lastDateKey = '';
   for (const msg of messages.value) {
-    // 历史会话分割线直接放入，不参与日期分组
+    if (msg.status === 3) continue;
     if (msg._historySeparator) {
-      lastDateKey = ''; // 重置日期，让下一条消息重新显示日期
+      lastDateKey = '';
       list.push(msg);
       continue;
     }
@@ -2188,6 +2188,17 @@ function handleWsMessage(data: any) {
       }
       console.log('[UserChat] 回复模式已切换为', replyMode.value === 1 ? '人工服务' : 'AI自动回复');
       break;
+
+    case 'message_recall': {
+      const recallMsgId = data.messageId;
+      if (recallMsgId) {
+        const idx = messages.value.findIndex((m) => m.id === recallMsgId);
+        if (idx !== -1) {
+          messages.value[idx].status = 3;
+        }
+      }
+      break;
+    }
 
     case 'conversation_closed':
       // 会话已结束

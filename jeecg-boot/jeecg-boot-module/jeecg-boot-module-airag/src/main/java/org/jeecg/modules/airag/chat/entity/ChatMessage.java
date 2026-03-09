@@ -143,7 +143,16 @@ public class ChatMessage implements Serializable {
     /** 更新时间 */
     private Date updateTime;
 
+    // ==================== 消息状态常量 ====================
+    /** 正常 */
+    public static final int STATUS_NORMAL = 1;
+    /** 已撤回 */
+    public static final int STATUS_REVOKED = 3;
+
     // ==================== 状态字段 ====================
+
+    /** 消息状态：1-正常 3-已撤回 */
+    private Integer status;
 
     /** 是否删除 */
     private Boolean deleted;

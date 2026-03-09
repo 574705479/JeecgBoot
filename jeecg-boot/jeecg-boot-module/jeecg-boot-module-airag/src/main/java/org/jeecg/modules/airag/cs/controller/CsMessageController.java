@@ -23,6 +23,10 @@ import java.util.Map;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
+import org.apache.shiro.SecurityUtils;
+import org.jeecg.common.system.vo.LoginUser;
+import org.jeecg.modules.airag.cs.entity.CsAgent;
+import org.jeecg.modules.airag.cs.service.ICsAgentService;
 import org.jeecg.common.constant.CommonConstant;
 import org.jeecg.common.util.CommonUtils;
 import org.jeecg.modules.airag.cs.entity.CsFileHash;
@@ -60,6 +64,9 @@ public class CsMessageController {
 
     @Autowired
     private ICsFileHashService fileHashService;
+
+    @Autowired
+    private ICsAgentService agentService;
 
     @Value(value = "${jeecg.path.upload}")
     private String uploadpath;
@@ -536,6 +543,36 @@ public class CsMessageController {
         }
         List<CsMessage> messages = messageService.getMessages(conversationId, beforeId, limit);
         return Result.OK(messages);
+    }
+
+    // ==================== 消息撤回 ====================
+
+    /**
+     * 撤回消息
+     */
+    @Operation(summary = "撤回消息")
+    @PutMapping("/{messageId}/recall")
+    public Result<String> recallMessage(@PathVariable String messageId) {
+        LoginUser loginUser = (LoginUser) SecurityUtils.getSubject().getPrincipal();
+        if (loginUser == null) {
+            return Result.error("未登录");
+        }
+        String agentId = null;
+        CsAgent agent = agentService.getByUserId(loginUser.getId());
+        if (agent == null) {
+            agent = agentService.getByUserId(loginUser.getUsername());
+        }
+        if (agent != null) {
+            agentId = agent.getId();
+        }
+        if (agentId == null) {
+            return Result.error("未找到客服信息");
+        }
+        boolean success = messageService.recallMessage(messageId, agentId);
+        if (success) {
+            return Result.OK("撤回成功");
+        }
+        return Result.error("撤回失败");
     }
 
     // ==================== AI相关 ====================

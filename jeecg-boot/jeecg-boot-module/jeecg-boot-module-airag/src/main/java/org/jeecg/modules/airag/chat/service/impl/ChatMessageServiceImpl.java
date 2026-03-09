@@ -52,6 +52,9 @@ public class ChatMessageServiceImpl implements IChatMessageService {
             message.setCreateTime(new Date());
         }
         message.setDeleted(false);
+        if (message.getStatus() == null) {
+            message.setStatus(ChatMessage.STATUS_NORMAL);
+        }
         
         log.debug("[ChatMessage] 保存消息: conversationId={}, senderType={}, content={}",
                 message.getConversationId(), message.getSenderType(), 
@@ -369,6 +372,19 @@ public class ChatMessageServiceImpl implements IChatMessageService {
     }
 
     // ==================== 消息状态 ====================
+
+    @Override
+    public ChatMessage findById(String messageId) {
+        return messageRepository.findById(messageId).orElse(null);
+    }
+
+    @Override
+    public boolean updateMessageStatus(String messageId, int status) {
+        Query query = new Query(Criteria.where("_id").is(messageId));
+        Update update = new Update().set("status", status).set("updateTime", new Date());
+        var result = mongoTemplate.updateFirst(query, update, ChatMessage.class);
+        return result.getModifiedCount() > 0;
+    }
 
     @Override
     public void markAsRead(String conversationId, Integer senderType) {

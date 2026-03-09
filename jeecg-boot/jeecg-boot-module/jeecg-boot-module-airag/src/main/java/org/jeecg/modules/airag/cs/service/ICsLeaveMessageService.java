@@ -24,6 +24,11 @@ public interface ICsLeaveMessageService extends IService<CsLeaveMessage> {
     boolean replyMessage(String id, String reply, String agentId);
 
     /**
+     * 撤回留言回复
+     */
+    boolean recallReply(String id);
+
+    /**
      * 获取用户未读的留言回复列表
      */
     List<CsLeaveMessage> getUnreadReplies(String userId);

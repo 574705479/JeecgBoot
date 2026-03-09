@@ -107,8 +107,9 @@
                             </span>
                             <a-tag v-if="msg.senderType === 1" color="purple" size="small">AI</a-tag>
                             <a-tag v-else color="green" size="small">客服</a-tag>
+                            <a-tag v-if="msg.status === 3" color="red" size="small">已撤回</a-tag>
                           </div>
-                          <div class="msg-bubble agent-bubble" :class="{ 'ai-bubble': msg.senderType === 1 }" v-html="renderMessage(msg.content)"></div>
+                          <div class="msg-bubble agent-bubble" :class="{ 'ai-bubble': msg.senderType === 1, 'revoked-bubble': msg.status === 3 }" v-html="renderMessage(msg.content)"></div>
                           <div v-if="getMediaAttachments(msg).length" class="msg-media-grid" :class="`media-grid--${Math.min(getMediaGridData(msg).total, 4)}`">
                             <div class="media-item" v-for="(item, idx) in getMediaGridData(msg).items" :key="idx">
                               <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview(msg, item)" />
@@ -882,6 +883,10 @@ function formatDateSeparator(time: string | Date) {
 
       &.ai-bubble {
         background: #f9f0ff;
+      }
+
+      &.revoked-bubble {
+        opacity: 0.6;
       }
     }
   }

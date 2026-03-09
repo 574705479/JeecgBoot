@@ -56,6 +56,28 @@ public class CsLeaveMessageServiceImpl extends ServiceImpl<CsLeaveMessageMapper,
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean recallReply(String id) {
+        CsLeaveMessage message = getById(id);
+        if (message == null) {
+            log.warn("[CS-LeaveMessage] 留言不存在: id={}", id);
+            return false;
+        }
+        if (message.getStatus() != CsLeaveMessage.STATUS_REPLIED) {
+            log.warn("[CS-LeaveMessage] 留言未回复，无法撤回: id={}, status={}", id, message.getStatus());
+            return false;
+        }
+        message.setReply(null);
+        message.setReplyAgentId(null);
+        message.setReplyTime(null);
+        message.setStatus(CsLeaveMessage.STATUS_PENDING);
+        message.setUpdateTime(new Date());
+        updateById(message);
+        log.info("[CS-LeaveMessage] 撤回留言回复: id={}", id);
+        return true;
+    }
+
+    @Override
     public List<CsLeaveMessage> getUnreadReplies(String userId) {
         LambdaQueryWrapper<CsLeaveMessage> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(CsLeaveMessage::getUserId, userId)

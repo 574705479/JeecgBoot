@@ -206,6 +206,17 @@ public interface ICsMessageService {
      */
     List<CsMessage> getRecentMessages(String conversationId, int limit);
 
+    // ==================== 消息撤回 ====================
+
+    /**
+     * 撤回消息
+     *
+     * @param messageId 消息ID
+     * @param agentId   操作客服ID
+     * @return 是否成功
+     */
+    boolean recallMessage(String messageId, String agentId);
+
     // ==================== 已读状态 ====================
 
     /**

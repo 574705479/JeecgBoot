@@ -122,6 +122,19 @@ public class CsLeaveMessageController {
     }
 
     /**
+     * 撤回留言回复
+     */
+    @Operation(summary = "撤回留言回复")
+    @PutMapping("/{id}/recallReply")
+    public Result<String> recallReply(@PathVariable String id) {
+        boolean success = leaveMessageService.recallReply(id);
+        if (success) {
+            return Result.OK("撤回成功");
+        }
+        return Result.error("撤回失败");
+    }
+
+    /**
      * 查询用户未读的留言回复（无需登录，访客端使用）
      */
     @Operation(summary = "查询用户未读的留言回复")

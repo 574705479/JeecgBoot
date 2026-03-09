@@ -36,6 +36,9 @@
             <a-space>
               <a @click="showDetail(record)">查看</a>
               <a v-if="record.status === 0" @click="showReplyModal(record)">回复</a>
+              <a-popconfirm v-if="record.status === 1" title="确定撤回该回复？" ok-text="确定" cancel-text="取消" @confirm="recallReply(record)">
+                <a style="color: #f5222d">撤回回复</a>
+              </a-popconfirm>
             </a-space>
           </template>
         </template>
@@ -71,6 +74,11 @@
           </a-descriptions-item>
           <a-descriptions-item label="回复时间" v-if="currentRecord.replyTime">
             {{ currentRecord.replyTime }}
+          </a-descriptions-item>
+          <a-descriptions-item label="操作" v-if="currentRecord.status === 1">
+            <a-popconfirm title="确定撤回该回复？" ok-text="确定" cancel-text="取消" @confirm="recallReply(currentRecord)">
+              <a-button type="link" danger size="small">撤回回复</a-button>
+            </a-popconfirm>
           </a-descriptions-item>
         </a-descriptions>
 
@@ -186,6 +194,18 @@ function showReplyModal(record: any) {
   currentRecord.value = record;
   replyContent.value = '';
   replyVisible.value = true;
+}
+
+async function recallReply(record: any) {
+  try {
+    await defHttp.put({ url: `/cs/leaveMessage/${record.id}/recallReply` });
+    message.success('撤回成功');
+    detailVisible.value = false;
+    await loadData();
+  } catch (e) {
+    console.error('撤回失败', e);
+    message.error('撤回失败');
+  }
 }
 
 async function submitReply() {

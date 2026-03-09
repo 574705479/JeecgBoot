@@ -108,6 +108,16 @@ public interface IChatMessageService {
     // ==================== 消息状态 ====================
 
     /**
+     * 根据ID查找消息
+     */
+    ChatMessage findById(String messageId);
+
+    /**
+     * 更新消息状态（用于撤回等）
+     */
+    boolean updateMessageStatus(String messageId, int status);
+
+    /**
      * 标记消息已读
      */
     void markAsRead(String conversationId, Integer senderType);

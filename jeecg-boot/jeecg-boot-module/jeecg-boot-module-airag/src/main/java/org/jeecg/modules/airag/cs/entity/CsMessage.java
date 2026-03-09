@@ -9,6 +9,7 @@ import org.springframework.format.annotation.DateTimeFormat;
 
 import java.io.Serializable;
 import java.util.Date;
+import java.util.UUID;
 
 /**
  * 客服消息DTO
@@ -137,6 +138,7 @@ public class CsMessage implements Serializable {
      */
     public static CsMessage createUserMessage(String conversationId, String userId, String userName, String content) {
         CsMessage msg = new CsMessage();
+        msg.setId(UUID.randomUUID().toString().replace("-", ""));
         msg.setConversationId(conversationId);
         msg.setSenderType(SENDER_USER);
         msg.setSenderId(userId);
@@ -153,6 +155,7 @@ public class CsMessage implements Serializable {
      */
     public static CsMessage createAgentMessage(String conversationId, String agentId, String agentName, String content) {
         CsMessage msg = new CsMessage();
+        msg.setId(UUID.randomUUID().toString().replace("-", ""));
         msg.setConversationId(conversationId);
         msg.setSenderType(SENDER_AGENT);
         msg.setSenderId(agentId);
@@ -172,6 +175,7 @@ public class CsMessage implements Serializable {
      */
     public static CsMessage createAiMessage(String conversationId, String displayName, String content) {
         CsMessage msg = new CsMessage();
+        msg.setId(UUID.randomUUID().toString().replace("-", ""));
         msg.setConversationId(conversationId);
         msg.setSenderType(SENDER_AGENT); // 用户看到的是客服
         msg.setSenderName(displayName != null ? displayName : "智能客服");
@@ -189,6 +193,7 @@ public class CsMessage implements Serializable {
      */
     public static CsMessage createSystemMessage(String conversationId, String content) {
         CsMessage msg = new CsMessage();
+        msg.setId(UUID.randomUUID().toString().replace("-", ""));
         msg.setConversationId(conversationId);
         msg.setSenderType(SENDER_SYSTEM);
         msg.setSenderName("系统");
