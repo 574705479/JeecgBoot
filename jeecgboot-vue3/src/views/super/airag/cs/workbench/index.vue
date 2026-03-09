@@ -2343,6 +2343,19 @@ function loadStatsDebounced() {
   }, 500); // 500ms 延迟
 }
 
+// 延迟加载会话列表（防抖，WebSocket 兜底刷新用）
+let conversationsLoadTimer: any = null;
+function loadConversationsDebounced() {
+  if (conversationsLoadTimer) {
+    clearTimeout(conversationsLoadTimer);
+  }
+  conversationsLoadTimer = setTimeout(() => {
+    if (!loadingConversations.value) {
+      loadConversations();
+    }
+  }, 500);
+}
+
 // ============ 客服超时未回复 - 访客等待时长 ============
 
 /** 加载超时配置 */
@@ -3720,6 +3733,16 @@ function handleWsMessage(data: any) {
         // 检查是否已经在列表中（避免重复）
         const exists = conversations.value.find(c => c.id === data.conversationId);
         if (!exists) {
+          // 兜底：extra 关键字段缺失时，通过 API 刷新列表
+          if (!data.extra || data.extra.status === undefined) {
+            loadConversationsDebounced();
+            loadStatsDebounced();
+            if (filter.value === 'monitor') {
+              loadMonitorAgents();
+            }
+            break;
+          }
+
           // 判断是否应该显示在当前列表
           const shouldAdd = 
             (filter.value === 'mine' && convOwnerAgentId === agentId.value) ||  // 我的：分配给当前客服

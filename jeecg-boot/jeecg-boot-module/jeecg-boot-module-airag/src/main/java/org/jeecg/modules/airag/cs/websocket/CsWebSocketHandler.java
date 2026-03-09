@@ -68,9 +68,10 @@ public class CsWebSocketHandler implements WebSocketHandler {
         java.util.Map<String, Object> extra = new java.util.HashMap<>();
         extra.put("userType", userType);
         
-        // 如果是用户连接，获取会话的replyMode
+        // 如果是用户连接，获取会话详情（复用于 welcome 消息和客服通知）
+        CsConversation conversation = null;
         if (CsWebSocketInterceptor.USER_TYPE_USER.equals(userType) && oConvertUtils.isNotEmpty(conversationId)) {
-            CsConversation conversation = conversationService.getById(conversationId);
+            conversation = conversationService.getById(conversationId);
             if (conversation != null) {
                 extra.put("replyMode", conversation.getReplyMode() != null ? conversation.getReplyMode() : 0);
                 extra.put("hasAgent", oConvertUtils.isNotEmpty(conversation.getOwnerAgentId()));
@@ -92,9 +93,8 @@ public class CsWebSocketHandler implements WebSocketHandler {
                 userId, userType, conversationId);
         
         // 如果是用户连接，通知相关客服
-        if (CsWebSocketInterceptor.USER_TYPE_USER.equals(userType)) {
-            notifyAgentsNewConversation(conversationId, userId);
-            // 通知客服用户上线
+        if (CsWebSocketInterceptor.USER_TYPE_USER.equals(userType) && conversation != null) {
+            notifyAgentsNewConversation(conversation);
             notifyAgentsUserOnline(conversationId, userId);
         }
     }
@@ -125,20 +125,40 @@ public class CsWebSocketHandler implements WebSocketHandler {
     }
 
     /**
-     * 通知客服有新会话
+     * 通知客服有新会话（携带完整会话信息）
      */
-    private void notifyAgentsNewConversation(String conversationId, String userId) {
+    private void notifyAgentsNewConversation(CsConversation conversation) {
         try {
+            java.util.Map<String, Object> extra = new java.util.HashMap<>();
+            extra.put("appId", conversation.getAppId());
+            extra.put("userName", conversation.getUserName());
+            extra.put("createTime", conversation.getCreateTime());
+            extra.put("status", conversation.getStatus());
+            extra.put("replyMode", conversation.getReplyMode());
+            extra.put("ownerAgentId", conversation.getOwnerAgentId());
+            extra.put("userIp", conversation.getUserIp());
+            extra.put("userOs", conversation.getUserOs());
+            extra.put("userOsVersion", conversation.getUserOsVersion());
+            extra.put("userBrowser", conversation.getUserBrowser());
+            extra.put("userBrowserVersion", conversation.getUserBrowserVersion());
+            extra.put("userDeviceId", conversation.getUserDeviceId());
+            extra.put("userCountry", conversation.getUserCountry());
+            extra.put("userProvince", conversation.getUserProvince());
+            extra.put("userCity", conversation.getUserCity());
+            extra.put("userLang", conversation.getUserLang());
+
             CsWebSocketMessage notification = CsWebSocketMessage.builder()
                     .type("new_conversation")
-                    .conversationId(conversationId)
-                    .senderId(userId)
+                    .conversationId(conversation.getId())
+                    .senderId(conversation.getUserId())
+                    .senderName(conversation.getUserName())
                     .content("有新的用户上线")
                     .timestamp(new java.util.Date())
+                    .extra(extra)
                     .build();
             
             sessionManager.sendToAllAgents(notification);
-            log.info("[CS-WebSocket] 通知客服新会话: conversationId={}", conversationId);
+            log.info("[CS-WebSocket] 通知客服新会话: conversationId={}", conversation.getId());
         } catch (Exception e) {
             log.error("[CS-WebSocket] 通知客服失败: {}", e.getMessage());
         }
