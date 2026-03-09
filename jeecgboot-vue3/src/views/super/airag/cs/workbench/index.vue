@@ -474,7 +474,7 @@
             <a-spin size="small" />
             <span>加载历史消息...</span>
           </div>
-          <div v-for="msg in displayMessages" :key="msg.id" class="message-wrapper" :class="getMessageClass(msg)">
+          <div v-for="msg in displayMessages" :key="msg._clientKey ?? msg.id" class="message-wrapper" :class="getMessageClass(msg)">
             <!-- 日期分隔符 -->
             <div v-if="msg.isDateSeparator" class="date-separator">
               <span>{{ msg.content }}</span>
@@ -3024,6 +3024,7 @@ async function sendMessage() {
     localMsgId = `local_${Date.now()}`;
     const localMsg = {
       id: localMsgId,
+      _clientKey: localMsgId,
       conversationId: currentConversation.value.id,
       content,
       msgType,
@@ -3071,11 +3072,11 @@ async function sendMessage() {
     if (resMessage?.id) {
       const idx = messages.value.findIndex(m => m.id === localMsgId);
       if (idx > -1) {
-        messages.value[idx].id = resMessage.id;
-        messages.value[idx].createTime = resMessage.createTime || nowIso;
-        if (resMessage.senderAvatar) {
-          messages.value[idx].senderAvatar = resMessage.senderAvatar;
-        }
+        Object.assign(messages.value[idx], {
+          id: resMessage.id,
+          createTime: resMessage.createTime || nowIso,
+          ...(resMessage.senderAvatar ? { senderAvatar: resMessage.senderAvatar } : {}),
+        });
       }
     }
 
