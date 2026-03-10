@@ -228,13 +228,7 @@ public class CsWebSocketSessionManager {
     public void sendToAllAgents(Object message) {
         String json = toJson(message);
         for (WebSocketSession session : agentSessions.values()) {
-            try {
-                if (session.isOpen()) {
-                    session.sendMessage(new TextMessage(json));
-                }
-            } catch (IOException e) {
-                log.error("[CS-WebSocket] 发送消息失败: {}", e.getMessage());
-            }
+            sendRawMessage(session, json);
         }
     }
 
@@ -245,23 +239,23 @@ public class CsWebSocketSessionManager {
         if (session == null || !session.isOpen()) {
             return;
         }
-        try {
-            String json = toJson(message);
-            session.sendMessage(new TextMessage(json));
-        } catch (IOException e) {
-            log.error("[CS-WebSocket] 发送消息失败: {}", e.getMessage());
-        }
+        sendRawMessage(session, toJson(message));
     }
 
     /**
      * 发送已序列化的JSON消息（避免重复序列化）
+     * WebSocketSession.sendMessage 不是线程安全的，需要对同一 session 加锁
      */
     private void sendRawMessage(WebSocketSession session, String json) {
         if (session == null || !session.isOpen()) {
             return;
         }
         try {
-            session.sendMessage(new TextMessage(json));
+            synchronized (session) {
+                if (session.isOpen()) {
+                    session.sendMessage(new TextMessage(json));
+                }
+            }
         } catch (IOException e) {
             log.error("[CS-WebSocket] 发送消息失败: {}", e.getMessage());
         }

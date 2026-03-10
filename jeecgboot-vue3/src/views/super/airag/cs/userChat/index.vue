@@ -182,7 +182,7 @@
                 <span class="sender-name">{{ msg.senderName || '客服' }}</span>
                 <a-tag v-if="msg.senderType === 1" color="blue" size="small">AI</a-tag>
               </div>
-              <div v-if="msg.content" class="message-text" v-html="renderMessage(msg.content)"></div>
+              <div v-if="msg.content" class="message-text" v-html="msg.isStreaming ? renderStreamingText(msg.content) : renderMessage(msg.content)"></div>
               <div
                 v-if="getMediaGridData(msg).items.length"
                 class="message-media-grid"
@@ -916,6 +916,19 @@ const wsFallbackPollIntervalMs = 20000;
 // AI回复中状态（用于限制用户快速发送）
 const aiResponding = ref(false);
 let aiResponseTimeoutTimer: number | null = null;
+let aiTimedOutMessageId: string | null = null;
+const AI_TOKEN_TIMEOUT_MS = 30000;
+
+function resetAiTokenTimeout() {
+  if (aiResponseTimeoutTimer) {
+    clearTimeout(aiResponseTimeoutTimer);
+  }
+  aiResponseTimeoutTimer = window.setTimeout(() => {
+    if (aiResponding.value) {
+      stopAiReply('AI回复超时，请稍后重试');
+    }
+  }, AI_TOKEN_TIMEOUT_MS);
+}
 
 function stopAiResponding(reason?: string) {
   if (aiResponseTimeoutTimer) {
@@ -926,6 +939,10 @@ function stopAiResponding(reason?: string) {
     aiResponding.value = false;
   }
   if (reason) {
+    // 记录超时的 messageId，用于过滤后续到达的 token
+    for (const [msgId] of streamingMessages.value) {
+      aiTimedOutMessageId = msgId;
+    }
     messages.value.push({
       id: Date.now().toString(),
       content: reason,
@@ -936,8 +953,8 @@ function stopAiResponding(reason?: string) {
   }
 }
 
-/** 用户主动终止AI回复 */
-function stopAiReply() {
+/** 用户主动终止AI回复 / 超时终止 */
+function stopAiReply(reason?: string) {
   // 1. 通知后端停止推送
   if (ws && ws.readyState === WebSocket.OPEN && conversationId.value) {
     ws.send(JSON.stringify({
@@ -956,12 +973,17 @@ function stopAiReply() {
   streamingMessages.value.clear();
 
   // 3. 重置状态
-  stopAiResponding();
+  stopAiResponding(reason);
   agentTyping.value = false;
 }
 
 // 流式AI消息临时存储 (messageId -> 累积内容)
 const streamingMessages = ref<Map<string, string>>(new Map());
+
+// RAF 批处理缓冲区
+const pendingTokens = new Map<string, { tokens: string[]; conversationId: string }>();
+let tokenRafId: number | null = null;
+let scrollRafId: number | null = null;
 
 // 用户信息
 const userId = ref('');
@@ -1183,6 +1205,8 @@ onUnmounted(() => {
   disconnectWebSocket();
   stopFallbackPoll();
   stopTokenValidateTimer();
+  if (tokenRafId) { cancelAnimationFrame(tokenRafId); tokenRafId = null; }
+  if (scrollRafId) { cancelAnimationFrame(scrollRafId); scrollRafId = null; }
   window.removeEventListener('online', handleNetworkOnline);
   document.removeEventListener('visibilitychange', handleVisibilityChange);
 });
@@ -1739,7 +1763,15 @@ async function loadMessages() {
     });
     const list = Array.isArray(res) ? res : (res?.result || res?.records || []);
     if (list) {
-      messages.value = list;
+      // 智能合并：保留 local_ 消息和正在流式输出的消息
+      const serverIds = new Set(list.map((m: any) => m.id));
+      const localAndStreaming = messages.value.filter((m: any) => {
+        if (String(m.id).startsWith('local_')) return !serverIds.has(m.id);
+        if (m.isStreaming) return true;
+        if (m.senderType === 3) return true;
+        return false;
+      });
+      messages.value = [...list, ...localAndStreaming];
       historyBeforeId.value = list[0]?.id || null;
       hasMoreHistory.value = list.length >= historyPageSize;
     }
@@ -2119,7 +2151,7 @@ function handleWsMessage(data: any) {
 
     case 'ai_typing':
       // AI正在输入状态
-      if (data.data?.isTyping) {
+      if (data.extra?.isTyping) {
         agentTyping.value = true;
       } else {
         agentTyping.value = false;
@@ -2308,16 +2340,9 @@ async function sendMessage() {
   const isAiMode = replyMode.value === 0;
   if (isAiMode) {
     aiResponding.value = true;
+    aiTimedOutMessageId = null;
+    resetAiTokenTimeout();
   }
-  
-  if (aiResponseTimeoutTimer) {
-    clearTimeout(aiResponseTimeoutTimer);
-  }
-  aiResponseTimeoutTimer = window.setTimeout(() => {
-    if (isAiMode) {
-      stopAiResponding('AI回复超时，请稍后重试');
-    }
-  }, 60000);
   
   try {
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -2396,38 +2421,62 @@ async function restartConversation() {
 
 
 
-// 处理AI流式token
+// 处理AI流式token（RAF 批处理，每帧最多刷新一次 DOM）
 function handleAiStreamToken(data: any) {
   const messageId = data.messageId;
   const token = data.content;
-  
+
   if (!messageId || !token) return;
-  
-  // 累积token
-  const currentContent = streamingMessages.value.get(messageId) || '';
-  const newContent = currentContent + token;
-  streamingMessages.value.set(messageId, newContent);
-  
-  // 查找或创建消息
-  let existingMsg = messages.value.find(m => m.id === messageId);
-  if (!existingMsg) {
-    // 创建新的流式消息
-    existingMsg = {
-      id: messageId,
-      conversationId: data.conversationId,
-      content: newContent,
-      senderType: 1, // AI消息
-      senderId: 'ai',
-      senderName: '智能客服',
-      createTime: new Date().toISOString(),
-      isStreaming: true, // 标记为流式消息
-    };
-    messages.value.push(existingMsg);
-  } else {
-    // 更新现有消息内容
-    existingMsg.content = newContent;
+
+  // 超时后忽略后续到达的 token
+  if (!aiResponding.value || messageId === aiTimedOutMessageId) return;
+
+  // AI 开始输出内容后，立即关闭 typing 指示器
+  if (agentTyping.value) {
+    agentTyping.value = false;
   }
-  
+
+  // 将 token 放入缓冲区
+  let entry = pendingTokens.get(messageId);
+  if (!entry) {
+    entry = { tokens: [], conversationId: data.conversationId };
+    pendingTokens.set(messageId, entry);
+  }
+  entry.tokens.push(token);
+
+  // 用 RAF 合并刷新
+  if (!tokenRafId) {
+    tokenRafId = requestAnimationFrame(flushPendingTokens);
+  }
+}
+
+function flushPendingTokens() {
+  tokenRafId = null;
+  for (const [messageId, entry] of pendingTokens) {
+    const batch = entry.tokens.join('');
+    const currentContent = streamingMessages.value.get(messageId) || '';
+    const newContent = currentContent + batch;
+    streamingMessages.value.set(messageId, newContent);
+
+    let existingMsg = messages.value.find(m => m.id === messageId);
+    if (!existingMsg) {
+      existingMsg = {
+        id: messageId,
+        conversationId: entry.conversationId,
+        content: newContent,
+        senderType: 1,
+        senderId: 'ai',
+        senderName: '智能客服',
+        createTime: new Date().toISOString(),
+        isStreaming: true,
+      };
+      messages.value.push(existingMsg);
+    } else {
+      existingMsg.content = newContent;
+    }
+  }
+  pendingTokens.clear();
+  resetAiTokenTimeout();
   scrollToBottom();
 }
 
@@ -2436,12 +2485,25 @@ function handleAiStreamComplete(data: any) {
   const messageId = data.messageId;
   const fullContent = data.content;
   
-  // 清除流式缓存
+  // 清理缓冲区，防止残留 RAF 刷入脏数据
+  pendingTokens.delete(messageId);
   streamingMessages.value.delete(messageId);
   
-  // 更新消息为最终内容
-  const existingMsg = messages.value.find(m => m.id === messageId);
-  if (existingMsg) {
+  // 更新消息为最终内容（RAF 未 flush 时 complete 先到则创建）
+  let existingMsg = messages.value.find(m => m.id === messageId);
+  if (!existingMsg) {
+    existingMsg = {
+      id: messageId,
+      conversationId: data.conversationId,
+      content: fullContent,
+      senderType: 1,
+      senderId: 'ai',
+      senderName: '智能客服',
+      createTime: new Date().toISOString(),
+      isStreaming: false,
+    };
+    messages.value.push(existingMsg);
+  } else {
     existingMsg.content = fullContent;
     existingMsg.isStreaming = false;
   }
@@ -2453,9 +2515,11 @@ function handleAiStreamComplete(data: any) {
   scrollToBottom();
 }
 
-// 滚动到底部
+// 滚动到底部（RAF 防抖，同帧多次调用只执行一次）
 function scrollToBottom() {
-  nextTick(() => {
+  if (scrollRafId) return;
+  scrollRafId = requestAnimationFrame(() => {
+    scrollRafId = null;
     if (messagesRef.value) {
       messagesRef.value.scrollTop = messagesRef.value.scrollHeight;
     }
@@ -2623,6 +2687,15 @@ function normalizeImgUrls(html: string): string {
   } catch { return html; }
 }
 
+// 流式消息轻量渲染（跳过 markdown 解析，完成后由 renderMessage 接管）
+function renderStreamingText(content: string) {
+  return content
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br>');
+}
+
 // 渲染消息内容（支持富文本HTML、Markdown、纯文本）
 function renderMessage(content: string) {
   if (!content) return '';
@@ -2651,12 +2724,12 @@ function renderMessage(content: string) {
     .replace(/\n/g, '<br>');
 }
 
-// 监听消息变化，自动滚动
-watch(messages, () => {
+// 监听新增消息，自动滚动（浅监听 length 变化，不再 deep watch 避免流式 content 修改触发）
+watch(() => messages.value.length, () => {
   if (loadingHistory.value) return;
   if (!isMessagesAtBottom()) return;
   scrollToBottom();
-}, { deep: true });
+});
 </script>
 
 <style lang="less" scoped>

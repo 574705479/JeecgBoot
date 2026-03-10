@@ -29,6 +29,7 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -434,8 +435,28 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             return active;
         }
         
-        // 创建新会话 (createConversation内部会广播)
-        return createConversation(appId, userId, userName, null, null, null, null, null, null, null, null);
+        // 使用 Redis 分布式锁防止并发创建重复会话
+        String lockKey = "cs:lock:create_conv:" + userId + ":" + appId;
+        Boolean locked = redisTemplate.opsForValue().setIfAbsent(lockKey, "1", Duration.ofSeconds(10));
+        if (locked == null || !locked) {
+            // 未获取到锁，等待后重新查询
+            try { Thread.sleep(500); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+            active = getActiveConversation(userId, appId);
+            if (active != null) {
+                return active;
+            }
+            log.warn("[CS-Conversation] 未获取到分布式锁，仍未找到活跃会话，强制创建: userId={}", userId);
+        }
+        try {
+            // 双重检查
+            active = getActiveConversation(userId, appId);
+            if (active != null) {
+                return active;
+            }
+            return createConversation(appId, userId, userName, null, null, null, null, null, null, null, null);
+        } finally {
+            redisTemplate.delete(lockKey);
+        }
     }
 
     @Override

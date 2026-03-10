@@ -553,7 +553,7 @@
                   </a-avatar>
                 </div>
                 <div class="msg-bubble agent-bubble" :class="{ 'ai-bubble': msg.senderType === 1 || msg.isAiGenerated }">
-                  <div v-if="msg.content" class="msg-text" v-html="renderMessage(msg.content)"></div>
+                  <div v-if="msg.content" class="msg-text" v-html="msg.isStreaming ? renderStreamingText(msg.content) : renderMessage(msg.content)"></div>
                   <div
                     v-if="getMediaGridData(msg).items.length"
                     class="msg-media-grid"
@@ -1439,6 +1439,13 @@ const messageAvatarSize = 38;
 // 流式AI消息临时存储 (messageId -> 累积内容)
 const streamingMessages = ref<Map<string, string>>(new Map());
 
+// RAF 批处理缓冲区
+const pendingTokens = new Map<string, { tokens: string[]; conversationId: string }>();
+let tokenRafId: number | null = null;
+let scrollRafId: number | null = null;
+let pendingSuggestionTokens: string[] = [];
+let suggestionRafId: number | null = null;
+
 // 访客信息
 const visitorInfo = ref<any>({});
 const visitorTags = ref<string[]>([]);
@@ -1714,6 +1721,9 @@ onUnmounted(() => {
   }
   refreshTimer && clearInterval(refreshTimer);
   stopWaitingTimer();
+  if (tokenRafId) { cancelAnimationFrame(tokenRafId); tokenRafId = null; }
+  if (scrollRafId) { cancelAnimationFrame(scrollRafId); scrollRafId = null; }
+  if (suggestionRafId) { cancelAnimationFrame(suggestionRafId); suggestionRafId = null; }
   window.removeEventListener('online', handleNetworkOnline);
   window.removeEventListener('beforeunload', handleBeforeUnload);
   document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -3014,7 +3024,7 @@ async function sendMessage() {
     if (currentReplyMode.value === 0) {
       currentReplyMode.value = 1;
       currentConversation.value.replyMode = 1;
-      void changeMode(1);
+      // 不再单独调用 changeMode(1)，后端 sendAgentMessage 会自动切换模式并通知
     }
     
     const msgType = attachments.length > 0 ? 5 : 0;
@@ -3606,7 +3616,7 @@ function handleWsMessage(data: any) {
         }
         
         // 实时添加消息到列表，避免重新加载
-        const newMsg = {
+        const newMsg: any = {
           id: data.messageId || Date.now().toString(),
           conversationId: data.conversationId,
           content: data.content,
@@ -3617,24 +3627,33 @@ function handleWsMessage(data: any) {
           senderName: data.senderName,
           senderAvatar: data.senderAvatar,
           createTime: data.timestamp || new Date().toISOString(),
+          _clientKey: data._clientKey,
         };
         if (!newMsg.senderAvatar && Number(newMsg.senderType) === 1) {
           newMsg.senderAvatar = conv?.ownerAgentAvatar || currentConversation.value?.ownerAgentAvatar || '';
         }
         // 避免重复添加（也检查 local_ 前缀消息以防 WebSocket 先于 HTTP 响应到达）
+        const matchLocalMsg = (m) => {
+          if (!String(m.id).startsWith('local_') || m._matched) return false;
+          if (m.senderId !== newMsg.senderId) return false;
+          // 优先用 _clientKey 匹配，其次用 content + 时间窗口匹配
+          if (m._clientKey && newMsg._clientKey) return m._clientKey === newMsg._clientKey;
+          if (m.content !== newMsg.content) return false;
+          const timeDiff = Math.abs(new Date(m.createTime).getTime() - new Date(newMsg.createTime || newMsg.timestamp).getTime());
+          return timeDiff < 5000;
+        };
         const isDuplicate = messages.value.find(m => m.id === newMsg.id) ||
           (newMsg.senderId === agentId.value && Number(newMsg.senderType) === 2 &&
-           messages.value.find(m => String(m.id).startsWith('local_') && m.senderId === newMsg.senderId &&
-             m.content === newMsg.content));
+           messages.value.find(matchLocalMsg));
         if (!isDuplicate) {
           messages.value.push(newMsg);
           scrollToBottom();
           scheduleClearUnread();
         } else if (newMsg.senderId === agentId.value) {
-          // WebSocket 回传自己发的消息，用真实 ID 替换 local_ ID
-          const localIdx = messages.value.findIndex(m => String(m.id).startsWith('local_') && m.senderId === newMsg.senderId && m.content === newMsg.content);
+          const localIdx = messages.value.findIndex(matchLocalMsg);
           if (localIdx > -1) {
             messages.value[localIdx].id = newMsg.id;
+            messages.value[localIdx]._matched = true;
           }
         }
       }
@@ -3988,13 +4007,22 @@ function handleWsMessage(data: any) {
       }
       break;
     case 'ai_suggestion_stream':
-      // 回复建议流式消息 — dismissed 时丢弃
+      // 回复建议流式消息 — dismissed 时丢弃（RAF 批处理）
       if (currentConversation.value?.id === data.conversationId && !aiSuggestionDismissed.value) {
-        aiSuggestion.value = (aiSuggestion.value || '') + data.content;
+        pendingSuggestionTokens.push(data.content);
+        if (!suggestionRafId) {
+          suggestionRafId = requestAnimationFrame(() => {
+            suggestionRafId = null;
+            aiSuggestion.value = (aiSuggestion.value || '') + pendingSuggestionTokens.join('');
+            pendingSuggestionTokens = [];
+          });
+        }
       }
       break;
     case 'ai_suggestion_complete':
       // 回复建议生成完成 — dismissed 时丢弃
+      pendingSuggestionTokens = [];
+      if (suggestionRafId) { cancelAnimationFrame(suggestionRafId); suggestionRafId = null; }
       if (currentConversation.value?.id === data.conversationId && !aiSuggestionDismissed.value) {
         aiSuggestion.value = data.content;
         aiSuggestionLoading.value = false;
@@ -4025,6 +4053,14 @@ function handleWsMessage(data: any) {
       // AI流式消息完成
       if (currentConversation.value?.id === data.conversationId) {
         handleAiStreamComplete(data);
+      } else {
+        // 非当前会话的 AI 完成消息，更新会话列表预览（切换时会自动重新加载消息）
+        const streamConv = conversations.value.find(c => c.id === data.conversationId);
+        if (streamConv) {
+          streamConv.lastMessage = data.content || streamConv.lastMessage;
+          streamConv.lastMessageTime = data.timestamp || new Date().toISOString();
+        }
+        sortConversations();
       }
       break;
     case 'user_offline':
@@ -4370,6 +4406,15 @@ function normalizeImgUrls(html: string): string {
   } catch { return html; }
 }
 
+// 流式消息轻量渲染（跳过 markdown 解析，完成后由 renderMessage 接管）
+function renderStreamingText(content: string) {
+  return content
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br>');
+}
+
 // 渲染消息内容（支持富文本HTML、Markdown、纯文本）
 function renderMessage(content: string) {
   if (!content) return '';
@@ -4432,38 +4477,51 @@ function renderMarkdown(content: string) {
   }
 }
 
-// 处理AI流式token
+// 处理AI流式token（RAF 批处理，每帧最多刷新一次 DOM）
 function handleAiStreamToken(data: any) {
   const messageId = data.messageId;
   const token = data.content;
-  
+
   if (!messageId || !token) return;
-  
-  // 累积token
-  const currentContent = streamingMessages.value.get(messageId) || '';
-  const newContent = currentContent + token;
-  streamingMessages.value.set(messageId, newContent);
-  
-  // 查找或创建消息
-  let existingMsg = messages.value.find(m => m.id === messageId);
-  if (!existingMsg) {
-    // 创建新的流式消息
-    existingMsg = {
-      id: messageId,
-      conversationId: data.conversationId,
-      content: newContent,
-      senderType: 1, // AI消息
-      senderId: 'ai',
-      senderName: '智能客服',
-      createTime: new Date().toISOString(),
-      isStreaming: true,
-    };
-    messages.value.push(existingMsg);
-  } else {
-    // 更新现有消息内容
-    existingMsg.content = newContent;
+
+  let entry = pendingTokens.get(messageId);
+  if (!entry) {
+    entry = { tokens: [], conversationId: data.conversationId };
+    pendingTokens.set(messageId, entry);
   }
-  
+  entry.tokens.push(token);
+
+  if (!tokenRafId) {
+    tokenRafId = requestAnimationFrame(flushPendingTokens);
+  }
+}
+
+function flushPendingTokens() {
+  tokenRafId = null;
+  for (const [messageId, entry] of pendingTokens) {
+    const batch = entry.tokens.join('');
+    const currentContent = streamingMessages.value.get(messageId) || '';
+    const newContent = currentContent + batch;
+    streamingMessages.value.set(messageId, newContent);
+
+    let existingMsg = messages.value.find(m => m.id === messageId);
+    if (!existingMsg) {
+      existingMsg = {
+        id: messageId,
+        conversationId: entry.conversationId,
+        content: newContent,
+        senderType: 1,
+        senderId: 'ai',
+        senderName: '智能客服',
+        createTime: new Date().toISOString(),
+        isStreaming: true,
+      };
+      messages.value.push(existingMsg);
+    } else {
+      existingMsg.content = newContent;
+    }
+  }
+  pendingTokens.clear();
   scrollToBottom();
 }
 
@@ -4472,12 +4530,25 @@ function handleAiStreamComplete(data: any) {
   const messageId = data.messageId;
   const fullContent = data.content;
   
-  // 清除流式缓存
+  // 清理缓冲区，防止残留 RAF 刷入脏数据
+  pendingTokens.delete(messageId);
   streamingMessages.value.delete(messageId);
   
-  // 更新消息为最终内容
-  const existingMsg = messages.value.find(m => m.id === messageId);
-  if (existingMsg) {
+  // 更新消息为最终内容（RAF 未 flush 时 complete 先到则创建）
+  let existingMsg = messages.value.find(m => m.id === messageId);
+  if (!existingMsg) {
+    existingMsg = {
+      id: messageId,
+      conversationId: data.conversationId,
+      content: fullContent,
+      senderType: 1,
+      senderId: 'ai',
+      senderName: '智能客服',
+      createTime: new Date().toISOString(),
+      isStreaming: false,
+    };
+    messages.value.push(existingMsg);
+  } else {
     existingMsg.content = fullContent;
     existingMsg.isStreaming = false;
   }
@@ -4487,7 +4558,9 @@ function handleAiStreamComplete(data: any) {
 
 function scrollToBottom() {
   showScrollToBottom.value = false;
-  nextTick(() => {
+  if (scrollRafId) return;
+  scrollRafId = requestAnimationFrame(() => {
+    scrollRafId = null;
     if (messagesRef.value) {
       messagesRef.value.scrollTop = messagesRef.value.scrollHeight;
       scheduleClearUnread();

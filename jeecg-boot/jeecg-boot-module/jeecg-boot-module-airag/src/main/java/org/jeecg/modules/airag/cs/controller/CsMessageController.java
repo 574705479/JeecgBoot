@@ -482,9 +482,22 @@ public class CsMessageController {
     @Operation(summary = "客服发送消息")
     @PostMapping("/agent/send")
     public Result<CsMessage> sendAgentMessage(@RequestBody Map<String, Object> params) {
+        // 从登录用户获取真实客服信息，防止身份伪造
+        LoginUser loginUser = (LoginUser) SecurityUtils.getSubject().getPrincipal();
+        if (loginUser == null) {
+            return Result.error("未登录");
+        }
+        CsAgent agent = agentService.getByUserId(loginUser.getId());
+        if (agent == null) {
+            agent = agentService.getByUserId(loginUser.getUsername());
+        }
+        if (agent == null) {
+            return Result.error("未找到客服信息");
+        }
+        String agentId = agent.getId();
+        String agentName = agent.getNickname();
+        
         String conversationId = params.get("conversationId") != null ? String.valueOf(params.get("conversationId")) : null;
-        String agentId = params.get("agentId") != null ? String.valueOf(params.get("agentId")) : null;
-        String agentName = params.get("agentName") != null ? String.valueOf(params.get("agentName")) : null;
         String content = params.get("content") != null ? String.valueOf(params.get("content")) : null;
         Integer msgType = params.get("msgType") instanceof Integer ? (Integer) params.get("msgType") : null;
         String extra = params.get("extra") != null ? String.valueOf(params.get("extra")) : null;

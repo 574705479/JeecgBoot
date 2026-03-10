@@ -32,6 +32,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Async;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -797,8 +798,10 @@ public class CsMessageServiceImpl implements ICsMessageService {
         // 保存到MongoDB
         saveToMongo(message);
         
-        // 更新会话
+        // 更新会话最后消息 + 清除未读 + 清除访客等待标记
         conversationService.updateLastMessage(conversationId, content, 2);
+        conversationService.clearUnread(conversationId);
+        conversationService.clearVisitorLastMsgTime(conversationId);
         
         // 推送给用户
         pushToUser(conversationId, message);
@@ -981,6 +984,22 @@ public class CsMessageServiceImpl implements ICsMessageService {
         private CollaboratorCacheEntry(List<CsCollaborator> data, long expiresAt) {
             this.data = data;
             this.expiresAt = expiresAt;
+        }
+    }
+
+    @Scheduled(fixedDelay = 60000)
+    public void cleanExpiredCollaboratorCache() {
+        long now = System.currentTimeMillis();
+        int removed = 0;
+        var it = collaboratorCache.entrySet().iterator();
+        while (it.hasNext()) {
+            if (it.next().getValue().expiresAt < now) {
+                it.remove();
+                removed++;
+            }
+        }
+        if (removed > 0) {
+            log.debug("[CS-Message] 清理过期协作者缓存: 移除{}条", removed);
         }
     }
 
@@ -1233,8 +1252,8 @@ public class CsMessageServiceImpl implements ICsMessageService {
                                     .extra(Map.of("isComplete", false))
                                     .build();
                             
-                            // 推送给用户
-                            sessionManager.sendToUser(userId, streamMsg);
+                            // 推送给用户（精确到会话，避免多标签页串消息）
+                            sessionManager.sendToUserByConversation(conversationId, userId, streamMsg);
                             
                             // 推送给客服（负责人 + 协作者 + 管理者；未分配则广播所有在线客服）
                             sendAiStreamToAgents(conversationId, ownerAgentId, streamMsg);
@@ -1293,7 +1312,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
                     .content(aiReply)
                     .build();
             
-            sessionManager.sendToUser(userId, completeMsg);
+            sessionManager.sendToUserByConversation(conversationId, userId, completeMsg);
             sendAiStreamToAgents(conversationId, ownerAgentId, completeMsg);
         }
         
@@ -1311,7 +1330,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
                 .extra(Map.of("isTyping", isTyping))
                 .build();
         
-        sessionManager.sendToUser(userId, statusMsg);
+        sessionManager.sendToUserByConversation(conversationId, userId, statusMsg);
     }
 
     /**
