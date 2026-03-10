@@ -480,6 +480,12 @@ public class CsWebSocketHandler implements WebSocketHandler {
             return;
         }
         
+        // 多 Tab 场景：检查该用户是否还有该会话的其他活跃连接
+        if (sessionManager.isUserOnlineByConversation(conversationId, userId)) {
+            log.info("[CS-WebSocket] 用户仍有其他活跃连接，不发送离线通知: conversationId={}, userId={}", conversationId, userId);
+            return;
+        }
+        
         try {
             CsConversation conversation = conversationService.getById(conversationId);
             if (conversation != null) {
