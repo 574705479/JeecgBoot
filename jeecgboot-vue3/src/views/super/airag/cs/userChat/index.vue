@@ -305,7 +305,7 @@
       <a-button 
         v-if="aiResponding"
         danger
-        @click="stopAiReply"
+        @click="stopAiReply()"
         class="stop-ai-btn"
       >
         <span class="stop-icon">■</span>
@@ -508,7 +508,11 @@ const appInfo = ref({
   prologue: '', // 开场白
   presetQuestion: '', // 预设问题（逗号或换行分隔）
 });
-const defaultAvatar = 'https://gw.alipayobjects.com/zos/rmsportal/KDpgvguMpGfqaHPjicRK.svg';
+const brandLogoUrl = ref('');
+const defaultAvatar = computed(() => {
+  if (brandLogoUrl.value) return resolveFileUrl(brandLogoUrl.value);
+  return '/logo.svg';
+});
 const defaultUserAvatar = 'https://gw.alipayobjects.com/zos/antfincdn/XAosXuNZyF/BiazfanxmamNRoxxVxka.png';
 
 // ==================== 聊天窗口配置 ====================
@@ -618,6 +622,19 @@ async function loadChatWindowConfig() {
   } catch (e) {
     console.warn('加载聊天窗口配置失败', e);
   }
+}
+
+async function loadBrandLogo() {
+  try {
+    const res = await defHttp.get(
+      { url: '/cs/brand/get' },
+      { ...silentRequestOptions, isTransformResponse: false },
+    );
+    const data = res?.result || res;
+    if (data?.logoUrl) {
+      brandLogoUrl.value = data.logoUrl;
+    }
+  } catch {}
 }
 
 // ==================== 敏感词配置 ====================
@@ -822,7 +839,9 @@ function resolveAvatarUrl(avatar?: string) {
 
 function getAgentAvatar(msg?: any) {
   const avatar = msg?.senderAvatar || currentAgentAvatar.value || appInfo.value.avatar;
-  return resolveAvatarUrl(avatar) || defaultAvatar;
+  if (avatar) return resolveAvatarUrl(avatar);
+  if (chatWindowConfig.logo) return resolveFileUrl(chatWindowConfig.logo);
+  return defaultAvatar.value;
 }
 
 function getUserAvatar(msg?: any) {
@@ -1161,8 +1180,8 @@ onMounted(async () => {
     }
   }
 
-  // 加载聊天窗口配置和敏感词配置
-  await Promise.all([loadChatWindowConfig(), loadSensitiveWords()]);
+  // 加载聊天窗口配置、敏感词配置和品牌Logo
+  await Promise.all([loadChatWindowConfig(), loadSensitiveWords(), loadBrandLogo()]);
 
   // 加载访客AI应用信息（头像/开场白/预设问题）
   await loadVisitorAppInfo();
@@ -2439,7 +2458,7 @@ function handleAiStreamToken(data: any) {
   // 将 token 放入缓冲区
   let entry = pendingTokens.get(messageId);
   if (!entry) {
-    entry = { tokens: [], conversationId: data.conversationId };
+    entry = { tokens: [], conversationId: data.conversationId, senderName: data.senderName };
     pendingTokens.set(messageId, entry);
   }
   entry.tokens.push(token);
@@ -2466,7 +2485,7 @@ function flushPendingTokens() {
         content: newContent,
         senderType: 1,
         senderId: 'ai',
-        senderName: '智能客服',
+        senderName: entry.senderName || '智能客服',
         createTime: new Date().toISOString(),
         isStreaming: true,
       };
@@ -2498,7 +2517,7 @@ function handleAiStreamComplete(data: any) {
       content: fullContent,
       senderType: 1,
       senderId: 'ai',
-      senderName: '智能客服',
+      senderName: data.senderName || '智能客服',
       createTime: new Date().toISOString(),
       isStreaming: false,
     };

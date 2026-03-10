@@ -1122,6 +1122,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
                 .senderName(message.getSenderName())
                 .senderAvatar(message.getSenderAvatar())
                 .senderType(message.getSenderType())
+                .isAiGenerated(message.getIsAiGenerated())
                 .extra(extraMap)
                 .timestamp(message.getCreateTime())
                 .build();
@@ -1151,6 +1152,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
                 .senderName(message.getSenderName())
                 .senderAvatar(message.getSenderAvatar())
                 .senderType(message.getSenderType())
+                .isAiGenerated(message.getIsAiGenerated())
                 .extra(extraMap)
                 .timestamp(message.getCreateTime())
                 .build();
@@ -1179,6 +1181,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
                 .senderName(message.getSenderName())
                 .senderAvatar(message.getSenderAvatar())
                 .senderType(message.getSenderType())
+                .isAiGenerated(message.getIsAiGenerated())
                 .extra(extraMap)
                 .timestamp(message.getCreateTime())
                 .build();
@@ -1208,9 +1211,22 @@ public class CsMessageServiceImpl implements ICsMessageService {
         String userId = conversation.getUserId();
         String ownerAgentId = conversation.getOwnerAgentId();
         
+        // 解析 AI 显示名称（与开场白 sendVisitorPrologue 使用同一来源）
+        String visitorAppId = getGlobalVisitorAppId();
+        String aiDisplayName = "智能客服";
+        if (oConvertUtils.isNotEmpty(visitorAppId)) {
+            AiragApp visitorApp = airagAppMapper.getByIdIgnoreTenant(visitorAppId);
+            if (visitorApp != null && oConvertUtils.isNotEmpty(visitorApp.getName())) {
+                aiDisplayName = visitorApp.getName();
+            }
+        }
+        
         // 注册取消标记
         java.util.concurrent.atomic.AtomicBoolean cancelled = new java.util.concurrent.atomic.AtomicBoolean(false);
         activeAiStreams.put(conversationId, cancelled);
+        
+        // effectively final for lambda capture
+        final String displayName = aiDisplayName;
         
         try {
             log.info("[CS-Message] 开始流式AI回复: conversationId={}", conversationId);
@@ -1234,7 +1250,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
                         // ★ 检查取消标记：被取消后不再推送新token，直接完成
                         if (cancelled.get()) {
                             if (completeSent.compareAndSet(false, true)) {
-                                finalizeAiReply(conversationId, userId, ownerAgentId, messageId, fullResponse.toString());
+                                finalizeAiReply(conversationId, userId, ownerAgentId, messageId, fullResponse.toString(), displayName);
                                 activeAiStreams.remove(conversationId);
                             }
                             return;
@@ -1249,6 +1265,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
                                     .conversationId(conversationId)
                                     .messageId(messageId)
                                     .content(token)
+                                    .senderName(displayName)
                                     .extra(Map.of("isComplete", false))
                                     .build();
                             
@@ -1261,7 +1278,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
                         
                         if (isComplete) {
                             if (completeSent.compareAndSet(false, true)) {
-                                finalizeAiReply(conversationId, userId, ownerAgentId, messageId, fullResponse.toString());
+                                finalizeAiReply(conversationId, userId, ownerAgentId, messageId, fullResponse.toString(), displayName);
                                 activeAiStreams.remove(conversationId);
                             }
                         }
@@ -1278,7 +1295,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
             
             // 发送错误消息
             String errorMsg = "抱歉，AI服务暂时不可用，请稍后再试或联系人工客服。";
-            CsMessage errorMessage = CsMessage.createAiMessage(conversationId, "智能客服", errorMsg);
+            CsMessage errorMessage = CsMessage.createAiMessage(conversationId, aiDisplayName, errorMsg);
             saveToMongo(errorMessage);
             pushToUser(conversationId, errorMessage);
         }
@@ -1289,13 +1306,13 @@ public class CsMessageServiceImpl implements ICsMessageService {
      * 保存已累积的内容到MongoDB，发送 ai_stream_complete，关闭 typing 状态
      */
     private void finalizeAiReply(String conversationId, String userId, String ownerAgentId,
-                                  String messageId, String aiReply) {
+                                  String messageId, String aiReply, String displayName) {
         log.info("[CS-Message] AI流式回复完成/中止: conversationId={}, length={}", 
                 conversationId, aiReply != null ? aiReply.length() : 0);
         
         if (oConvertUtils.isNotEmpty(aiReply)) {
             // 创建AI消息并保存
-            CsMessage aiMessage = CsMessage.createAiMessage(conversationId, "智能客服", aiReply);
+            CsMessage aiMessage = CsMessage.createAiMessage(conversationId, displayName, aiReply);
             aiMessage.setId(messageId);
             
             // 保存到MongoDB
@@ -1310,6 +1327,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
                     .conversationId(conversationId)
                     .messageId(messageId)
                     .content(aiReply)
+                    .senderName(displayName)
                     .build();
             
             sessionManager.sendToUserByConversation(conversationId, userId, completeMsg);

@@ -547,12 +547,12 @@
               <div class="msg-body">
                 <div class="msg-info">
                   <span class="sender-name">{{ msg.actualSenderName || msg.senderName }}</span>
-                  <a-tag v-if="msg.senderType === 1 || msg.isAiGenerated" color="purple" size="small">AI</a-tag>
+                  <a-tag v-if="msg.senderType === 1 || msg.isAiGenerated || (msg.senderType === 2 && !msg.senderId)" color="purple" size="small">AI</a-tag>
                   <a-avatar :size="messageAvatarSize" class="msg-avatar-inline" :src="getMessageAvatarUrl(msg)">
                     {{ (msg.actualSenderName || msg.senderName)?.charAt(0) || (msg.senderType === 1 ? 'AI' : '客') }}
                   </a-avatar>
                 </div>
-                <div class="msg-bubble agent-bubble" :class="{ 'ai-bubble': msg.senderType === 1 || msg.isAiGenerated }">
+                <div class="msg-bubble agent-bubble" :class="{ 'ai-bubble': msg.senderType === 1 || msg.isAiGenerated || (msg.senderType === 2 && !msg.senderId) }">
                   <div v-if="msg.content" class="msg-text" v-html="msg.isStreaming ? renderStreamingText(msg.content) : renderMessage(msg.content)"></div>
                   <div
                     v-if="getMediaGridData(msg).items.length"
@@ -1040,6 +1040,8 @@ import { defHttp } from '/@/utils/http/axios';
 import { useGlobSetting } from '/@/hooks/setting';
 import { ElectronEnum } from '/@/enums/jeecgEnum';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
+import { getBrandSetting } from '/@/settings/brandSetting';
+import { resolveBrandUrl } from '/@/utils/brand';
 import { createImgPreview } from '/@/components/Preview';
 import EmojiPicker from '../components/EmojiPicker.vue';
 import { computeFileMd5 } from '../utils/fileHash';
@@ -1252,6 +1254,9 @@ function httpPut<T = any>(config: any, options: any = {}) {
 function httpDelete<T = any>(config: any, options: any = {}) {
   return defHttp.delete<T>(config, { ...silentRequestOptions, ...options });
 }
+
+// 聊天窗口配置 Logo（优先级高于品牌配置 Logo）
+const chatWindowLogo = ref('');
 
 // 客服信息
 const agentId = ref('');
@@ -1709,6 +1714,7 @@ onMounted(async () => {
     loadAiPrologueEnabled(),      // 加载AI开场白开关状态
     loadGlobalVisitorApp(),       // 加载全局访客AI应用配置
     loadAgentTimeoutConfig(),     // 加载客服超时未回复配置
+    loadChatWindowLogo(),         // 加载聊天窗口Logo
     loadConversations(),
   ]);
   startWaitingTimer();             // 启动访客等待时长计时器
@@ -1991,7 +1997,18 @@ function getMessageAvatarUrl(msg: any) {
   if (avatar) {
     return getFileAccessHttpUrl(avatar);
   }
-  if (Number(msg?.senderType) === 1) {
+  const st = Number(msg?.senderType);
+  const isAi = st === 1 || msg?.isAiGenerated || (st === 2 && !msg?.senderId);
+  if (isAi) {
+    if (chatWindowLogo.value) {
+      return getFileAccessHttpUrl(chatWindowLogo.value);
+    }
+    const brandLogo = getBrandSetting().logoUrl;
+    if (brandLogo) {
+      return resolveBrandUrl(brandLogo);
+    }
+  }
+  if (Number(msg?.senderType) !== 0) {
     const conv = conversations.value.find((c) => c.id === msg?.conversationId);
     const ownerAvatar = msg?.ownerAgentAvatar || conv?.ownerAgentAvatar || currentConversation.value?.ownerAgentAvatar;
     if (ownerAvatar) {
@@ -2255,6 +2272,22 @@ async function loadGlobalVisitorApp() {
   } catch (e) {
     console.error('加载访客AI应用配置失败', e);
   }
+}
+
+// 加载聊天窗口配置 Logo
+async function loadChatWindowLogo() {
+  try {
+    const res = await httpGet({ url: '/cs/agent/global/chat-window-settings' });
+    let parsed: any = {};
+    if (typeof res === 'string') {
+      try { parsed = JSON.parse(res); } catch {}
+    } else if (res && typeof res === 'object') {
+      parsed = res;
+    }
+    if (parsed.logo) {
+      chatWindowLogo.value = parsed.logo;
+    }
+  } catch {}
 }
 
 // 加载AI开关状态
@@ -3642,12 +3675,10 @@ function handleWsMessage(data: any) {
           senderId: data.senderId,
           senderName: data.senderName,
           senderAvatar: data.senderAvatar,
+          isAiGenerated: data.isAiGenerated,
           createTime: data.timestamp || new Date().toISOString(),
           _clientKey: data._clientKey,
         };
-        if (!newMsg.senderAvatar && Number(newMsg.senderType) === 1) {
-          newMsg.senderAvatar = conv?.ownerAgentAvatar || currentConversation.value?.ownerAgentAvatar || '';
-        }
         // 避免重复添加（也检查 local_ 前缀消息以防 WebSocket 先于 HTTP 响应到达）
         const matchLocalMsg = (m) => {
           if (!String(m.id).startsWith('local_') || m._matched) return false;
@@ -4522,7 +4553,7 @@ function handleAiStreamToken(data: any) {
 
   let entry = pendingTokens.get(messageId);
   if (!entry) {
-    entry = { tokens: [], conversationId: data.conversationId };
+    entry = { tokens: [], conversationId: data.conversationId, senderName: data.senderName };
     pendingTokens.set(messageId, entry);
   }
   entry.tokens.push(token);
@@ -4549,7 +4580,7 @@ function flushPendingTokens() {
         content: newContent,
         senderType: 1,
         senderId: 'ai',
-        senderName: '智能客服',
+        senderName: entry.senderName || '智能客服',
         createTime: new Date().toISOString(),
         isStreaming: true,
       };
@@ -4580,7 +4611,7 @@ function handleAiStreamComplete(data: any) {
       content: fullContent,
       senderType: 1,
       senderId: 'ai',
-      senderName: '智能客服',
+      senderName: data.senderName || '智能客服',
       createTime: new Date().toISOString(),
       isStreaming: false,
     };

@@ -66,6 +66,11 @@ public class CsWebSocketMessage {
     private String senderAvatar;
 
     /**
+     * 是否AI生成
+     */
+    private Boolean isAiGenerated;
+
+    /**
      * 时间戳
      */
     private Date timestamp;
