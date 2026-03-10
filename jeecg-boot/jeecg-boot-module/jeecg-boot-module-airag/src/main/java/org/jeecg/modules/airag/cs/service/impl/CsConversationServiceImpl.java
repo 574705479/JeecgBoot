@@ -1036,6 +1036,7 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         updateWrapper.eq(CsConversation::getId, conversationId)
                 .set(CsConversation::getUnreadCount, 0);
         update(updateWrapper);
+        broadcastToAllAgents("unread_cleared", Map.of("conversationId", conversationId));
     }
 
     @Override

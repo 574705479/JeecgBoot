@@ -277,7 +277,7 @@
           :class="{ active: filter === 'monitor' }"
           @click="filter = 'monitor'"
         >
-          <TeamOutlined /> 同事会话
+          <TeamOutlined /> 同事会话 <span class="count" v-if="filter === 'monitor' && monitorCount > 0">{{ monitorCount }}</span>
         </div>
       </div>
 
@@ -306,9 +306,9 @@
             </div>
             <div class="conv-preview">{{ stripHtmlTags(conv.lastMessage) || '暂无消息' }}</div>
             <!-- 显示当前对话客服 - 从消息列表中获取最后一个发消息的客服 -->
-            <div class="conv-agent" v-if="getLastTalkingAgent(conv) && conv.status === 1">
+            <div class="conv-agent" v-if="conv.lastTalkingAgent && conv.status === 1">
               <span class="agent-label">对话中:</span>
-              <span class="agent-name">{{ getLastTalkingAgent(conv) }}</span>
+              <span class="agent-name">{{ conv.lastTalkingAgent }}</span>
             </div>
             <div class="conv-waiting" v-if="agentTimeoutConfig.enabled && visitorWaitingSeconds[conv.id]">
               <span class="waiting-icon">⏱</span>
@@ -1308,6 +1308,10 @@ const statsData = ref({ myCount: 0, unassignedCount: 0, closedCount: 0 });
 const myCount = computed(() => statsData.value.myCount);
 const _unassignedCount = computed(() => statsData.value.unassignedCount); // 待接入标签已隐藏
 const _closedCount = computed(() => statsData.value.closedCount); // 已结束标签已隐藏
+const monitorCount = computed(() => {
+  if (filter.value !== 'monitor') return 0;
+  return monitorGroups.value.reduce((sum, g) => sum + g.conversations.length, 0);
+});
 
 // ============ 监控模式：按客服分组 ============
 const monitorAgentList = ref<any[]>([]); // 监控模式下的所有客服列表
@@ -1445,6 +1449,9 @@ let tokenRafId: number | null = null;
 let scrollRafId: number | null = null;
 let pendingSuggestionTokens: string[] = [];
 let suggestionRafId: number | null = null;
+
+// 会话切换序列号，用于丢弃过期的异步请求结果
+let switchSeq = 0;
 
 // 访客信息
 const visitorInfo = ref<any>({});
@@ -2600,6 +2607,16 @@ function sortConversations() {
 
 // 选择会话
 async function selectConversation(conv: any) {
+  if (currentConversation.value?.id === conv.id) return;
+  const seq = ++switchSeq;
+
+  // 清理旧会话的AI流式缓冲区，防止幽灵消息
+  pendingTokens.clear();
+  if (tokenRafId) { cancelAnimationFrame(tokenRafId); tokenRafId = null; }
+  streamingMessages.value.clear();
+  pendingSuggestionTokens = [];
+  if (suggestionRafId) { cancelAnimationFrame(suggestionRafId); suggestionRafId = null; }
+
   // 清理上一个会话残留，避免昵称/头像短暂闪回
   visitorInfo.value = { level: 1, star: 0 };
   visitorTags.value = [];
@@ -2629,14 +2646,44 @@ async function selectConversation(conv: any) {
   aiSuggestionDismissed.value = false;
   aiSuggestionLoading.value = false;
   
-  // AI应用使用客服全局设置，不跟随会话变化
+  // Phase 1：三个独立请求并行（detail + messages + visitor）
+  await Promise.all([
+    loadConversationDetail(conv, seq),
+    loadMessages(conv.id, seq),
+    loadVisitorInfo(conv.appId, conv.userId, seq),
+  ]);
 
-  // 从API拉取完整会话详情（补充设备/地理位置等字段）
+  if (seq !== switchSeq) return;
+
+  // Phase 2：依赖 detail 提供的 userIp
+  await loadBlacklistStatus(seq);
+
+  if (seq !== switchSeq) return;
+  
+  // 加载消息后，计算"对话中"的客服并缓存
+  const listItem = conversations.value.find(c => c.id === conv.id);
+  const lastAgent = getLastAgentFromMessages();
+  if (lastAgent) {
+    conv.lastTalkingAgent = lastAgent;
+    if (listItem) {
+      listItem.lastTalkingAgent = lastAgent;
+    }
+  }
+  
+  scheduleClearUnread();
+  if (conv.userOnline !== undefined) {
+    userOnline.value = conv.userOnline;
+  }
+  nextTick(() => inputRef.value?.focus());
+}
+
+// 加载会话详情（补充设备/地理位置等字段）
+async function loadConversationDetail(conv: any, seq?: number) {
   try {
     const convDetail = await httpGet({ url: `/cs/conversation/${conv.id}` });
+    if (seq !== undefined && seq !== switchSeq) return;
     if (convDetail) {
       const detail = convDetail.result || convDetail;
-      // 合并详情到当前会话对象（保留列表中已有的额外字段如 visitorNickname）
       const fieldsToMerge = [
         'userIp', 'userDevice', 'userOs', 'userOsVersion', 
         'userBrowser', 'userBrowserVersion', 'userDeviceId',
@@ -2652,27 +2699,6 @@ async function selectConversation(conv: any) {
   } catch {
     // 获取会话详情失败不影响主流程
   }
-
-  await loadMessages(conv.id);
-  await loadVisitorInfo(conv.appId, conv.userId);
-  await loadBlacklistStatus();
-  
-  // 加载消息后，计算"对话中"的客服并缓存
-  const listItem = conversations.value.find(c => c.id === conv.id);
-  const lastAgent = getLastAgentFromMessages();
-  if (lastAgent) {
-    conv.lastTalkingAgent = lastAgent;
-    // 同步更新会话列表中的对应项
-    if (listItem) {
-      listItem.lastTalkingAgent = lastAgent;
-    }
-  }
-  
-  scheduleClearUnread();
-  if (conv.userOnline !== undefined) {
-    userOnline.value = conv.userOnline;
-  }
-  nextTick(() => inputRef.value?.focus());
 }
 
 // 从消息列表中获取最后一个发消息的客服名称
@@ -2692,8 +2718,8 @@ function getLastAgentFromMessages(): string | null {
   return null;
 }
 
-// 获取当前正在对话的客服（从缓存或消息中获取）
-function getLastTalkingAgent(conv: any): string | null {
+// 获取当前正在对话的客服（从缓存或消息中获取，模板已改为直接使用 conv.lastTalkingAgent）
+function _getLastTalkingAgent(conv: any): string | null {
   // 优先使用缓存的lastTalkingAgent
   if (conv.lastTalkingAgent) {
     return conv.lastTalkingAgent;
@@ -2711,21 +2737,13 @@ function getLastTalkingAgent(conv: any): string | null {
   return null;
 }
 
-// 获取显示名称
+// 获取显示名称（仅依赖 conv 自身字段，避免外部 ref 触发列表全量重渲染）
 function getDisplayName(conv: any): string {
-  // 优先使用会话对象中缓存的昵称
-  if (conv.visitorNickname) {
-    return conv.visitorNickname;
-  }
-  // 如果是当前选中的会话，使用visitorInfo中的昵称
-  if (visitorInfo.value.nickname && currentConversation.value?.id === conv.id) {
-    return visitorInfo.value.nickname;
-  }
-  return conv.userName || '访客';
+  return conv.visitorNickname || conv.userName || '访客';
 }
 
 function getVisitorDisplayName(msg?: any): string {
-  const nickname = currentConversation.value?.visitorNickname || visitorInfo.value?.nickname;
+  const nickname = currentConversation.value?.visitorNickname;
   if (nickname) {
     return nickname;
   }
@@ -2736,12 +2754,14 @@ function getVisitorDisplayName(msg?: any): string {
 }
 
 // 加载消息
-async function loadMessages(conversationId: string) {
+async function loadMessages(conversationId: string, seq?: number) {
   try {
     const res = await httpGet({
       url: `/cs/message/${conversationId}`,
       params: { limit: historyPageSize }
     });
+    if (seq !== undefined && seq !== switchSeq) return;
+    if (conversationId !== currentConversation.value?.id) return;
     const list = Array.isArray(res) ? res : (res?.records || res?.result || []);
     messages.value = list;
     historyBeforeId.value = list[0]?.id || null;
@@ -2756,7 +2776,8 @@ async function loadMessages(conversationId: string) {
 async function loadMoreMessages() {
   if (loadingHistory.value) return;
   if (!hasMoreHistory.value) return;
-  if (!currentConversation.value?.id) return;
+  const convId = currentConversation.value?.id;
+  if (!convId) return;
   const beforeId = historyBeforeId.value;
   if (!beforeId) {
     hasMoreHistory.value = false;
@@ -2770,9 +2791,10 @@ async function loadMoreMessages() {
   loadingHistory.value = true;
   try {
     const res = await httpGet({
-      url: `/cs/message/${currentConversation.value.id}/page`,
+      url: `/cs/message/${convId}/page`,
       params: { beforeId, limit: historyPageSize }
     });
+    if (convId !== currentConversation.value?.id) return;
     const olderMessages = Array.isArray(res) ? res : (res?.records || res?.result || []);
     if (!olderMessages.length) {
       hasMoreHistory.value = false;
@@ -2804,30 +2826,22 @@ async function loadMoreMessages() {
 
 // 加载访客信息（使用缓存优化）
 // 注：新版本不再依赖 appId，使用 userId 作为唯一标识
-async function loadVisitorInfo(appId: string, userId: string) {
+async function loadVisitorInfo(appId: string, userId: string, seq?: number) {
   if (!userId) {
     visitorInfo.value = {};
     visitorTags.value = [];
     return;
   }
   
-  // 使用 userId 作为缓存key（兼容有无appId的情况）
   const cacheKey = getVisitorCacheKey(appId, userId);
-  const currentCacheKey = getVisitorCacheKey(
-    currentConversation.value?.appId,
-    currentConversation.value?.userId
-  );
   
   // 1. 先从缓存加载（立即显示）
   const cached = visitorCache.get(cacheKey);
-  if (cached) {
-    if (cacheKey === currentCacheKey) {
-      visitorInfo.value = cached;
-      visitorTags.value = cached.tags ? JSON.parse(cached.tags) : [];
-      // 同步更新会话列表中的昵称
-      if (cached.nickname && currentConversation.value) {
-        currentConversation.value.visitorNickname = cached.nickname;
-      }
+  if (cached && (seq === undefined || seq === switchSeq)) {
+    visitorInfo.value = cached;
+    visitorTags.value = cached.tags ? JSON.parse(cached.tags) : [];
+    if (cached.nickname && currentConversation.value) {
+      currentConversation.value.visitorNickname = cached.nickname;
     }
   }
   
@@ -2844,17 +2858,14 @@ async function loadVisitorInfo(appId: string, userId: string) {
     });
     
     if (res) {
-      // 更新缓存
       visitorCache.set(cacheKey, res);
       
-      if (cacheKey !== currentCacheKey) {
-        return;
-      }
+      if (seq !== undefined && seq !== switchSeq) return;
+      if (userId !== currentConversation.value?.userId) return;
       
       visitorInfo.value = res;
       visitorTags.value = res.tags ? JSON.parse(res.tags) : [];
       
-      // 如果有昵称，同步更新到会话列表中对应的会话对象
       if (res.nickname && currentConversation.value) {
         const conv = conversations.value.find(c => c.id === currentConversation.value?.id);
         if (conv) {
@@ -2863,18 +2874,17 @@ async function loadVisitorInfo(appId: string, userId: string) {
         currentConversation.value.visitorNickname = res.nickname;
       }
     } else if (!cached) {
-      // 只有没有缓存时才设置默认值
-      if (cacheKey === currentCacheKey) {
-        visitorInfo.value = { level: 1, star: 0 };
-        visitorTags.value = [];
-      }
+      if (seq !== undefined && seq !== switchSeq) return;
+      if (userId !== currentConversation.value?.userId) return;
+      visitorInfo.value = { level: 1, star: 0 };
+      visitorTags.value = [];
     }
   } catch {
     if (!cached) {
-      if (cacheKey === currentCacheKey) {
-        visitorInfo.value = { level: 1, star: 0 };
-        visitorTags.value = [];
-      }
+      if (seq !== undefined && seq !== switchSeq) return;
+      if (userId !== currentConversation.value?.userId) return;
+      visitorInfo.value = { level: 1, star: 0 };
+      visitorTags.value = [];
     }
   }
 }
@@ -2884,7 +2894,7 @@ function resetBlacklistStatus() {
   ipBlacklisted.value = false;
 }
 
-async function loadBlacklistStatus() {
+async function loadBlacklistStatus(seq?: number) {
   resetBlacklistStatus();
   if (!currentConversation.value) {
     return;
@@ -2897,6 +2907,7 @@ async function loadBlacklistStatus() {
         url: '/airag/cs/visitor/blacklist/check',
         params: { userId },
       });
+      if (seq !== undefined && seq !== switchSeq) return;
       userIdBlacklisted.value = !!res?.blacklisted;
     }
     if (userIp) {
@@ -2904,6 +2915,7 @@ async function loadBlacklistStatus() {
         url: '/airag/cs/visitor/blacklist/ip/check',
         params: { ip: userIp },
       });
+      if (seq !== undefined && seq !== switchSeq) return;
       ipBlacklisted.value = !!res?.blacklisted;
     }
   } catch (e) {
@@ -3202,15 +3214,19 @@ watch(() => currentConversation.value?.id, (newId) => {
 // 结束会话
 async function closeConversation() {
   if (!currentConversation.value) return;
-  
+  const closingId = currentConversation.value.id;
   try {
-    await httpPost({ url: `/cs/conversation/${currentConversation.value.id}/close` });
+    await httpPost({ url: `/cs/conversation/${closingId}/close` });
     console.log('[Workbench] 会话已结束');
-    currentConversation.value.status = 2;
-    
-    // 刷新会话列表和统计数据
-    await loadConversations();
-    await loadStats();
+
+    const idx = conversations.value.findIndex(c => c.id === closingId);
+    if (idx > -1) {
+      conversations.value.splice(idx, 1);
+    }
+    if (currentConversation.value?.id === closingId) {
+      currentConversation.value = null;
+    }
+    loadStatsDebounced();
   } catch (e) {
     console.error('[Workbench] 结束会话失败', e);
   }
@@ -3781,7 +3797,7 @@ function handleWsMessage(data: any) {
               ownerAgentId: convOwnerAgentId,
               createTime: data.extra?.createTime || new Date().toISOString(),
               lastMessageTime: data.extra?.createTime || new Date().toISOString(),
-              lastMessage: '会话已创建',
+              lastMessage: data.content || '',
               unreadCount: 0,
               messageCount: 0,
               // 设备信息
@@ -3988,6 +4004,12 @@ function handleWsMessage(data: any) {
           loadAvailableAgents();
         }
         
+        // 实时更新监控模式下的客服状态
+        const monitorAgent = monitorAgentList.value.find(a => a.id === changedAgentId);
+        if (monitorAgent) {
+          monitorAgent.status = newStatus;
+        }
+        
         // 显示提示（仅当其他客服状态变化时）
         if (changedAgentId !== agentId.value) {
           const agentName = statusData.agentName || '客服';
@@ -4053,6 +4075,9 @@ function handleWsMessage(data: any) {
       // AI流式消息完成
       if (currentConversation.value?.id === data.conversationId) {
         handleAiStreamComplete(data);
+        currentConversation.value.lastMessage = data.content || currentConversation.value.lastMessage;
+        currentConversation.value.lastMessageTime = data.timestamp || new Date().toISOString();
+        sortConversations();
       } else {
         // 非当前会话的 AI 完成消息，更新会话列表预览（切换时会自动重新加载消息）
         const streamConv = conversations.value.find(c => c.id === data.conversationId);
@@ -4081,6 +4106,17 @@ function handleWsMessage(data: any) {
       }
       if (currentConversation.value?.id === data.conversationId) {
         userOnline.value = true;
+      }
+      break;
+    case 'unread_cleared':
+      {
+        const clearedConv = conversations.value.find(c => c.id === data.conversationId);
+        if (clearedConv) {
+          clearedConv.unreadCount = 0;
+        }
+        if (currentConversation.value?.id === data.conversationId) {
+          currentConversation.value.unreadCount = 0;
+        }
       }
       break;
     case 'message_recall': {
@@ -4499,6 +4535,7 @@ function handleAiStreamToken(data: any) {
 function flushPendingTokens() {
   tokenRafId = null;
   for (const [messageId, entry] of pendingTokens) {
+    if (entry.conversationId !== currentConversation.value?.id) continue;
     const batch = entry.tokens.join('');
     const currentContent = streamingMessages.value.get(messageId) || '';
     const newContent = currentContent + batch;

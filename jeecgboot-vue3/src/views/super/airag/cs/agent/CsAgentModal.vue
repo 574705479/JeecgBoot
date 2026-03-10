@@ -65,9 +65,6 @@ const [registerForm, { setFieldsValue, resetFields, validate, updateSchema }] = 
     { field: 'maxSessions', label: '最大接待数', component: 'InputNumber', defaultValue: 10,
       componentProps: { min: 1, max: 50 }
     },
-    { field: 'welcomeMessage', label: '欢迎语', component: 'InputTextArea',
-      componentProps: { rows: 3, placeholder: '用户接入时发送的欢迎语' }
-    },
   ],
   showActionButtonGroup: false,
 });
@@ -82,7 +79,6 @@ const [registerModal, { setModalProps, closeModal }] = useModalInner(async (data
       nickname: data.record.nickname,
       avatar: data.record.avatar,
       maxSessions: data.record.maxSessions,
-      welcomeMessage: data.record.welcomeMessage,
     });
   }
 });

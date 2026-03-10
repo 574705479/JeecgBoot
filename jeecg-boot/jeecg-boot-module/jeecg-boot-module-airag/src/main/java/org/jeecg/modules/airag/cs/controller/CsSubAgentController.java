@@ -167,9 +167,11 @@ public class CsSubAgentController {
         String salt = oConvertUtils.randomGen(8);
         String passwordEncode = PasswordUtil.encrypt(form.getUsername(), form.getPassword(), salt);
 
+        String phone = oConvertUtils.isNotEmpty(form.getPhone()) ? form.getPhone() : null;
+        String email = oConvertUtils.isNotEmpty(form.getEmail()) ? form.getEmail() : null;
         csSubAgentMapper.insertSysUser(sysUserId, form.getUsername(),
                 oConvertUtils.isNotEmpty(form.getNickname()) ? form.getNickname() : form.getUsername(),
-                passwordEncode, salt, form.getPhone(), form.getEmail());
+                passwordEncode, salt, phone, email);
 
         // 3. 查询子客服角色ID，分配角色
         String roleId = csSubAgentMapper.getRoleIdByCode(SUB_AGENT_ROLE_CODE);

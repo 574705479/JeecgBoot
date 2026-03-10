@@ -392,8 +392,8 @@ const loadingMode = ref(true); // 正在加载配置
 const tokenMode = computed(() => visitorTokenRequired.value);
 // 调试参数
 const externalUserId = ref('U1001');
-const userName = ref('Tom');
-const source = ref('partnerA');
+const userName = ref('');
+const source = ref('');
 const agentId = ref('');
 const token = ref('');
 const expireAt = ref(0);

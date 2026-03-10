@@ -42,17 +42,8 @@
             width="100"
           />
         </a-form-item>
-        <a-form-item label="手机号">
-          <a-input v-model:value="formState.phone" placeholder="请输入手机号" />
-        </a-form-item>
-        <a-form-item label="邮箱">
-          <a-input v-model:value="formState.email" placeholder="请输入邮箱" />
-        </a-form-item>
         <a-form-item label="最大接待数">
           <a-input-number v-model:value="formState.maxSessions" :min="1" :max="50" style="width: 100%" />
-        </a-form-item>
-        <a-form-item label="欢迎语">
-          <a-textarea v-model:value="formState.welcomeMessage" :rows="3" placeholder="用户接入时发送的欢迎语" />
         </a-form-item>
         <a-form-item label="可见菜单">
           <a-tree
@@ -99,6 +90,7 @@ import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
 import { isMenuAllowed } from '/@/utils/license/featureMenuMap';
 
 const { createConfirm, createMessage } = useMessage();
+const MENU_STORAGE_KEY = 'cs_sub_agent_last_menus';
 
 // ==================== 表格 ====================
 const columns = [
@@ -257,7 +249,11 @@ function handleAdd() {
     welcomeMessage: '',
     allowedMenus: '',
   });
-  checkedMenuKeys.value = [];
+  try {
+    checkedMenuKeys.value = JSON.parse(localStorage.getItem(MENU_STORAGE_KEY) || '[]');
+  } catch {
+    checkedMenuKeys.value = [];
+  }
   openModal(true);
 }
 
@@ -334,6 +330,7 @@ async function handleSubmit() {
       createMessage.success('编辑成功');
     } else {
       await defHttp.post({ url: '/cs/sub-agent/add', data: submitData });
+      localStorage.setItem(MENU_STORAGE_KEY, JSON.stringify(checkedMenuKeys.value));
       createMessage.success('添加成功');
     }
     closeModal();
@@ -344,7 +341,7 @@ async function handleSubmit() {
 }
 
 async function handleDelete(record: any) {
-  await defHttp.delete({ url: '/cs/sub-agent/delete', params: { id: record.id } });
+  await defHttp.delete({ url: `/cs/sub-agent/delete?id=${record.id}` });
   createMessage.success('删除成功');
   reload();
 }
