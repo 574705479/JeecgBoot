@@ -46,7 +46,7 @@ public interface CsVisitorMapper extends BaseMapper<CsVisitor> {
     /**
      * 切换星标状态
      */
-    @Update("UPDATE cs_visitor SET star = IF(star = 0, 1, 0), update_time = NOW() WHERE id = #{id}")
+    @Update("UPDATE cs_visitor SET star = IF(star = 0, 1, 0), star_time = IF(star = 0, NOW(), NULL), update_time = NOW() WHERE id = #{id}")
     int toggleStar(@Param("id") String id);
 
     /**

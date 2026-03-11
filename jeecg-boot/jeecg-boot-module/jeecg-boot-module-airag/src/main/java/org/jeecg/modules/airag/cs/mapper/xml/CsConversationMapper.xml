@@ -3,13 +3,19 @@
 <mapper namespace="org.jeecg.modules.airag.cs.mapper.CsConversationMapper">
 
     <!-- 分页查询会话列表 (重构版) -->
+    <!-- 注意：ownerAgentId 字段通过 @TableField("agent_id") 映射，XML 中必须显式别名 -->
     <select id="selectConversationPage" resultType="org.jeecg.modules.airag.cs.entity.CsConversation">
         SELECT 
             c.*,
+            c.agent_id as owner_agent_id,
             a.nickname as owner_agent_name,
-            a.avatar as owner_agent_avatar
+            a.avatar as owner_agent_avatar,
+            v.nickname as visitor_nickname,
+            v.star as visitor_star,
+            v.star_time as visitor_star_time
         FROM cs_conversation c
         LEFT JOIN cs_agent a ON c.agent_id = a.id
+        LEFT JOIN cs_visitor v ON c.user_id = v.user_id AND c.app_id = v.app_id
         <where>
             <!-- ★ 逻辑删除过滤：根据includeDeleted参数决定是否包含已删除记录 -->
             <if test="includeDeleted == null or includeDeleted == false">
@@ -117,6 +123,25 @@
                 AND c.app_id = #{appId}
             </if>
         </where>
+        ORDER BY c.last_message_time DESC
+    </select>
+
+    <!-- 查询所有进行中的会话（监控模式），包含访客星标和客服信息 -->
+    <!-- 注意：ownerAgentId 字段通过 @TableField("agent_id") 映射，XML 中必须显式别名 -->
+    <select id="selectAllActiveConversations" resultType="org.jeecg.modules.airag.cs.entity.CsConversation">
+        SELECT
+            c.*,
+            c.agent_id as owner_agent_id,
+            a.nickname as owner_agent_name,
+            a.avatar as owner_agent_avatar,
+            v.nickname as visitor_nickname,
+            v.star as visitor_star,
+            v.star_time as visitor_star_time
+        FROM cs_conversation c
+        LEFT JOIN cs_agent a ON c.agent_id = a.id
+        LEFT JOIN cs_visitor v ON c.user_id = v.user_id AND c.app_id = v.app_id
+        WHERE c.status IN (0, 1)
+          AND (c.deleted = 0 OR c.deleted IS NULL)
         ORDER BY c.last_message_time DESC
     </select>
 

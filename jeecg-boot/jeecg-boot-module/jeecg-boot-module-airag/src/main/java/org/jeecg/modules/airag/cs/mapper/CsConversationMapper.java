@@ -57,11 +57,19 @@ public interface CsConversationMapper extends BaseMapper<CsConversation> {
                                                    @Param("userId") String userId);
 
     /**
+     * 查询所有进行中的会话（监控模式），包含访客星标和客服信息
+     */
+    IPage<CsConversation> selectAllActiveConversations(Page<CsConversation> page);
+
+    /**
      * 获取客服负责的会话列表
      */
-    @Select("SELECT c.*, a.nickname as owner_agent_name, a.avatar as owner_agent_avatar " +
+    @Select("SELECT c.*, c.agent_id as owner_agent_id, " +
+            "a.nickname as owner_agent_name, a.avatar as owner_agent_avatar, " +
+            "v.nickname as visitor_nickname, v.star as visitor_star, v.star_time as visitor_star_time " +
             "FROM cs_conversation c " +
             "LEFT JOIN cs_agent a ON c.agent_id = a.id " +
+            "LEFT JOIN cs_visitor v ON c.user_id = v.user_id AND c.app_id = v.app_id " +
             "WHERE c.agent_id = #{agentId} AND c.status != 2 " +
             "AND (c.deleted = 0 OR c.deleted IS NULL) " +
             "ORDER BY c.last_message_time DESC")

@@ -213,6 +213,20 @@ public class CsConversation implements Serializable {
     @Schema(description = "用户是否在线")
     private Boolean userOnline;
 
+    @TableField(exist = false)
+    @Schema(description = "访客备注昵称(来自cs_visitor)")
+    private String visitorNickname;
+
+    @TableField(exist = false)
+    @Schema(description = "访客星标(来自cs_visitor)")
+    private Integer visitorStar;
+
+    @TableField(exist = false)
+    @JsonFormat(timezone = "GMT+8", pattern = "yyyy-MM-dd HH:mm:ss")
+    @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    @Schema(description = "访客星标时间(来自cs_visitor)")
+    private Date visitorStarTime;
+
     // ==================== 状态常量 ====================
     
     /** 未分配 (AI自动回复中) */

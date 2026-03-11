@@ -12,9 +12,11 @@ import org.jeecg.modules.airag.cs.entity.CsAgent;
 import org.jeecg.modules.airag.cs.entity.CsCollaborator;
 import org.jeecg.modules.airag.cs.entity.CsConversation;
 import org.jeecg.modules.airag.cs.entity.CsGlobalConfig;
+import org.jeecg.modules.airag.cs.entity.CsVisitor;
 import org.jeecg.modules.airag.cs.mapper.CsCollaboratorMapper;
 import org.jeecg.modules.airag.cs.mapper.CsConversationMapper;
 import org.jeecg.modules.airag.cs.mapper.CsGlobalConfigMapper;
+import org.jeecg.modules.airag.cs.mapper.CsVisitorMapper;
 import org.jeecg.modules.airag.cs.service.CsIpGeoService;
 import org.jeecg.modules.airag.cs.service.ICsAgentService;
 import org.jeecg.modules.airag.cs.service.ICsConversationService;
@@ -78,6 +80,9 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
 
     @Autowired
     private CsIpGeoService ipGeoService;
+
+    @Autowired
+    private CsVisitorMapper csVisitorMapper;
 
     // ==================== 会话生命周期 ====================
 
@@ -398,6 +403,17 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             extra.put("userCity", conversation.getUserCity());
             // 浏览器语言
             extra.put("userLang", conversation.getUserLang());
+            // 访客备注信息（老用户回来时直接带上）
+            try {
+                CsVisitor visitor = csVisitorMapper.selectByUserId(conversation.getUserId());
+                if (visitor != null) {
+                    extra.put("visitorNickname", visitor.getNickname());
+                    extra.put("visitorStar", visitor.getStar());
+                    extra.put("visitorStarTime", visitor.getStarTime());
+                }
+            } catch (Exception ex) {
+                log.debug("[CS-Conversation] 查询访客信息失败: {}", ex.getMessage());
+            }
             
             CsWebSocketMessage notification = CsWebSocketMessage.builder()
                     .type("new_conversation")
@@ -1221,21 +1237,14 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
 
     @Override
     public IPage<CsConversation> getAllActiveConversations(Page<CsConversation> page) {
-        // 查询所有进行中的会话（状态：待接入 或 服务中）
-        LambdaQueryWrapper<CsConversation> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.in(CsConversation::getStatus, 
-                CsConversation.STATUS_UNASSIGNED, 
-                CsConversation.STATUS_ASSIGNED)
-                .orderByDesc(CsConversation::getLastMessageTime);
-        
-        IPage<CsConversation> result = page(page, queryWrapper);
-        
+        IPage<CsConversation> result = baseMapper.selectAllActiveConversations(page);
+
         // 填充用户在线状态
         java.util.Set<String> onlineConversationIds = sessionManager.getOnlineConversationIds();
         for (CsConversation conv : result.getRecords()) {
             conv.setUserOnline(onlineConversationIds.contains(conv.getId()));
         }
-        
+
         return result;
     }
 

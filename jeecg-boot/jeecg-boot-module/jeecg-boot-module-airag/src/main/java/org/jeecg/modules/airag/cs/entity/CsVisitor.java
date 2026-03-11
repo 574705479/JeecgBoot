@@ -103,6 +103,11 @@ public class CsVisitor implements Serializable {
     @Schema(description = "星标: 0-否 1-是")
     private Integer star;
 
+    @JsonFormat(timezone = "GMT+8", pattern = "yyyy-MM-dd HH:mm:ss")
+    @DateTimeFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    @Schema(description = "星标时间")
+    private Date starTime;
+
     // ==================== 系统字段 ====================
 
     @Schema(description = "创建人")

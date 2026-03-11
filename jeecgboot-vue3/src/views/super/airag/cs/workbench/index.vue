@@ -298,6 +298,7 @@
             <a-badge :status="(conv.userOnline ?? (currentConversation?.id === conv.id ? userOnline : false)) ? 'success' : 'default'" dot>
               <a-avatar :size="42" class="visitor-avatar">{{ getDisplayName(conv).charAt(0) }}</a-avatar>
             </a-badge>
+            <StarFilled v-if="conv.visitorStar === 1" class="conv-star-badge" />
           </div>
           <div class="conv-content">
             <div class="conv-header">
@@ -393,6 +394,7 @@
                 <a-badge :status="(conv.userOnline ?? (currentConversation?.id === conv.id ? userOnline : false)) ? 'success' : 'default'" dot>
                   <a-avatar :size="36" class="visitor-avatar">{{ getDisplayName(conv).charAt(0) }}</a-avatar>
                 </a-badge>
+                <StarFilled v-if="conv.visitorStar === 1" class="conv-star-badge" />
               </div>
               <div class="conv-content">
                 <div class="conv-header">
@@ -2571,23 +2573,27 @@ async function loadConversations() {
     }
     const newConversations = res?.records || [];
     
-    // 保留已有的访客昵称和"对话中"客服名称（从缓存或旧数据中获取）
+    // 补充访客信息：API返回值 > 缓存 > 旧会话数据
     newConversations.forEach((conv: any) => {
-      // 1. 尝试从访客缓存获取昵称
       const cacheKey = getVisitorCacheKey(conv.appId, conv.userId);
       const cached = visitorCache.get(cacheKey);
-      if (cached?.nickname) {
-        conv.visitorNickname = cached.nickname;
-      } else {
-        // 2. 尝试从旧会话列表获取昵称
-        const oldConv = conversations.value.find(c => c.id === conv.id);
-        if (oldConv?.visitorNickname) {
+      const oldConv = conversations.value.find(c => c.id === conv.id);
+      
+      if (!conv.visitorNickname) {
+        if (cached?.nickname) {
+          conv.visitorNickname = cached.nickname;
+        } else if (oldConv?.visitorNickname) {
           conv.visitorNickname = oldConv.visitorNickname;
         }
       }
       
-      // 3. 尝试从旧数据中保留"对话中"的客服名称（lastTalkingAgent）
-      const oldConv = conversations.value.find(c => c.id === conv.id);
+      if (conv.visitorStar === undefined || conv.visitorStar === null) {
+        if (cached?.star !== undefined) {
+          conv.visitorStar = cached.star;
+          conv.visitorStarTime = cached.starTime;
+        }
+      }
+      
       if (oldConv?.lastTalkingAgent) {
         conv.lastTalkingAgent = oldConv.lastTalkingAgent;
       }
@@ -2601,7 +2607,10 @@ async function loadConversations() {
     // 初始化访客等待追踪
     initWaitingTracking();
 
-    // 异步预取昵称，避免首次加载显示为“访客”
+    // 按星标置顶排序
+    sortConversations();
+
+    // 异步预取昵称（API已返回的不会触发）
     newConversations.forEach((conv: any) => {
       if (!conv.visitorNickname) {
         prefetchVisitorNickname(conv);
@@ -2658,16 +2667,35 @@ async function prefetchVisitorNickname(conv: any) {
   }
 }
 
-// 对会话列表进行排序（未读消息优先，然后按最后消息时间）
+function updateConversationStar(conv: any, star: number, starTime: string | null) {
+  conversations.value.forEach(c => {
+    if (c.userId === conv.userId) {
+      c.visitorStar = star;
+      c.visitorStarTime = starTime;
+    }
+  });
+  sortConversations();
+}
+
 function sortConversations() {
   conversations.value.sort((a, b) => {
-    // 1. 未读消息优先
+    // 1. 星标优先（star_time 最新的排最前，类似置顶）
+    const aStar = a.visitorStar || 0;
+    const bStar = b.visitorStar || 0;
+    if (aStar !== bStar) return bStar - aStar;
+    if (aStar === 1 && bStar === 1) {
+      const aStarTime = a.visitorStarTime ? new Date(a.visitorStarTime).getTime() : 0;
+      const bStarTime = b.visitorStarTime ? new Date(b.visitorStarTime).getTime() : 0;
+      if (aStarTime !== bStarTime) return bStarTime - aStarTime;
+    }
+    
+    // 2. 未读消息优先
     const aUnread = a.unreadCount || 0;
     const bUnread = b.unreadCount || 0;
     if (aUnread > 0 && bUnread === 0) return -1;
     if (aUnread === 0 && bUnread > 0) return 1;
     
-    // 2. 按最后消息时间排序
+    // 3. 按最后消息时间排序
     const aTime = a.lastMessageTime ? new Date(a.lastMessageTime).getTime() : 0;
     const bTime = b.lastMessageTime ? new Date(b.lastMessageTime).getTime() : 0;
     return bTime - aTime;
@@ -2935,12 +2963,14 @@ async function loadVisitorInfo(appId: string, userId: string, seq?: number) {
       visitorInfo.value = res;
       visitorTags.value = res.tags ? JSON.parse(res.tags) : [];
       
-      if (res.nickname && currentConversation.value) {
+      if (currentConversation.value) {
         const conv = conversations.value.find(c => c.id === currentConversation.value?.id);
         if (conv) {
-          conv.visitorNickname = res.nickname;
+          if (res.nickname) conv.visitorNickname = res.nickname;
+          conv.visitorStar = res.star;
+          conv.visitorStarTime = res.starTime;
         }
-        currentConversation.value.visitorNickname = res.nickname;
+        if (res.nickname) currentConversation.value.visitorNickname = res.nickname;
       }
     } else if (!cached) {
       if (seq !== undefined && seq !== switchSeq) return;
@@ -3163,6 +3193,7 @@ async function sendMessage() {
         listItem.lastTalkingAgent = agentName.value;
       }
     }
+    sortConversations();
 
     const res = await httpPost({
       url: '/cs/message/agent/send',
@@ -3457,21 +3488,60 @@ function getCurrentVisitorCacheKey(): string {
 }
 
 async function toggleStar() {
-  if (!visitorInfo.value.id || !currentConversation.value) return;
-  
+  if (!currentConversation.value) return;
+
+  // 无访客记录时，先创建并直接设 star=1
+  if (!visitorInfo.value.id) {
+    try {
+      const res = await httpPost({
+        url: '/airag/cs/visitor/update',
+        data: {
+          userId: currentConversation.value.userId,
+          appId: currentConversation.value.appId,
+          star: 1,
+          level: visitorInfo.value.level || 1,
+        },
+      });
+      if (res && typeof res === 'object') {
+        Object.assign(visitorInfo.value, res);
+        const cacheKey = getCurrentVisitorCacheKey();
+        if (cacheKey) visitorCache.set(cacheKey, { ...visitorInfo.value });
+        updateConversationStar(currentConversation.value, res.star ?? 1, res.starTime ?? null);
+      }
+    } catch {
+      message.error('操作失败');
+    }
+    return;
+  }
+
+  // 已有记录，乐观更新 + toggleStar API
+  const prevStar = visitorInfo.value.star;
+  const prevStarTime = visitorInfo.value.starTime;
+  const newStar = prevStar === 1 ? 0 : 1;
+  const newStarTime = newStar === 1 ? new Date().toISOString() : null;
+
+  visitorInfo.value.star = newStar;
+  visitorInfo.value.starTime = newStarTime;
+
+  const cacheKey = getCurrentVisitorCacheKey();
+  if (cacheKey) {
+    visitorCache.set(cacheKey, { ...visitorInfo.value });
+  }
+
+  updateConversationStar(currentConversation.value, newStar, newStarTime);
+
   try {
     await httpPost({
       url: '/airag/cs/visitor/toggleStar',
-      data: { id: visitorInfo.value.id }
+      data: { id: visitorInfo.value.id },
     });
-    visitorInfo.value.star = visitorInfo.value.star === 1 ? 0 : 1;
-    
-    // 更新缓存
-    const cacheKey = getCurrentVisitorCacheKey();
+  } catch {
+    visitorInfo.value.star = prevStar;
+    visitorInfo.value.starTime = prevStarTime;
     if (cacheKey) {
       visitorCache.set(cacheKey, { ...visitorInfo.value });
     }
-  } catch {
+    updateConversationStar(currentConversation.value, prevStar, prevStarTime);
     message.error('操作失败');
   }
 }
@@ -3897,10 +3967,15 @@ function handleWsMessage(data: any) {
               userCity: data.extra?.userCity,
               // 浏览器语言
               userLang: data.extra?.userLang,
+              // 访客备注信息
+              visitorNickname: data.extra?.visitorNickname,
+              visitorStar: data.extra?.visitorStar,
+              visitorStarTime: data.extra?.visitorStarTime,
             };
             
-            // 添加到列表头部
+            // 添加到列表并按星标排序
             conversations.value.unshift(newConv);
+            sortConversations();
           }
         }
         
@@ -4240,7 +4315,7 @@ function handleWsMessage(data: any) {
       if (cacheKey) {
         visitorCache.set(cacheKey, visitor);
       }
-      // 更新会话列表中的昵称缓存
+      // 更新会话列表中的访客信息缓存
       conversations.value.forEach(conv => {
         if (conv.userId !== visitor.userId) {
           return;
@@ -4251,7 +4326,12 @@ function handleWsMessage(data: any) {
         if (visitor.nickname) {
           conv.visitorNickname = visitor.nickname;
         }
+        if (visitor.star !== undefined) {
+          conv.visitorStar = visitor.star;
+          conv.visitorStarTime = visitor.starTime || null;
+        }
       });
+      sortConversations();
       // 更新当前会话的访客信息
       if (currentConversation.value?.userId === visitor.userId) {
         if (!visitor.appId || currentConversation.value?.appId === visitor.appId) {
@@ -5158,6 +5238,21 @@ function restoreMessageScroll() {
     .conv-avatar { filter: grayscale(0.5); }
   }
 
+  .conv-avatar {
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  .conv-star-badge {
+    position: absolute;
+    top: -4px;
+    left: -4px;
+    font-size: 16px;
+    color: #faad14;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.25));
+    z-index: 1;
+  }
+
   .conv-content {
     flex: 1;
     min-width: 0;
@@ -5173,6 +5268,9 @@ function restoreMessageScroll() {
     font-weight: 500;
     font-size: 14px;
     color: var(--cs-text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .conv-time {

@@ -536,6 +536,9 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
             visitor.setConversationCount(1);
             visitor.setFirstVisitTime(new Date());
             visitor.setLastVisitTime(new Date());
+            if (visitor.getStar() != null && visitor.getStar() == 1 && visitor.getStarTime() == null) {
+                visitor.setStarTime(new Date());
+            }
             visitorService.save(visitor);
             visitorService.notifyVisitorUpdated(visitor);
             return Result.OK(visitor);
