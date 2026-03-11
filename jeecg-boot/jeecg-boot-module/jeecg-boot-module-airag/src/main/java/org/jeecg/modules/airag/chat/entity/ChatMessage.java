@@ -134,6 +134,15 @@ public class ChatMessage implements Serializable {
     /** 阅读时间 */
     private Date readTime;
 
+    /** 是否AI生成 */
+    private Boolean isAiGenerated;
+
+    /** 是否经客服确认(AI辅助模式) */
+    private Boolean aiConfirmed;
+
+    /** AI建议ID */
+    private String aiSuggestionId;
+
     // ==================== 时间字段 ====================
 
     /** 创建时间 */

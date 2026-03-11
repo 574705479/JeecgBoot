@@ -547,12 +547,12 @@
               <div class="msg-body">
                 <div class="msg-info">
                   <span class="sender-name">{{ msg.actualSenderName || msg.senderName }}</span>
-                  <a-tag v-if="msg.senderType === 1 || msg.isAiGenerated || (msg.senderType === 2 && !msg.senderId)" color="purple" size="small">AI</a-tag>
+                  <a-tag v-if="isAiMessage(msg)" color="purple" size="small">AI</a-tag>
                   <a-avatar :size="messageAvatarSize" class="msg-avatar-inline" :src="getMessageAvatarUrl(msg)">
-                    {{ (msg.actualSenderName || msg.senderName)?.charAt(0) || (msg.senderType === 1 ? 'AI' : '客') }}
+                    {{ (msg.actualSenderName || msg.senderName)?.charAt(0) || (isAiMessage(msg) ? 'AI' : '客') }}
                   </a-avatar>
                 </div>
-                <div class="msg-bubble agent-bubble" :class="{ 'ai-bubble': msg.senderType === 1 || msg.isAiGenerated || (msg.senderType === 2 && !msg.senderId) }">
+                <div class="msg-bubble agent-bubble" :class="{ 'ai-bubble': isAiMessage(msg) }">
                   <div v-if="msg.content" class="msg-text" v-html="msg.isStreaming ? renderStreamingText(msg.content) : renderMessage(msg.content)"></div>
                   <div
                     v-if="getMediaGridData(msg).items.length"
@@ -588,7 +588,7 @@
                 </div>
                 <div class="msg-meta">
                   {{ formatMessageTime(msg.createTime) }}
-                  <a-popconfirm v-if="msg.senderType === 1 || msg.senderId === agentId" title="确定撤回这条消息？" ok-text="确定" cancel-text="取消" @confirm="recallMessage(msg)">
+                  <a-popconfirm v-if="isAiMessage(msg) || msg.senderId === agentId" title="确定撤回这条消息？" ok-text="确定" cancel-text="取消" @confirm="recallMessage(msg)">
                     <UndoOutlined class="recall-btn" title="撤回" />
                   </a-popconfirm>
                 </div>
@@ -1992,14 +1992,17 @@ function getAttachmentUrl(attachment: any) {
   return getFileAccessHttpUrl(attachment?.url);
 }
 
+function isAiMessage(msg: any): boolean {
+  const st = Number(msg?.senderType);
+  return st === 1 || msg?.isAiGenerated || (st === 2 && !msg?.senderId);
+}
+
 function getMessageAvatarUrl(msg: any) {
   const avatar = msg?.senderAvatar;
   if (avatar) {
     return getFileAccessHttpUrl(avatar);
   }
-  const st = Number(msg?.senderType);
-  const isAi = st === 1 || msg?.isAiGenerated || (st === 2 && !msg?.senderId);
-  if (isAi) {
+  if (isAiMessage(msg)) {
     if (chatWindowLogo.value) {
       return getFileAccessHttpUrl(chatWindowLogo.value);
     }

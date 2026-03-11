@@ -947,6 +947,9 @@ public class CsMessageServiceImpl implements ICsMessageService {
             chatMessage.setCreateTime(message.getCreateTime() != null ? message.getCreateTime() : new Date());
             chatMessage.setSenderType(message.getSenderType());
             chatMessage.setSenderAvatar(message.getSenderAvatar());
+            chatMessage.setIsAiGenerated(message.getIsAiGenerated());
+            chatMessage.setAiConfirmed(message.getAiConfirmed());
+            chatMessage.setAiSuggestionId(message.getAiSuggestionId());
             chatMessage.setMsgType(message.getMsgType() != null ? message.getMsgType() : ChatMessage.MSG_TYPE_TEXT);
             if (oConvertUtils.isNotEmpty(message.getExtra())) {
                 try {
@@ -1077,6 +1080,9 @@ public class CsMessageServiceImpl implements ICsMessageService {
             csMsg.setCreateTime(msg.getCreateTime());
             csMsg.setSenderAvatar(msg.getSenderAvatar());
             csMsg.setStatus(msg.getStatus() != null ? msg.getStatus() : CsMessage.STATUS_SENT);
+            csMsg.setIsAiGenerated(msg.getIsAiGenerated());
+            csMsg.setAiConfirmed(msg.getAiConfirmed());
+            csMsg.setAiSuggestionId(msg.getAiSuggestionId());
             messages.add(csMsg);
         }
         return messages;

@@ -179,8 +179,8 @@
             <img class="avatar" :src="getAgentAvatar(msg)" />
             <div class="message-content">
               <div class="sender-info">
-                <span class="sender-name">{{ msg.senderName || '客服' }}</span>
-                <a-tag v-if="msg.senderType === 1" color="blue" size="small">AI</a-tag>
+                <span class="sender-name">{{ msg.senderName || (isAiMessage(msg) ? 'AI客服' : '客服') }}</span>
+                <a-tag v-if="isAiMessage(msg)" color="blue" size="small">AI</a-tag>
               </div>
               <div v-if="msg.content" class="message-text" v-html="msg.isStreaming ? renderStreamingText(msg.content) : renderMessage(msg.content)"></div>
               <div
@@ -838,6 +838,10 @@ function resolveAvatarUrl(avatar?: string) {
 }
 
 function getAgentAvatar(msg?: any) {
+  if (msg && isAiMessage(msg)) {
+    if (chatWindowConfig.logo) return resolveFileUrl(chatWindowConfig.logo);
+    return defaultAvatar.value;
+  }
   const avatar = msg?.senderAvatar || currentAgentAvatar.value || appInfo.value.avatar;
   if (avatar) return resolveAvatarUrl(avatar);
   if (chatWindowConfig.logo) return resolveFileUrl(chatWindowConfig.logo);
@@ -1185,6 +1189,17 @@ onMounted(async () => {
 
   // 加载访客AI应用信息（头像/开场白/预设问题）
   await loadVisitorAppInfo();
+
+  // 前置检测：无客服在线时直接显示留言板，不创建会话
+  const hasStoredConv = !!localStorage.getItem(`cs_conversation_${userId.value}`);
+  if (!hasStoredConv) {
+    const agentOnline = await checkAgentOnline();
+    if (!agentOnline) {
+      await loadMessageBoardConfig();
+      showLeaveMessageBoard.value = true;
+      return;
+    }
+  }
 
   // 获取或创建会话（如果是消息接通模式，延迟到发送第一条消息时）
   if (chatWindowConfig.visitorMessageConnect) {
@@ -1579,6 +1594,15 @@ function generateDeviceId(): string {
   return deviceId;
 }
 
+async function checkAgentOnline(): Promise<boolean> {
+  try {
+    const res = await httpGet({ url: '/cs/agent/global/online-status' });
+    return res?.online === true;
+  } catch {
+    return true;
+  }
+}
+
 // 初始化会话
 async function initConversation() {
   try {
@@ -1608,6 +1632,14 @@ async function initConversation() {
         // 获取会话失败，创建新会话
         localStorage.removeItem(`cs_conversation_${userId.value}`);
       }
+    }
+
+    // 二次检查：创建新会话前确认客服在线
+    const agentOnline = await checkAgentOnline();
+    if (!agentOnline) {
+      await loadMessageBoardConfig();
+      showLeaveMessageBoard.value = true;
+      return;
     }
 
     // 创建新会话（后端会自动分配客服），附带设备指纹
@@ -2134,6 +2166,7 @@ function handleWsMessage(data: any) {
         senderId: data.senderId,
         senderName: data.senderName,
         senderAvatar: data.senderAvatar,
+        isAiGenerated: data.isAiGenerated,
         createTime: data.timestamp || new Date().toISOString(),
       };
       // 避免重复添加
@@ -2142,7 +2175,7 @@ function handleWsMessage(data: any) {
         scrollToBottom();
       }
       // 收到非用户消息（AI/客服）后，解除等待状态
-      // senderType: 0=用户, 1=客服, 2=AI, 3=系统
+      // senderType: 0=用户, 1=AI, 2=客服, 3=系统
       if (msgSenderType !== 0) {
         console.log('[UserChat] 收到AI/客服回复，解除等待状态, senderType:', msgSenderType);
         stopAiResponding();
@@ -2310,6 +2343,9 @@ async function sendMessage() {
   if (messageConnectMode.value && !conversationId.value) {
     try {
       await initConversation();
+      if (showLeaveMessageBoard.value) {
+        return;
+      }
       messageConnectMode.value = false;
       if (!conversationId.value) {
         message.error('会话创建失败');
@@ -2591,21 +2627,22 @@ function formatTime(time: string | Date) {
   return `${datePart} ${timePart}`;
 }
 
-// 判断是否是用户消息
 // senderType: 0-用户, 1-AI, 2-客服, 3-系统
 function isUserMessage(msg: any): boolean {
-  // 用户消息 senderType === 0
-  // 或者 senderId 等于当前用户ID
   if (msg.senderType === 0) return true;
   if (msg.senderId === userId.value) return true;
   return false;
 }
 
-// 获取消息样式类
+function isAiMessage(msg: any): boolean {
+  const st = Number(msg?.senderType);
+  return st === 1 || msg?.isAiGenerated || (st === 2 && !msg?.senderId);
+}
+
 function getMessageClass(msg: any) {
   if (msg.senderType === 3) return 'is-system';
   if (isUserMessage(msg)) return 'is-user';
-  return msg.senderType === 1 ? 'is-ai' : 'is-agent';
+  return isAiMessage(msg) ? 'is-ai' : 'is-agent';
 }
 
 function parseExtra(extra: any) {

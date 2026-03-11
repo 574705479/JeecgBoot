@@ -103,13 +103,13 @@
                           <div class="msg-header">
                             <span class="msg-time">{{ formatTime(msg.createTime) }}</span>
                             <span class="sender-name">
-                              {{ msg.senderName || (msg.senderType === 1 ? 'AI客服' : '客服') }}
+                              {{ msg.senderName || (isAiMessage(msg) ? 'AI客服' : '客服') }}
                             </span>
-                            <a-tag v-if="msg.senderType === 1" color="purple" size="small">AI</a-tag>
-                            <a-tag v-else color="green" size="small">客服</a-tag>
+                            <a-tag v-if="isAiMessage(msg)" color="purple" size="small">AI</a-tag>
+                            <a-tag v-else-if="!isAiMessage(msg)" color="green" size="small">客服</a-tag>
                             <a-tag v-if="msg.status === 3" color="red" size="small">已撤回</a-tag>
                           </div>
-                          <div class="msg-bubble agent-bubble" :class="{ 'ai-bubble': msg.senderType === 1, 'revoked-bubble': msg.status === 3 }" v-html="renderMessage(msg.content)"></div>
+                          <div class="msg-bubble agent-bubble" :class="{ 'ai-bubble': isAiMessage(msg), 'revoked-bubble': msg.status === 3 }" v-html="renderMessage(msg.content)"></div>
                           <div v-if="getMediaAttachments(msg).length" class="msg-media-grid" :class="`media-grid--${Math.min(getMediaGridData(msg).total, 4)}`">
                             <div class="media-item" v-for="(item, idx) in getMediaGridData(msg).items" :key="idx">
                               <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview(msg, item)" />
@@ -124,8 +124,8 @@
                             </div>
                           </div>
                         </div>
-                        <a-avatar :size="32" class="msg-avatar agent-avatar">
-                          {{ msg.senderType === 1 ? 'AI' : (msg.senderName || '客').charAt(0) }}
+                        <a-avatar :size="32" class="msg-avatar agent-avatar" :src="isAiMessage(msg) ? getAiAvatarUrl() : ''">
+                          {{ isAiMessage(msg) ? 'AI' : (msg.senderName || '客').charAt(0) }}
                         </a-avatar>
                       </div>
                     </template>
@@ -255,6 +255,8 @@ import { defHttp } from '/@/utils/http/axios';
 import { MessageOutlined } from '@ant-design/icons-vue';
 import { Typography } from 'ant-design-vue';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
+import { getBrandSetting } from '/@/settings/brandSetting';
+import { resolveBrandUrl } from '/@/utils/brand';
 import { createImgPreview } from '/@/components/Preview';
 import { useGlobSetting } from '/@/hooks/setting';
 import MarkdownIt from 'markdown-it';
@@ -262,6 +264,29 @@ import hljs from 'highlight.js';
 
 const { Text: ATypographyText } = Typography;
 const globSetting = useGlobSetting();
+
+function isAiMessage(msg: any): boolean {
+  const st = Number(msg?.senderType);
+  return st === 1 || msg?.isAiGenerated || (st === 2 && !msg?.senderId);
+}
+
+const chatWindowLogo = ref('');
+async function loadChatWindowLogo() {
+  try {
+    const res = await defHttp.get({ url: '/cs/agent/global/chat-window-settings' });
+    let parsed: any = {};
+    if (typeof res === 'string') { try { parsed = JSON.parse(res); } catch {} }
+    else if (res && typeof res === 'object') { parsed = res; }
+    if (parsed.logo) chatWindowLogo.value = parsed.logo;
+  } catch {}
+}
+
+function getAiAvatarUrl(): string {
+  if (chatWindowLogo.value) return getFileAccessHttpUrl(chatWindowLogo.value);
+  const brandLogo = getBrandSetting().logoUrl;
+  if (brandLogo) return resolveBrandUrl(brandLogo);
+  return '';
+}
 
 const md = new MarkdownIt({
   html: true,
@@ -437,7 +462,7 @@ const [registerModal] = useModalInner(async (data) => {
   visitorInfo.value = null;
   
   if (record.value?.id) {
-    await loadMessages(record.value.id);
+    await Promise.all([loadMessages(record.value.id), loadChatWindowLogo()]);
     loadVisitorInfo();
   }
 });
@@ -582,12 +607,11 @@ function getModeText(mode: number) {
 }
 
 function getMsgClass(msg: any) {
+  if (isAiMessage(msg)) return 'msg-ai';
   switch (msg.senderType) {
     case 0: return 'msg-user';
-    case 1: return 'msg-ai';
-    case 2: return 'msg-agent';
     case 3: return 'msg-system';
-    default: return '';
+    default: return 'msg-agent';
   }
 }
 

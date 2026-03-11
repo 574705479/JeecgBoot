@@ -26,7 +26,7 @@
                 </a-form-item>
               </a-col>
               <a-col :span="12">
-                <a-form-item label="Logo 图片（建议正方形 PNG/SVG）" name="logoUrl">
+                <a-form-item label="Logo 图片（建议 PNG/SVG）" name="logoUrl">
                   <CropperUpload
                     v-model:value="formState.logoUrl"
                     :uploadApi="uploadImg"

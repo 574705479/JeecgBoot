@@ -541,6 +541,22 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
         return Result.OK("保存成功");
     }
 
+    // ==================== 客服在线状态（访客端） ====================
+
+    /**
+     * 获取客服在线状态（全局，访客端在创建会话前调用）
+     */
+    @Operation(summary = "获取客服在线状态（全局）")
+    @org.jeecg.config.shiro.IgnoreAuth
+    @GetMapping("/global/online-status")
+    public Result<java.util.Map<String, Object>> getOnlineStatus() {
+        java.util.List<CsAgent> onlineAgents = csAgentService.getOnlineAgents();
+        java.util.Map<String, Object> result = new java.util.HashMap<>();
+        result.put("online", onlineAgents != null && !onlineAgents.isEmpty());
+        result.put("count", onlineAgents != null ? onlineAgents.size() : 0);
+        return Result.OK(result);
+    }
+
     // ==================== AI开关 ====================
 
     /**
