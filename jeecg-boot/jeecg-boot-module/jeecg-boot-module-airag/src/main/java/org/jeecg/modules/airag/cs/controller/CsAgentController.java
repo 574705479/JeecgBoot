@@ -830,8 +830,8 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
         }
         CsAgent agent = csAgentService.getByUserId(loginUser.getId());
         JSONObject data = new JSONObject();
+        data.put("isAgent", agent != null);
         if (agent == null) {
-            // 非客服用户，不做菜单限制
             data.put("isSubAgent", false);
             data.put("allowedMenus", new JSONArray());
             return Result.OK(data);

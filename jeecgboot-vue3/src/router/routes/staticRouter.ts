@@ -1,6 +1,27 @@
 import type { AppRouteRecordRaw } from '/@/router/types';
 import { LAYOUT } from '/@/router/constant';
 
+export const DASHBOARD_ROUTE: AppRouteRecordRaw = {
+  path: '/dashboard',
+  name: 'Dashboard',
+  component: LAYOUT,
+  redirect: '/dashboard/analysis',
+  meta: {
+    title: '首页',
+    icon: 'ant-design:dashboard-outlined',
+    hideChildrenInMenu: true,
+    orderNo: 0,
+  },
+  children: [
+    {
+      path: 'analysis',
+      name: 'Analysis',
+      component: () => import('/@/views/dashboard/Analysis/index.vue'),
+      meta: { title: '首页', hideMenu: true },
+    },
+  ],
+};
+
 export const AI_ROUTE: AppRouteRecordRaw = {
   path: '',
   name: 'ai-parent',
@@ -20,4 +41,4 @@ export const AI_ROUTE: AppRouteRecordRaw = {
   ],
 };
 
-export const staticRoutesList = [AI_ROUTE];
+export const staticRoutesList = [DASHBOARD_ROUTE, AI_ROUTE];

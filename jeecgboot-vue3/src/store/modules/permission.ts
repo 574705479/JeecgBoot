@@ -15,7 +15,7 @@ import { PermissionModeEnum } from '/@/enums/appEnum';
 
 import { asyncRoutes } from '/@/router/routes';
 import { ERROR_LOG_ROUTE, PAGE_NOT_FOUND_ROUTE } from '/@/router/routes/basic';
-import { staticRoutesList } from '../../router/routes/staticRouter';
+import { staticRoutesList, DASHBOARD_ROUTE } from '../../router/routes/staticRouter';
 
 import { filter } from '/@/utils/helper/treeHelper';
 
@@ -291,6 +291,9 @@ export const usePermissionStore = defineStore({
           // === 子客服菜单过滤 ===
           try {
             const menuRes = await defHttp.get({ url: '/cs/agent/current-menus' });
+            if (menuRes && menuRes.isAgent === true) {
+              userStore.getUserInfo.homePath = '/cs/workbench';
+            }
             if (menuRes && menuRes.isSubAgent === true) {
               const allowedMenuIds: string[] = menuRes.allowedMenus || [];
               if (allowedMenuIds.length > 0) {
@@ -319,11 +322,16 @@ export const usePermissionStore = defineStore({
             console.warn('[CS-SubAgent] 获取菜单权限失败，跳过过滤', e);
           }
 
+          // 移除后端 routeList 中的重复 dashboard 路由
+          routeList = routeList.filter(r => r.path !== '/dashboard');
+
           // 动态引入组件
           routeList = transformObjToRoute(routeList);
 
           // 构建后台路由菜单
           const backMenuList = transformRouteToMenu(routeList);
+          const dashboardMenuList = transformRouteToMenu([DASHBOARD_ROUTE]);
+          backMenuList.unshift(...dashboardMenuList);
           this.setBackMenuList(backMenuList);
 
           // 删除meta.ignoreRoute项

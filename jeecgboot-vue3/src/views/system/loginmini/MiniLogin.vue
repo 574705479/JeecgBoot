@@ -163,8 +163,8 @@
   //账号登录表单字段
   const formData = reactive<any>({
     inputCode: '',
-    username: 'admin',
-    password: '123456',
+    username: '',
+    password: '',
     loginOrgCode: '',
   });
   //手机登录表单字段

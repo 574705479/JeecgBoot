@@ -197,6 +197,15 @@ export function createPermissionGuard(router: Router) {
       userStore.setAllDictItemsByLocal();
     }
     if (permissionStore.getIsDynamicAddedRoute) {
+      if (to.name === PAGE_NOT_FOUND_NAME_404) {
+        const homePath = userStore.getUserInfo.homePath || PageEnum.BASE_HOME;
+        if (to.fullPath !== homePath) {
+          next({ path: homePath, replace: true });
+        } else {
+          next();
+        }
+        return;
+      }
       next();
       return;
     }
