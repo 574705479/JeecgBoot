@@ -66,6 +66,9 @@ public class CsQuickReply implements Serializable {
     @Schema(description = "排序")
     private Integer sort;
 
+    @Schema(description = "快捷键(如 Ctrl+1)")
+    private String shortcutKey;
+
     @Schema(description = "创建人")
     private String createBy;
 

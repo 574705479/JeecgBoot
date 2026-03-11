@@ -20,7 +20,7 @@
 </template>
 
 <script lang="ts" setup>
-import { ref } from 'vue';
+import { ref, onMounted } from 'vue';
 import { BasicTable, useTable, TableAction } from '/@/components/Table';
 import { useModal } from '/@/components/Modal';
 import { defHttp } from '/@/utils/http/axios';
@@ -31,6 +31,30 @@ const { createMessage } = useMessage();
 
 const [registerModal, { openModal }] = useModal();
 
+const agentOptions = ref<{ label: string; value: string }[]>([]);
+const agentMap = ref<Record<string, string>>({});
+
+async function loadAgentList() {
+  try {
+    const res = await defHttp.get({ url: '/cs/agent/list', params: { pageSize: 1000 } });
+    const records = res.records || res || [];
+    agentOptions.value = records.map((agent: any) => ({
+      label: agent.nickname || agent.username || agent.id,
+      value: agent.id,
+    }));
+    agentMap.value = {};
+    agentOptions.value.forEach((opt) => {
+      agentMap.value[opt.value] = opt.label;
+    });
+  } catch (e) {
+    console.error('加载客服列表失败', e);
+  }
+}
+
+onMounted(() => {
+  loadAgentList();
+});
+
 const columns = [
   { title: '标题/关键词', dataIndex: 'title', width: 150 },
   { title: '回复内容', dataIndex: 'content', width: 300, ellipsis: true },
@@ -40,7 +64,10 @@ const columns = [
       return types[text] || '未知';
     }
   },
-  { title: '所属客服', dataIndex: 'agentId', width: 120, customRender: ({ text }) => text || '公共' },
+  { title: '所属客服', dataIndex: 'agentId', width: 120,
+    customRender: ({ text }) => text ? (agentMap.value[text] || text) : '公共'
+  },
+  { title: '快捷键', dataIndex: 'shortcutKey', width: 100 },
   { title: '使用次数', dataIndex: 'useCount', width: 80 },
   { title: '状态', dataIndex: 'status', width: 80, slots: { customRender: 'status' } },
   { title: '创建时间', dataIndex: 'createTime', width: 160 },
@@ -57,6 +84,9 @@ const [registerTable, { reload }] = useTable({
     schemas: [
       { field: 'title', label: '标题', component: 'Input', colProps: { span: 6 } },
       { field: 'content', label: '内容', component: 'Input', colProps: { span: 6 } },
+      { field: 'agentId', label: '所属客服', component: 'Select', colProps: { span: 6 },
+        componentProps: { placeholder: '全部', allowClear: true, options: agentOptions },
+      },
     ],
   },
   useSearchForm: true,

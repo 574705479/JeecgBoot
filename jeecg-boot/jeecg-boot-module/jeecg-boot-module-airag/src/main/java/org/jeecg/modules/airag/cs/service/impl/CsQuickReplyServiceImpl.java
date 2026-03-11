@@ -23,21 +23,22 @@ public class CsQuickReplyServiceImpl extends ServiceImpl<CsQuickReplyMapper, CsQ
     @Override
     public List<CsQuickReply> getAgentQuickReplies(String agentId) {
         QueryWrapper<CsQuickReply> queryWrapper = new QueryWrapper<>();
-        // 获取该客服的私有回复和公共回复
+        queryWrapper.eq("status", 1);
         queryWrapper.and(wrapper -> 
             wrapper.eq("agent_id", agentId)
                    .or()
                    .isNull("agent_id")
         );
-        queryWrapper.orderByDesc("create_time");
+        queryWrapper.orderByAsc("sort").orderByDesc("create_time");
         return list(queryWrapper);
     }
 
     @Override
     public List<CsQuickReply> getPublicQuickReplies() {
         QueryWrapper<CsQuickReply> queryWrapper = new QueryWrapper<>();
+        queryWrapper.eq("status", 1);
         queryWrapper.isNull("agent_id");
-        queryWrapper.orderByDesc("create_time");
+        queryWrapper.orderByAsc("sort").orderByDesc("create_time");
         return list(queryWrapper);
     }
 }

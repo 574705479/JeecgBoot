@@ -662,10 +662,35 @@
                 @click="applyQuickReply(item)"
               >
                 <div class="quick-reply-title">
-                  <span>{{ item.title || '无标题' }}</span>
-                  <a-tag size="small">{{ item.scope === 'public' ? '公共' : '我的' }}</a-tag>
+                  <span class="quick-reply-title-left">
+                    <span>{{ item.title || '无标题' }}</span>
+                    <a-tag size="small">{{ item.scope === 'public' ? '公共' : '我的' }}</a-tag>
+                    <a-tag v-if="item.shortcutKey" size="small" color="blue">{{ item.shortcutKey }}</a-tag>
+                  </span>
+                  <span class="quick-reply-title-right">
+                    <a-tag v-if="item.msgType === 1" size="small" color="orange">图片</a-tag>
+                    <a-tag v-else-if="item.msgType === 2" size="small" color="cyan">文件</a-tag>
+                    <a-tag v-else-if="item.msgType === 5" size="small" color="purple">富文本</a-tag>
+                  </span>
                 </div>
-                <div class="quick-reply-content">{{ item.content }}</div>
+                <a-popover v-if="item.msgType === 1" placement="topLeft" trigger="hover" :overlayStyle="{ maxWidth: '400px' }">
+                  <template #content>
+                    <img :src="getFileAccessHttpUrl(item.content)" style="max-width: 360px; max-height: 300px; border-radius: 6px; display: block" />
+                  </template>
+                  <div class="quick-reply-content">
+                    <img :src="getFileAccessHttpUrl(item.content)" class="quick-reply-img" />
+                  </div>
+                </a-popover>
+                <a-popover v-else-if="item.msgType === 5" placement="topLeft" trigger="hover" :overlayStyle="{ maxWidth: '450px' }">
+                  <template #content>
+                    <div class="quick-reply-preview-richtext" v-html="item.content"></div>
+                  </template>
+                  <div class="quick-reply-content quick-reply-richtext" v-html="item.content"></div>
+                </a-popover>
+                <div class="quick-reply-content" v-else-if="item.msgType === 2">
+                  <PaperClipOutlined style="margin-right: 4px" />{{ item.content?.split('/').pop() || '文件' }}
+                </div>
+                <div class="quick-reply-content" v-else>{{ item.content }}</div>
               </div>
             </div>
             <a-empty v-else description="暂无快捷回复" />
@@ -1716,6 +1741,7 @@ onMounted(async () => {
     loadAgentTimeoutConfig(),     // 加载客服超时未回复配置
     loadChatWindowLogo(),         // 加载聊天窗口Logo
     loadConversations(),
+    loadQuickReplies(),           // 预加载快捷回复（快捷键匹配需要）
   ]);
   startWaitingTimer();             // 启动访客等待时长计时器
   hasMounted.value = true;
@@ -2213,7 +2239,14 @@ async function loadQuickReplies(force = false) {
 }
 
 function applyQuickReply(item: any) {
-  inputMessage.value = item?.content || '';
+  if (item.msgType === 1 || item.msgType === 2) {
+    const type = item.msgType === 1 ? 'image' : 'file';
+    const url = item.content || '';
+    const name = url.split('/').pop() || (type === 'image' ? '图片' : '文件');
+    attachmentList.value.push({ url, type, name });
+  } else {
+    inputMessage.value = item?.content || '';
+  }
   showQuickReply.value = false;
   nextTick(() => inputRef.value?.focus());
 }
@@ -3041,17 +3074,34 @@ async function removeBlacklist(type: 'user' | 'ip' | 'both') {
   }
 }
 
-// 处理输入框按键事件
+function buildShortcutString(e: KeyboardEvent): string {
+  const parts: string[] = [];
+  if (e.ctrlKey) parts.push('Ctrl');
+  if (e.altKey) parts.push('Alt');
+  if (e.shiftKey) parts.push('Shift');
+  const key = e.key.length === 1 ? e.key.toUpperCase() : e.key;
+  parts.push(key);
+  return parts.join('+');
+}
+
 function handleInputKeydown(e: KeyboardEvent) {
-  // Enter键发送消息（不按其他修饰键）
+  if ((e.ctrlKey || e.altKey) && e.key !== 'Enter') {
+    const pressed = buildShortcutString(e);
+    const match = quickReplyList.value.find(
+      (item) => item.shortcutKey && item.shortcutKey.toLowerCase() === pressed.toLowerCase(),
+    );
+    if (match) {
+      e.preventDefault();
+      applyQuickReply(match);
+      return;
+    }
+  }
+
   if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
     e.preventDefault();
     sendMessage();
-  }
-  // Ctrl+Enter 或 Shift+Enter 换行
-  else if (e.key === 'Enter' && (e.ctrlKey || e.shiftKey)) {
-    // 让默认行为发生（换行）
-    // 不需要手动处理，textarea会自动换行
+  } else if (e.key === 'Enter' && (e.ctrlKey || e.shiftKey)) {
+    // 默认换行行为
   }
 }
 
@@ -5653,12 +5703,48 @@ function restoreMessageScroll() {
       font-weight: 500;
       margin-bottom: 4px;
       font-size: 13px;
+
+      .quick-reply-title-left {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex: 1;
+        min-width: 0;
+      }
+
+      .quick-reply-title-right {
+        flex-shrink: 0;
+        margin-left: 8px;
+      }
     }
 
     .quick-reply-content {
       font-size: 12px;
       color: var(--cs-text-muted);
       white-space: pre-wrap;
+    }
+
+    .quick-reply-img {
+      max-width: 80px;
+      max-height: 60px;
+      border-radius: 4px;
+      object-fit: cover;
+    }
+
+    .quick-reply-richtext {
+      max-height: 60px;
+      overflow: hidden;
+      line-height: 1.4;
+
+      img {
+        max-height: 40px;
+        max-width: 80px;
+        vertical-align: middle;
+      }
+
+      p {
+        margin: 0;
+      }
     }
   }
 
@@ -6219,6 +6305,22 @@ function restoreMessageScroll() {
 :deep(.ant-alert) {
   background: var(--cs-bg-card);
   border-color: var(--cs-border);
+}
+
+.quick-reply-preview-richtext {
+  max-height: 400px;
+  overflow-y: auto;
+  line-height: 1.6;
+  font-size: 14px;
+
+  img {
+    max-width: 100%;
+    border-radius: 4px;
+  }
+
+  p {
+    margin: 0 0 8px 0;
+  }
 }
 
 </style>
