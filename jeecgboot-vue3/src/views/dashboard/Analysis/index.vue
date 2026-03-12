@@ -21,9 +21,20 @@
               <div class="section-title">接入链接</div>
               <div v-for="(link, idx) in accessLinks" :key="idx" class="access-link-item">
                 <a-tag color="blue">{{ link.domain }}</a-tag>
-                <a-typography-paragraph :copyable="{ text: link.fullUrl }" class="link-text">
-                  {{ link.fullUrl }}
+                <a-typography-paragraph :copyable="{ text: getFullUrl(idx) }" class="link-text">
+                  {{ getFullUrl(idx) }}
                 </a-typography-paragraph>
+                <a-select
+                  v-model:value="selectedAgentMap[idx]"
+                  placeholder="默认分配"
+                  allowClear
+                  style="width: 140px; flex-shrink: 0"
+                  size="small"
+                >
+                  <a-select-option v-for="agent in agentList" :key="agent.id" :value="agent.id">
+                    {{ agent.nickname }}
+                  </a-select-option>
+                </a-select>
               </div>
             </div>
             <a-empty v-else description="请先在【域名配置】中配置域名，在【接入设置】中生成接入密钥" :image="simpleImage" />
@@ -35,7 +46,18 @@
               <a-col :span="8">
                 <div class="section-title">对话二维码</div>
                 <div class="qr-wrapper">
-                  <QrCode :value="accessLinks[0]?.fullUrl || ''" :width="140" />
+                  <a-select
+                    v-if="accessLinks.length > 1"
+                    v-model:value="selectedQrLinkIdx"
+                    size="small"
+                    style="width: 140px; margin-bottom: 8px"
+                  >
+                    <a-select-option v-for="(link, idx) in accessLinks" :key="idx" :value="idx">
+                      {{ link.domain }}
+                    </a-select-option>
+                  </a-select>
+                  <a-tag v-else color="blue" style="margin-bottom: 8px">{{ accessLinks[0]?.domain }}</a-tag>
+                  <QrCode :value="getFullUrl(selectedQrLinkIdx)" :width="140" />
                   <div class="qr-tip">扫码打开对话</div>
                 </div>
               </a-col>
@@ -163,6 +185,16 @@ const domainConfig = reactive({
   downloadLinks: '',
 });
 const secretKey = ref('');
+const agentList = ref<any[]>([]);
+const selectedAgentMap = reactive<Record<number, string | undefined>>({});
+const selectedQrLinkIdx = ref(0);
+
+function getFullUrl(idx: number): string {
+  const link = accessLinks.value[idx];
+  if (!link) return '';
+  const agentId = selectedAgentMap[idx];
+  return agentId ? `${link.fullUrl}&agentId=${agentId}` : link.fullUrl;
+}
 
 const accessLinks = computed(() => {
   if (!domainConfig.domains || !secretKey.value) return [];
@@ -214,6 +246,16 @@ async function fetchSecretKey() {
     secretKey.value = data.secretKey || '';
   } catch (e) {
     console.error('[Dashboard] 获取接入密钥失败', e);
+  }
+}
+
+async function fetchAgentList() {
+  try {
+    const res = await defHttp.get({ url: '/cs/agent/list', params: { pageNo: 1, pageSize: 100 } }, { isTransformResponse: false });
+    const data = res?.result || res || {};
+    agentList.value = data.records || [];
+  } catch (e) {
+    console.error('[Dashboard] 获取客服列表失败', e);
   }
 }
 
@@ -276,7 +318,7 @@ async function fetchAgentStatus() {
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 
 onMounted(async () => {
-  await Promise.all([fetchStats(), fetchDomainConfig(), fetchSecretKey(), fetchAgentStatus(), fetchLicenseInfo()]);
+  await Promise.all([fetchStats(), fetchDomainConfig(), fetchSecretKey(), fetchAgentList(), fetchAgentStatus(), fetchLicenseInfo()]);
   // 每30秒自动刷新统计数据和坐席状态
   refreshTimer = setInterval(() => {
     fetchStats();

@@ -103,6 +103,8 @@ services:
       # Redisson
       JEECG_REDISSON_ADDRESS: kefu-redis:6379
       JEECG_REDISSON_PASSWORD: 92400bda284afba53b21162911f98d00Z
+      # License
+      LICENSE_SERVER_URL: https://sq.beartalk.net
     depends_on:
       kefu-mysql:
         condition: service_healthy

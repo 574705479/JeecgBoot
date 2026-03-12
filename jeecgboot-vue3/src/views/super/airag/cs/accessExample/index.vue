@@ -113,8 +113,12 @@
                 <a-input v-model:value="source" placeholder="第三方系统标识" />
               </div>
               <div class="field">
-                <span class="label">agentId（指定客服ID，可选，填写后访客将直接接入该客服）</span>
-                <a-input v-model:value="agentId" placeholder="客服ID（可选）" />
+                <span class="label">agentId（指定客服，可选，选择后访客将直接接入该客服）</span>
+                <a-select v-model:value="agentId" placeholder="不指定（默认分配）" allowClear style="width: 100%">
+                  <a-select-option v-for="agent in agentList" :key="agent.id" :value="agent.id">
+                    {{ agent.nickname }} ({{ agent.id }})
+                  </a-select-option>
+                </a-select>
               </div>
               <div class="field" v-if="secretKey">
                 <span class="label">{{ tokenMode ? '接入密钥（用于本地调试获取Token，生产环境请放后端）' : '接入密钥（已在上方安全配置中设置）' }}</span>
@@ -395,6 +399,7 @@ const externalUserId = ref('U1001');
 const userName = ref('');
 const source = ref('');
 const agentId = ref('');
+const agentList = ref<any[]>([]);
 const token = ref('');
 const expireAt = ref(0);
 const loading = ref(false);
@@ -423,13 +428,23 @@ const wc = reactive({
 });
 
 onMounted(async () => {
-  // 并行加载域名配置和访客接入配置
   await Promise.all([
     loadDomainOptions(),
     loadVisitorAccessConfig(),
+    fetchAgentList(),
   ]);
   loadingMode.value = false;
 });
+
+async function fetchAgentList() {
+  try {
+    const res = await defHttp.get({ url: '/cs/agent/list', params: { pageNo: 1, pageSize: 100 } }, { isTransformResponse: false });
+    const data = res?.result || res || {};
+    agentList.value = data.records || [];
+  } catch (e) {
+    console.error('[AccessExample] 获取客服列表失败', e);
+  }
+}
 
 async function loadDomainOptions() {
   try {
