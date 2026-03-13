@@ -333,7 +333,7 @@ public class CsMessageController {
         String question = (String) params.get("question");
         String answer = (String) params.get("answer");
 
-        if (oConvertUtils.isEmpty(conversationId) || oConvertUtils.isEmpty(answer)) {
+        if (oConvertUtils.isEmpty(conversationId) || oConvertUtils.isEmpty(question)) {
             return Result.error("参数不完整");
         }
 
@@ -378,18 +378,21 @@ public class CsMessageController {
                 }
                 JSONArray faqList = settings.getJSONArray("faqList");
                 boolean found = false;
+                String storedAnswer = null;
                 if (faqList != null) {
                     for (int i = 0; i < faqList.size(); i++) {
                         JSONObject faq = faqList.getJSONObject(i);
-                        if (faq != null && answer.equals(faq.getString("answer"))) {
+                        if (faq != null && question.equals(faq.getString("question"))) {
                             found = true;
+                            storedAnswer = faq.getString("answer");
                             break;
                         }
                     }
                 }
-                if (!found) {
-                    return Result.error("无效的FAQ答案");
+                if (!found || oConvertUtils.isEmpty(storedAnswer)) {
+                    return Result.error("无效的FAQ问题");
                 }
+                answer = storedAnswer;
             } else {
                 return Result.error("常见问题功能未配置");
             }
