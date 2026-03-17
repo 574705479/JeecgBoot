@@ -187,6 +187,14 @@ public class CsConversation implements Serializable {
     @Schema(description = "逻辑删除: 0-未删除 1-已删除")
     private Integer deleted;
 
+    // ==================== 人工客服转接 ====================
+
+    @Schema(description = "是否为人工客服转接模式: 0-否 1-是")
+    private Integer humanAgentMode;
+
+    @Schema(description = "访客自定义字段(JSON)")
+    private String customFields;
+
     // ==================== 评价 ====================
 
     @Schema(description = "满意度评分: 1-5")

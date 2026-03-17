@@ -112,6 +112,37 @@ public interface ICsMessageService {
     void sendVisitorAutoMessagesAsAgent(String conversationId, String agentId, String agentName, String userLang);
 
     /**
+     * 以系统身份("智能助手")发送自动消息，用于无客服分配时
+     * @param conversationId 会话ID
+     * @param userLang       用户浏览器语言
+     */
+    void sendAutoMessagesAsSystem(String conversationId, String userLang);
+
+    /**
+     * 发送智能助手消息 (senderType=4)
+     * @param conversationId 会话ID
+     * @param content        消息文本
+     * @param faqExtraJson   FAQ扩展JSON（可为null）
+     * @return 智能助手消息
+     */
+    CsMessage sendSmartAssistantMessage(String conversationId, String content, String faqExtraJson);
+
+    /**
+     * 发送初始FAQ列表消息（会话创建后的欢迎FAQ）
+     * @param conversationId 会话ID
+     */
+    void sendInitialFaqMessage(String conversationId);
+
+    /**
+     * 处理FAQ交互（点击/返回第一层/返回上一层）
+     * @param conversationId 会话ID
+     * @param action         操作类型: click/top/back
+     * @param faqIndex       FAQ索引（action=click时使用）
+     * @param parentPath     路径数组，定位当前展示的FAQ层级位置
+     */
+    void handleFaqInteract(String conversationId, String action, Integer faqIndex, java.util.List<Integer> parentPath);
+
+    /**
      * 发送消息（通用）
      * 
      * @param message 消息实体

@@ -57,6 +57,7 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
     private static final String AI_PROLOGUE_ENABLED_CONFIG_KEY = "ai_prologue_enabled";
     private static final String CONVERSATION_ASSIGN_REDIS_KEY = "cs:global:conversation_assign";
     private static final String CONVERSATION_ASSIGN_CONFIG_KEY = "conversation_assign";
+    private static final String CHAT_WINDOW_REDIS_KEY = "cs:global:chat_window_settings";
 
     @Autowired
     @Lazy
@@ -96,30 +97,63 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         boolean aiPrologueEnabled = isAiPrologueEnabled();
         JSONObject assignConfig = getConversationAssignConfig();
 
-        CsAgent assignedAgent = null;
-
-        // 优先使用指定客服
-        if (oConvertUtils.isNotEmpty(preferredAgentId)) {
-            CsAgent preferred = agentService.getById(preferredAgentId);
-            if (preferred != null && preferred.getStatus() != null && preferred.getStatus() == 1) {
-                assignedAgent = preferred;
-                log.info("[CS-Conversation] 使用指定客服: agentId={}", preferredAgentId);
-            } else {
-                log.info("[CS-Conversation] 指定客服不可用(不存在或不在线), agentId={}, 回退自动分配", preferredAgentId);
-            }
-        }
-
-        // 指定客服不可用时，走自动分配
-        if (assignedAgent == null) {
-            String lastAgentId = null;
-            if (assignConfig != null) {
-                JSONObject inherit = assignConfig.getJSONObject("inheritLastAgent");
-                if (inherit != null && inherit.getBooleanValue("enabled")) {
-                    int expireMinutes = inherit.getIntValue("expireMinutes");
-                    lastAgentId = findLastAgentForUser(userId, expireMinutes);
+        // 读取 humanAgentEnabled / faqEnabled 配置
+        boolean humanAgentEnabled = false;
+        boolean faqEnabled = false;
+        try {
+            String chatWindowJson = redisTemplate.opsForValue().get(CHAT_WINDOW_REDIS_KEY);
+            if (oConvertUtils.isNotEmpty(chatWindowJson)) {
+                JSONObject chatWindowConfig = com.alibaba.fastjson.JSON.parseObject(chatWindowJson);
+                Boolean hae = chatWindowConfig.getBoolean("humanAgentEnabled");
+                if (hae != null && hae) {
+                    humanAgentEnabled = true;
+                }
+                // visitorMessageConnect 旧值兼容（仅 humanAgentEnabled 未设置时）
+                if (hae == null) {
+                    Boolean vmc = chatWindowConfig.getBoolean("visitorMessageConnect");
+                    if (vmc != null && vmc) {
+                        humanAgentEnabled = true;
+                    }
+                }
+                Boolean faqFlag = chatWindowConfig.getBoolean("faqEnabled");
+                if (faqFlag != null && faqFlag) {
+                    com.alibaba.fastjson.JSONArray faqList = chatWindowConfig.getJSONArray("faqList");
+                    faqEnabled = faqList != null && !faqList.isEmpty();
                 }
             }
-            assignedAgent = agentService.assignAgent(lastAgentId);
+        } catch (Exception e) {
+            log.warn("[CS-Conversation] 读取chatWindowSettings失败: {}", e.getMessage());
+        }
+
+        CsAgent assignedAgent = null;
+
+        if (humanAgentEnabled) {
+            // humanAgentEnabled 模式: 不自动分配客服，等待访客手动转人工
+            log.info("[CS-Conversation] humanAgentEnabled模式，跳过客服自动分配");
+        } else {
+            // 优先使用指定客服
+            if (oConvertUtils.isNotEmpty(preferredAgentId)) {
+                CsAgent preferred = agentService.getById(preferredAgentId);
+                if (preferred != null && preferred.getStatus() != null && preferred.getStatus() == 1) {
+                    assignedAgent = preferred;
+                    log.info("[CS-Conversation] 使用指定客服: agentId={}", preferredAgentId);
+                } else {
+                    log.info("[CS-Conversation] 指定客服不可用(不存在或不在线), agentId={}, 回退自动分配", preferredAgentId);
+                }
+            }
+
+            // 指定客服不可用时，走自动分配
+            if (assignedAgent == null) {
+                String lastAgentId = null;
+                if (assignConfig != null) {
+                    JSONObject inherit = assignConfig.getJSONObject("inheritLastAgent");
+                    if (inherit != null && inherit.getBooleanValue("enabled")) {
+                        int expireMinutes = inherit.getIntValue("expireMinutes");
+                        lastAgentId = findLastAgentForUser(userId, expireMinutes);
+                    }
+                }
+                assignedAgent = agentService.assignAgent(lastAgentId);
+            }
         }
 
         // ====== 解析设备信息和IP地理位置 ======
@@ -164,12 +198,51 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         conversation.setLandingPage(landingPage);
         conversation.setReferrerPage(referrerPage);
 
-        if (assignedAgent != null) {
+        if (humanAgentEnabled) {
+            // humanAgentEnabled 模式: 不分配客服，等待用户手动转人工
+            conversation.setHumanAgentMode(1);
+            conversation.setStatus(CsConversation.STATUS_UNASSIGNED);
+            conversation.setReplyMode(CsConversation.REPLY_MODE_MANUAL);
+            save(conversation);
+            log.info("[CS-Conversation] 创建会话(humanAgent模式): id={}, userId={}, aiEnabled={}", 
+                    conversation.getId(), userId, aiEnabled);
+
+            // 广播新会话给所有在线客服（工作台未分配分组可见）
+            broadcastNewConversation(conversation);
+
+            // humanAgent模式下的欢迎消息
+            if (aiEnabled) {
+                try {
+                    if (aiPrologueEnabled) {
+                        messageService.sendVisitorPrologue(conversation.getId());
+                    } else {
+                        messageService.sendAutoMessagesAsSystem(conversation.getId(), conversation.getUserLang());
+                    }
+                } catch (Exception e) {
+                    log.warn("[CS-Conversation] humanAgent模式发送欢迎消息失败: {}", e.getMessage());
+                }
+            } else {
+                try {
+                    messageService.sendAutoMessagesAsSystem(conversation.getId(), conversation.getUserLang());
+                } catch (Exception e) {
+                    log.warn("[CS-Conversation] humanAgent模式发送自动消息失败: {}", e.getMessage());
+                }
+            }
+
+            // FAQ启用时，发送初始FAQ列表消息
+            if (faqEnabled) {
+                try {
+                    messageService.sendInitialFaqMessage(conversation.getId());
+                } catch (Exception e) {
+                    log.warn("[CS-Conversation] 发送初始FAQ消息失败: {}", e.getMessage());
+                }
+            }
+        } else if (assignedAgent != null) {
             // 有可用客服，直接分配
+            conversation.setHumanAgentMode(0);
             conversation.setOwnerAgentId(assignedAgent.getId());
             conversation.setStatus(CsConversation.STATUS_ASSIGNED);
             conversation.setAssignTime(new Date());
-            // AI开关决定回复模式
             conversation.setReplyMode(aiEnabled ? CsConversation.REPLY_MODE_AI_AUTO : CsConversation.REPLY_MODE_MANUAL);
             
             save(conversation);
@@ -195,34 +268,43 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             extra.put("agentAvatar", assignedAgent.getAvatar());
             notifyUser(conversation.getId(), "agent_connected", 
                     "客服 " + assignedAgent.getNickname() + " 为您服务", extra);
+
+            // AI欢迎消息分支
+            if (aiEnabled) {
+                try {
+                    if (aiPrologueEnabled) {
+                        messageService.sendVisitorPrologue(conversation.getId());
+                    } else {
+                        messageService.sendVisitorAutoMessagesAsAgent(conversation.getId(),
+                                assignedAgent.getId(), assignedAgent.getNickname(), conversation.getUserLang());
+                    }
+                } catch (Exception e) {
+                    log.warn("[CS-Conversation] 发送欢迎消息失败: {}", e.getMessage());
+                }
+            } else {
+                try {
+                    messageService.sendAutoMessages(conversation.getId(),
+                            assignedAgent.getId(), assignedAgent.getNickname(), conversation.getUserLang());
+                } catch (Exception e) {
+                    log.warn("[CS-Conversation] 发送自动消息失败: {}", e.getMessage());
+                }
+            }
+
+            // FAQ启用时，发送初始FAQ列表消息
+            if (faqEnabled) {
+                try {
+                    messageService.sendInitialFaqMessage(conversation.getId());
+                } catch (Exception e) {
+                    log.warn("[CS-Conversation] 发送初始FAQ消息失败: {}", e.getMessage());
+                }
+            }
         } else {
             // 无可用客服 → 标记noAgent，前端展示留言板
+            conversation.setHumanAgentMode(0);
             conversation.setStatus(CsConversation.STATUS_UNASSIGNED);
             conversation.setReplyMode(CsConversation.REPLY_MODE_MANUAL);
             save(conversation);
             log.info("[CS-Conversation] 创建会话(无在线客服): id={}, userId={}", conversation.getId(), userId);
-        }
-
-        // AI欢迎消息分支：AI开启时可独立控制是否使用AI开场白
-        if (aiEnabled) {
-            try {
-                if (aiPrologueEnabled) {
-                    messageService.sendVisitorPrologue(conversation.getId());
-                } else if (assignedAgent != null) {
-                    messageService.sendVisitorAutoMessagesAsAgent(conversation.getId(),
-                            assignedAgent.getId(), assignedAgent.getNickname(), conversation.getUserLang());
-                }
-            } catch (Exception e) {
-                log.warn("[CS-Conversation] 发送欢迎消息失败: {}", e.getMessage());
-            }
-        } else if (assignedAgent != null) {
-            // AI关闭时发送自动消息（如果有配置）
-            try {
-                messageService.sendAutoMessages(conversation.getId(),
-                        assignedAgent.getId(), assignedAgent.getNickname(), conversation.getUserLang());
-            } catch (Exception e) {
-                log.warn("[CS-Conversation] 发送自动消息失败: {}", e.getMessage());
-            }
         }
         
         return conversation;

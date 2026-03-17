@@ -382,11 +382,24 @@ public class CsMessageController {
                 if (faqList != null) {
                     for (int i = 0; i < faqList.size(); i++) {
                         JSONObject faq = faqList.getJSONObject(i);
-                        if (faq != null && question.equals(faq.getString("question"))) {
+                        if (faq == null) continue;
+                        if (question.equals(faq.getString("question"))) {
                             found = true;
                             storedAnswer = faq.getString("answer");
                             break;
                         }
+                        JSONArray children = faq.getJSONArray("children");
+                        if (children != null) {
+                            for (int j = 0; j < children.size(); j++) {
+                                JSONObject child = children.getJSONObject(j);
+                                if (child != null && question.equals(child.getString("question"))) {
+                                    found = true;
+                                    storedAnswer = child.getString("answer");
+                                    break;
+                                }
+                            }
+                        }
+                        if (found) break;
                     }
                 }
                 if (!found || oConvertUtils.isEmpty(storedAnswer)) {
@@ -419,6 +432,69 @@ public class CsMessageController {
         } catch (Exception e) {
             log.error("[CS-Message] FAQ回复发送失败", e);
             return Result.error("FAQ回复发送失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * FAQ交互端点（智能助手消息模式）
+     * 访客点击FAQ链接/返回操作时调用，后端生成智能助手消息并通过WebSocket推送
+     */
+    @Operation(summary = "FAQ交互")
+    @org.jeecg.config.shiro.IgnoreAuth
+    @PostMapping("/faq/interact")
+    public Result<?> faqInteract(@RequestBody Map<String, Object> params, HttpServletRequest request) {
+        String conversationId = (String) params.get("conversationId");
+        String action = (String) params.get("action");
+        Integer faqIndex = params.get("faqIndex") instanceof Number ? ((Number) params.get("faqIndex")).intValue() : null;
+        java.util.List<Integer> parentPath = new java.util.ArrayList<>();
+        Object pathObj = params.get("parentPath");
+        if (pathObj instanceof java.util.List) {
+            for (Object item : (java.util.List<?>) pathObj) {
+                if (item instanceof Number) {
+                    parentPath.add(((Number) item).intValue());
+                }
+            }
+        }
+
+        if (oConvertUtils.isEmpty(conversationId) || oConvertUtils.isEmpty(action)) {
+            return Result.error("参数不完整");
+        }
+
+        boolean isAdmin = visitorTokenService.isAdminRequest(request);
+        if (!isAdmin) {
+            CsVisitorTokenPayload tokenPayload = resolveVisitorPayload(request);
+            if (tokenPayload != null) {
+                if (visitorTokenService.isBlacklisted(tokenPayload.getExternalUserId())) {
+                    return Result.error("访客已被拉黑");
+                }
+                if (!isConversationOwner(conversationId, tokenPayload.getExternalUserId())) {
+                    return Result.error("无权访问该会话");
+                }
+            } else if (!visitorTokenService.isTokenRequired()) {
+                if (!visitorTokenService.validateAppKey(request)) {
+                    return Result.error("接入密钥无效");
+                }
+                String devId = visitorTokenService.extractDeviceId(request);
+                if (oConvertUtils.isEmpty(devId)) {
+                    return Result.error("缺少设备码");
+                }
+                if (visitorTokenService.isBlacklisted(devId)) {
+                    return Result.error("访客已被拉黑");
+                }
+                if (!isConversationOwner(conversationId, devId)) {
+                    return Result.error("无权访问该会话");
+                }
+            } else {
+                return Result.error("访客凭证无效或已过期");
+            }
+        }
+
+        try {
+            messageService.handleFaqInteract(conversationId, action, faqIndex, parentPath);
+            return Result.OK("success");
+        } catch (Exception e) {
+            log.error("[CS-Message] FAQ交互处理失败", e);
+            return Result.error("FAQ交互处理失败: " + e.getMessage());
         }
     }
 

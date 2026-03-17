@@ -35,7 +35,7 @@ public class CsMessage implements Serializable {
 
     // ==================== 发送者信息 ====================
 
-    @Schema(description = "发送者类型: 0-用户 1-AI 2-客服 3-系统")
+    @Schema(description = "发送者类型: 0-用户 1-AI 2-客服 3-系统 4-智能助手")
     private Integer senderType;
 
     @Schema(description = "发送者ID")
@@ -102,6 +102,8 @@ public class CsMessage implements Serializable {
     public static final int SENDER_AGENT = 2;
     /** 系统 */
     public static final int SENDER_SYSTEM = 3;
+    /** 智能助手 */
+    public static final int SENDER_SMART_ASSISTANT = 4;
 
     // ==================== 消息类型常量 ====================
     
@@ -199,6 +201,24 @@ public class CsMessage implements Serializable {
         msg.setSenderName("系统");
         msg.setMsgType(MSG_TYPE_TEXT);
         msg.setContent(content);
+        msg.setStatus(STATUS_SENT);
+        msg.setCreateTime(new Date());
+        return msg;
+    }
+
+    /**
+     * 创建智能助手消息
+     */
+    public static CsMessage createSmartAssistantMessage(String conversationId, String content, String extra) {
+        CsMessage msg = new CsMessage();
+        msg.setId(UUID.randomUUID().toString().replace("-", ""));
+        msg.setConversationId(conversationId);
+        msg.setSenderType(SENDER_SMART_ASSISTANT);
+        msg.setSenderId("smart_assistant");
+        msg.setSenderName("智能助手");
+        msg.setMsgType(MSG_TYPE_TEXT);
+        msg.setContent(content);
+        msg.setExtra(extra);
         msg.setStatus(STATUS_SENT);
         msg.setCreateTime(new Date());
         return msg;

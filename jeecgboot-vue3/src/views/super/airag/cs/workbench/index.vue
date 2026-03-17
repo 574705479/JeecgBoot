@@ -368,11 +368,11 @@
               {{ (group.agent.nickname || '客').charAt(0) }}
             </a-avatar>
             <span class="monitor-agent-name">{{ group.agent.nickname || '未知客服' }}</span>
-            <span class="monitor-agent-status" :class="'status-' + group.agent.status">
+            <span v-if="group.agent.id !== '__unassigned__'" class="monitor-agent-status" :class="'status-' + group.agent.status">
               {{ getAgentStatusText(group.agent.status) }}
             </span>
             <span class="monitor-agent-sessions">
-              {{ group.conversations.filter(c => c.userOnline).length }}/{{ group.conversations.length }}
+              <template v-if="group.agent.id !== '__unassigned__'">{{ group.conversations.filter(c => c.userOnline).length }}/</template>{{ group.conversations.length }}
             </span>
           </div>
           <!-- 展开的对话列表 -->
@@ -437,6 +437,11 @@
               <span v-if="currentConversation.status === 1 && currentConversation.ownerAgentName" class="status-text">
                 首次接入: {{ currentConversation.ownerAgentName }}
               </span>
+            </div>
+            <div v-if="parsedCustomFields.length" class="custom-fields-header">
+              <a-tag v-for="cf in parsedCustomFields" :key="cf.label" color="red" size="small">
+                {{ cf.label }}: {{ cf.value }}
+              </a-tag>
             </div>
           </div>
         </div>
@@ -542,6 +547,20 @@
                     <RobotOutlined /> 回复建议
                   </a-button>
                 </div>
+              </div>
+            </template>
+            <!-- 智能助手消息 (senderType=4, 显示在左侧访客方向) -->
+            <template v-else-if="msg.senderType === 4">
+              <a-avatar :size="messageAvatarSize" class="msg-avatar" style="background: #13c2c2">助</a-avatar>
+              <div class="msg-body">
+                <div class="msg-info">
+                  <span class="sender-name">{{ msg.senderName || '智能助手' }}</span>
+                  <a-tag color="cyan" size="small">助手</a-tag>
+                </div>
+                <div class="msg-bubble user-bubble">
+                  <div v-if="msg.content" class="msg-text" v-html="renderMessage(msg.content)"></div>
+                </div>
+                <div class="msg-meta">{{ formatMessageTime(msg.createTime) }}</div>
               </div>
             </template>
             <!-- 客服/AI消息 (显示在右边，类似Telegram自己发送的消息) -->
@@ -812,6 +831,17 @@
             <StarOutlined v-else class="star-btn" @click="toggleStar" />
           </div>
         </div>
+
+        <!-- 自定义字段信息（暂时隐藏） -->
+        <!--
+        <div v-if="parsedCustomFields.length" class="info-section">
+          <div class="section-title">转人工填写信息</div>
+          <div v-for="cf in parsedCustomFields" :key="cf.label" class="info-item">
+            <label>{{ cf.label }}</label>
+            <span class="info-value" style="color: #ff4d4f; font-weight: 500;">{{ cf.value }}</span>
+          </div>
+        </div>
+        -->
 
         <!-- 访问信息 -->
         <div class="info-section">
@@ -1403,8 +1433,10 @@ const monitorGroups = computed(() => {
     });
   }
   
-  // 排序：在线优先，然后按对话数量降序
+  // 排序：未分配排第一，然后在线优先，再按对话数量降序
   groups.sort((a, b) => {
+    if (a.agent.id === '__unassigned__') return -1;
+    if (b.agent.id === '__unassigned__') return 1;
     const statusOrder = (s: number) => s === 1 ? 0 : s === 2 ? 1 : s === 3 ? 2 : 3;
     const sa = statusOrder(a.agent.status);
     const sb = statusOrder(b.agent.status);
@@ -1489,6 +1521,19 @@ let switchSeq = 0;
 const visitorInfo = ref<any>({});
 const visitorTags = ref<string[]>([]);
 const showDetailPanel = ref(true);
+
+// 解析当前会话的自定义字段
+const parsedCustomFields = computed(() => {
+  const conv = currentConversation.value;
+  if (!conv?.customFields) return [];
+  try {
+    const fields = typeof conv.customFields === 'string' ? JSON.parse(conv.customFields) : conv.customFields;
+    if (typeof fields === 'object' && fields !== null) {
+      return Object.entries(fields).map(([label, value]) => ({ label, value: String(value) }));
+    }
+  } catch {}
+  return [];
+});
 const userOnline = ref(false);
 const userIdBlacklisted = ref(false);
 const ipBlacklisted = ref(false);
@@ -3876,6 +3921,9 @@ function handleWsMessage(data: any) {
           assignedConv.ownerAgentName = assignedAgentName;
           assignedConv.ownerAgentAvatar = assignedAgentAvatar;
           assignedConv.assignTime = new Date().toISOString();
+          if (extraData.customFields !== undefined) {
+            assignedConv.customFields = extraData.customFields;
+          }
           
           // 如果当前是待接入列表，从列表中移除该会话
           if (filter.value === 'unassigned') {
@@ -3891,6 +3939,9 @@ function handleWsMessage(data: any) {
             currentConversation.value.ownerAgentId = assignedAgentId;
             currentConversation.value.ownerAgentName = assignedAgentName;
             currentConversation.value.ownerAgentAvatar = assignedAgentAvatar;
+            if (extraData.customFields !== undefined) {
+              currentConversation.value.customFields = extraData.customFields;
+            }
           }
           
           // 如果不是当前客服接入的，显示提示
@@ -4576,6 +4627,7 @@ function getStatusName(status: number) {
 function getMessageClass(msg: any) {
   if (msg.isDateSeparator) return 'date-sep';
   if (msg.senderType === 3) return 'system';
+  if (msg.senderType === 4) return 'smart-assistant';
   return msg.senderType === 0 ? 'user' : 'agent';
 }
 
@@ -5395,6 +5447,12 @@ function restoreMessageScroll() {
       gap: 8px;
       .status-divider { color: #e0e0e0; }
     }
+    .custom-fields-header {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 4px;
+    }
   }
 
   .chat-tools {
@@ -5487,6 +5545,15 @@ function restoreMessageScroll() {
     .msg-body { align-items: flex-start; }
     .msg-avatar {
       background: linear-gradient(135deg, var(--cs-brand-start), var(--cs-brand-end));
+    }
+  }
+
+  // 智能助手消息（左侧，与用户消息同方向）
+  &.smart-assistant {
+    .msg-body { align-items: flex-start; max-width: 65%; }
+    .msg-bubble { overflow-wrap: anywhere; }
+    .msg-avatar {
+      background: #13c2c2;
     }
   }
 

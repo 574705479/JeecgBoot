@@ -31,12 +31,32 @@
                   <CropperUpload v-model:value="config.backgroundImage" :uploadApi="uploadImg" btnText="上传背景" />
                 </a-form-item>
               </a-col>
+              <a-col :span="6">
+                <a-form-item label="隐藏页面标题">
+                  <a-switch v-model:checked="config.hidePageTitle" />
+                </a-form-item>
+              </a-col>
+              <a-col :span="6">
+                <a-form-item label="隐藏在线状态">
+                  <a-switch v-model:checked="config.hideOnlineStatus" />
+                </a-form-item>
+              </a-col>
+              <a-col :span="6">
+                <a-form-item label="隐藏AI/人工标签">
+                  <a-switch v-model:checked="config.hideAiHumanLabel" />
+                </a-form-item>
+              </a-col>
+              <a-col :span="6">
+                <a-form-item label="隐藏Logo">
+                  <a-switch v-model:checked="config.hideLogo" />
+                </a-form-item>
+              </a-col>
             </a-row>
 
             <!-- 头部 -->
             <a-divider orientation="left">头部</a-divider>
             <a-row :gutter="16">
-              <a-col :span="12">
+              <a-col :span="24">
                 <a-form-item label="显示头部">
                   <a-switch v-model:checked="config.headerVisible" />
                   <span class="switch-hint">关闭后访客端不显示头部</span>
@@ -46,6 +66,56 @@
                 <a-form-item label="头部背景图">
                   <CropperUpload v-model:value="config.headerBgImage" :uploadApi="uploadImg" btnText="上传背景图" />
                   <div class="upload-hint">上传后头部将使用背景图替代纯色</div>
+                </a-form-item>
+                <a-form-item v-if="config.headerBgImage" label="背景图显示模式">
+                  <a-select v-model:value="config.headerBgImageMode" style="width: 100%">
+                    <a-select-option value="cover">铺满（裁剪）</a-select-option>
+                    <a-select-option value="contain">完整显示（留白）</a-select-option>
+                    <a-select-option value="stretch">拉伸填充</a-select-option>
+                    <a-select-option value="repeat">平铺重复</a-select-option>
+                    <a-select-option value="center">居中（原始尺寸）</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item v-if="config.headerBgImage" label="背景图位置">
+                  <a-select v-model:value="config.headerBgPosition" style="width: 100%">
+                    <a-select-option value="center">居中</a-select-option>
+                    <a-select-option value="left center">左对齐</a-select-option>
+                    <a-select-option value="right center">右对齐</a-select-option>
+                    <a-select-option value="center top">顶部居中</a-select-option>
+                    <a-select-option value="center bottom">底部居中</a-select-option>
+                    <a-select-option value="left top">左上角</a-select-option>
+                    <a-select-option value="right top">右上角</a-select-option>
+                    <a-select-option value="left bottom">左下角</a-select-option>
+                    <a-select-option value="right bottom">右下角</a-select-option>
+                  </a-select>
+                </a-form-item>
+              </a-col>
+              <a-col :span="12">
+                <a-form-item label="手机端头部背景图">
+                  <CropperUpload v-model:value="config.mobileHeaderBgImage" :uploadApi="uploadImg" btnText="上传手机端背景图" />
+                  <div class="upload-hint">未设置时使用通用头部背景图</div>
+                </a-form-item>
+                <a-form-item v-if="config.mobileHeaderBgImage" label="手机端背景图显示模式">
+                  <a-select v-model:value="config.mobileHeaderBgImageMode" style="width: 100%">
+                    <a-select-option value="cover">铺满（裁剪）</a-select-option>
+                    <a-select-option value="contain">完整显示（留白）</a-select-option>
+                    <a-select-option value="stretch">拉伸填充</a-select-option>
+                    <a-select-option value="repeat">平铺重复</a-select-option>
+                    <a-select-option value="center">居中（原始尺寸）</a-select-option>
+                  </a-select>
+                </a-form-item>
+                <a-form-item v-if="config.mobileHeaderBgImage" label="手机端背景图位置">
+                  <a-select v-model:value="config.mobileHeaderBgPosition" style="width: 100%">
+                    <a-select-option value="center">居中</a-select-option>
+                    <a-select-option value="left center">左对齐</a-select-option>
+                    <a-select-option value="right center">右对齐</a-select-option>
+                    <a-select-option value="center top">顶部居中</a-select-option>
+                    <a-select-option value="center bottom">底部居中</a-select-option>
+                    <a-select-option value="left top">左上角</a-select-option>
+                    <a-select-option value="right top">右上角</a-select-option>
+                    <a-select-option value="left bottom">左下角</a-select-option>
+                    <a-select-option value="right bottom">右下角</a-select-option>
+                  </a-select>
                 </a-form-item>
               </a-col>
               <a-col :span="24">
@@ -175,9 +245,32 @@
                 </a-form-item>
               </a-col>
               <a-col :span="12">
-                <a-form-item label="访客消息接通">
-                  <a-switch v-model:checked="config.visitorMessageConnect" />
-                  <span class="switch-hint">开启后发消息才接通，否则自动接入</span>
+                <a-form-item label="访客填写指定内容接通">
+                  <a-switch v-model:checked="config.humanAgentEnabled" />
+                  <span class="switch-hint">开启后访客需点击人工客服按钮并填写信息才接入人工</span>
+                </a-form-item>
+              </a-col>
+              <a-col :span="24" v-if="config.humanAgentEnabled">
+                <a-form-item>
+                  <template #label>
+                    <span>自定义字段 <span style="color:#999;font-weight:normal;font-size:12px">（配置访客转人工时需填写的字段）</span></span>
+                  </template>
+                  <div class="human-agent-fields-section">
+                    <a-button type="dashed" size="small" @click="addHumanAgentField" style="margin-bottom:8px">
+                      <PlusOutlined /> 添加字段
+                    </a-button>
+                    <div v-if="!config.humanAgentFields.length" style="color:#bbb;font-size:12px;padding:8px 0">暂未配置字段</div>
+                    <div v-for="(field, fIdx) in config.humanAgentFields" :key="fIdx" class="human-agent-field-row">
+                      <a-input v-model:value="field.label" placeholder="字段名称" style="width:140px" size="small" />
+                      <a-select v-model:value="field.type" style="width:110px" size="small">
+                        <a-select-option value="text">文本</a-select-option>
+                        <a-select-option value="phone">手机号</a-select-option>
+                        <a-select-option value="email">邮箱</a-select-option>
+                      </a-select>
+                      <a-checkbox v-model:checked="field.required">必填</a-checkbox>
+                      <a-button type="text" size="small" danger @click="config.humanAgentFields.splice(fIdx, 1)"><DeleteOutlined /></a-button>
+                    </div>
+                  </div>
                 </a-form-item>
               </a-col>
               <a-col :span="6">
@@ -244,9 +337,33 @@
                 </a-form-item>
               </a-col>
               <a-col :span="24" v-if="config.faqEnabled">
+                <a-form-item label="FAQ引导语">
+                  <a-input v-model:value="config.faqHeaderText" placeholder="您好，请问有什么可以帮助您的？" allow-clear />
+                  <span class="switch-hint">访客端首次进入时，智能助手发送的FAQ引导语文本，留空默认"您好，请问有什么可以帮助您的？"</span>
+                </a-form-item>
+              </a-col>
+              <a-col :span="12" v-if="config.faqEnabled">
+                <a-form-item label="问题链接颜色">
+                  <div class="color-picker-row">
+                    <input type="color" v-model="config.faqLinkColor" class="color-input" />
+                    <a-input v-model:value="config.faqLinkColor" size="small" style="width:120px" />
+                  </div>
+                  <span class="switch-hint">访客端FAQ问题超链接颜色</span>
+                </a-form-item>
+              </a-col>
+              <a-col :span="12" v-if="config.faqEnabled">
+                <a-form-item label="功能栏颜色">
+                  <div class="color-picker-row">
+                    <input type="color" v-model="config.faqNavColor" class="color-input" />
+                    <a-input v-model:value="config.faqNavColor" size="small" style="width:120px" />
+                  </div>
+                  <span class="switch-hint">"返回第一层"、"返回上一层"、"人工客服"链接颜色</span>
+                </a-form-item>
+              </a-col>
+              <a-col :span="24" v-if="config.faqEnabled">
                 <div class="faq-section">
                   <div class="faq-header">
-                    <a-button type="primary" size="small" @click="openFaqEditor(-1)">
+                    <a-button type="primary" size="small" @click="openFaqEditor([], -1)">
                       <PlusOutlined /> 添加问题
                     </a-button>
                     <span class="faq-count">{{ config.faqList.length }} 条</span>
@@ -256,24 +373,78 @@
                     <div>暂无常见问题</div>
                     <div style="font-size:12px;color:#bbb;margin-top:4px">点击上方"添加问题"按钮开始配置</div>
                   </div>
-                  <div v-for="(faq, idx) in config.faqList" :key="idx" class="faq-item" @click="openFaqEditor(idx)">
-                    <div class="faq-item-num">{{ idx + 1 }}</div>
-                    <div class="faq-item-body">
-                      <div class="faq-item-question">{{ faq.question }}</div>
-                      <div class="faq-item-answer">{{ stripHtml(faq.answer) }}</div>
-                      <div v-if="faq.keywords?.length" class="faq-item-keywords">
-                        <a-tag v-for="kw in faq.keywords" :key="kw" size="small" color="blue">{{ kw }}</a-tag>
+                  <template v-for="(faq, idx) in config.faqList" :key="'faq-' + idx">
+                    <div class="faq-tree-node" :style="{ paddingLeft: '0px' }">
+                      <div class="faq-tree-main" @click="openFaqEditor([], idx)">
+                        <div class="faq-tree-body">
+                          <div class="faq-tree-question">{{ faq.question }}</div>
+                          <div class="faq-tree-answer">{{ stripHtml(faq.answer) }}</div>
+                          <div v-if="faq.keywords?.length" class="faq-tree-keywords">
+                            <a-tag v-for="kw in faq.keywords" :key="kw" size="small" color="blue">{{ kw }}</a-tag>
+                          </div>
+                        </div>
+                        <div class="faq-tree-actions" @click.stop>
+                          <a-button type="text" size="small" @click="openFaqEditor([], idx)"><EditOutlined /></a-button>
+                          <a-button type="text" size="small" danger @click="removeFaq([], idx)"><DeleteOutlined /></a-button>
+                          <a-button type="link" size="small" @click="openFaqEditor([idx], -1)"><PlusOutlined /> 添加下级</a-button>
+                        </div>
                       </div>
                     </div>
-                    <div class="faq-item-actions" @click.stop>
-                      <a-tooltip title="编辑">
-                        <a-button type="text" size="small" @click="openFaqEditor(idx)"><EditOutlined /></a-button>
-                      </a-tooltip>
-                      <a-tooltip title="删除">
-                        <a-button type="text" size="small" danger @click="removeFaq(idx)"><DeleteOutlined /></a-button>
-                      </a-tooltip>
-                    </div>
-                  </div>
+                    <template v-if="faq.children?.length">
+                      <template v-for="(c1, i1) in faq.children" :key="'faq-' + idx + '-' + i1">
+                        <div class="faq-tree-node" :style="{ paddingLeft: '24px' }">
+                          <div class="faq-tree-main" @click="openFaqEditor([idx], i1)">
+                            <span class="faq-tree-prefix">--</span>
+                            <div class="faq-tree-body">
+                              <div class="faq-tree-question">{{ c1.question }}</div>
+                              <div class="faq-tree-answer">{{ stripHtml(c1.answer) }}</div>
+                            </div>
+                            <div class="faq-tree-actions" @click.stop>
+                              <a-button type="text" size="small" @click="openFaqEditor([idx], i1)"><EditOutlined /></a-button>
+                              <a-button type="text" size="small" danger @click="removeFaq([idx], i1)"><DeleteOutlined /></a-button>
+                              <a-button type="link" size="small" @click="openFaqEditor([idx, i1], -1)"><PlusOutlined /> 添加下级</a-button>
+                            </div>
+                          </div>
+                        </div>
+                        <template v-if="c1.children?.length">
+                          <template v-for="(c2, i2) in c1.children" :key="'faq-' + idx + '-' + i1 + '-' + i2">
+                            <div class="faq-tree-node" :style="{ paddingLeft: '48px' }">
+                              <div class="faq-tree-main" @click="openFaqEditor([idx, i1], i2)">
+                                <span class="faq-tree-prefix">--</span>
+                                <div class="faq-tree-body">
+                                  <div class="faq-tree-question">{{ c2.question }}</div>
+                                  <div class="faq-tree-answer">{{ stripHtml(c2.answer) }}</div>
+                                </div>
+                                <div class="faq-tree-actions" @click.stop>
+                                  <a-button type="text" size="small" @click="openFaqEditor([idx, i1], i2)"><EditOutlined /></a-button>
+                                  <a-button type="text" size="small" danger @click="removeFaq([idx, i1], i2)"><DeleteOutlined /></a-button>
+                                  <a-button type="link" size="small" @click="openFaqEditor([idx, i1, i2], -1)"><PlusOutlined /> 添加下级</a-button>
+                                </div>
+                              </div>
+                            </div>
+                            <template v-if="c2.children?.length">
+                              <template v-for="(c3, i3) in c2.children" :key="'faq-' + idx + '-' + i1 + '-' + i2 + '-' + i3">
+                                <div class="faq-tree-node" :style="{ paddingLeft: '72px' }">
+                                  <div class="faq-tree-main" @click="openFaqEditor([idx, i1, i2], i3)">
+                                    <span class="faq-tree-prefix">--</span>
+                                    <div class="faq-tree-body">
+                                      <div class="faq-tree-question">{{ c3.question }}</div>
+                                      <div class="faq-tree-answer">{{ stripHtml(c3.answer) }}</div>
+                                    </div>
+                                    <div class="faq-tree-actions" @click.stop>
+                                      <a-button type="text" size="small" @click="openFaqEditor([idx, i1, i2], i3)"><EditOutlined /></a-button>
+                                      <a-button type="text" size="small" danger @click="removeFaq([idx, i1, i2], i3)"><DeleteOutlined /></a-button>
+                                      <a-button type="link" size="small" @click="openFaqEditor([idx, i1, i2, i3], -1)"><PlusOutlined /> 添加下级</a-button>
+                                    </div>
+                                  </div>
+                                </div>
+                              </template>
+                            </template>
+                          </template>
+                        </template>
+                      </template>
+                    </template>
+                  </template>
                 </div>
               </a-col>
             </a-row>
@@ -294,9 +465,19 @@
             <div class="preview-wrapper" :style="previewWrapperStyle">
               <!-- 全宽头部（独立于 preview-chat，横跨整个 preview-wrapper） -->
               <div v-if="config.headerVisible" class="p-header-full" :style="previewHeaderStyle">
+                <LeftOutlined v-if="previewTab === 'mobile'" class="p-back-btn" />
                 <div class="p-header-content">
-                  <img v-if="config.logo" :src="resolveUrl(config.logo)" class="p-logo" alt="logo" />
-                  <span class="p-title">{{ config.pageTitle || '在线客服' }}</span>
+                  <img v-if="config.logo && !config.hideLogo" :src="resolveUrl(config.logo)" class="p-logo" alt="logo" />
+                  <div class="p-header-info">
+                    <span v-if="!config.hidePageTitle" class="p-title">{{ config.pageTitle || '在线客服' }}</span>
+                    <span class="p-status-line">
+                      <template v-if="!config.hideOnlineStatus">
+                        <span class="p-status-dot"></span>
+                        <span class="p-status-text">在线</span>
+                      </template>
+                      <a-tag v-if="!config.hideAiHumanLabel" color="blue" size="small" style="margin-left: 4px;">AI客服</a-tag>
+                    </span>
+                  </div>
                 </div>
                 <div v-if="previewTab === 'pc' && config.headerIcons?.length" class="p-header-icons">
                   <a v-for="(item, idx) in config.headerIcons" :key="idx" class="p-header-icon-item" :href="item.link || '#'" target="_blank" rel="noopener">
@@ -347,13 +528,6 @@
                       </div>
                     </div>
                   </div>
-                  <!-- 手机端FAQ入口（输入框上方） -->
-                  <div v-if="previewTab === 'mobile' && config.faqEnabled && config.faqList.length > 0" class="p-faq-mobile">
-                    <div class="p-faq-mobile-title"><QuestionCircleOutlined /> 常见问题</div>
-                    <div class="p-faq-mobile-list">
-                      <div v-for="(faq, idx) in config.faqList" :key="idx" class="p-faq-mobile-item">{{ faq.question }}</div>
-                    </div>
-                  </div>
                   <!-- 输入区 -->
                   <div class="p-input-area">
                     <div class="p-toolbar">
@@ -361,6 +535,7 @@
                       <span v-if="config.sendImage" class="p-tool-icon">🖼</span>
                       <span v-if="config.sendVideo" class="p-tool-icon">🎬</span>
                       <span v-if="config.sendPdf" class="p-tool-icon">📄</span>
+                      <QuestionCircleOutlined v-if="config.faqEnabled && config.faqList?.length > 0" class="p-tool-icon" style="font-size: 14px;" />
                     </div>
                     <div class="p-input-box">
                       <span class="p-input-placeholder">输入消息...</span>
@@ -392,7 +567,7 @@
     <!-- FAQ编辑弹窗 -->
     <a-modal
       v-model:open="faqEditorVisible"
-      :title="faqEditIndex >= 0 ? '编辑常见问题' : '添加常见问题'"
+      :title="faqEditIdx >= 0 ? '编辑常见问题' : '添加常见问题'"
       :width="780"
       :maskClosable="false"
       :bodyStyle="{ padding: '20px 24px' }"
@@ -405,7 +580,7 @@
         <a-form-item label="问题" :required="true" style="margin-bottom:16px">
           <a-input v-model:value="faqEditForm.question" placeholder="请输入访客常见问题，例如：你们的产品有哪些？" :maxlength="100" showCount size="large" />
         </a-form-item>
-        <a-form-item style="margin-bottom:16px">
+        <a-form-item v-if="faqEditPath.length === 0" style="margin-bottom:16px">
           <template #label>
             <span>匹配关键词 <span style="color:#999;font-weight:normal;font-size:12px">（可选，用户消息包含任一关键词时自动匹配此问题）</span></span>
           </template>
@@ -440,7 +615,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { defHttp } from '/@/utils/http/axios';
 import { useMessage } from '/@/hooks/web/useMessage';
 import { uploadImg } from '/@/api/sys/upload';
-import { DeleteOutlined, EditOutlined, PlusOutlined, QuestionCircleOutlined } from '@ant-design/icons-vue';
+import { DeleteOutlined, EditOutlined, LeftOutlined, PlusOutlined, QuestionCircleOutlined } from '@ant-design/icons-vue';
 import { Tinymce } from '/@/components/Tinymce/index';
 import { CropperUpload } from '/@/components/Cropper';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
@@ -467,7 +642,8 @@ const previewTab = ref('pc');
 interface FaqItem {
   question: string;
   answer: string;
-  keywords: string[];
+  keywords?: string[];
+  children?: FaqItem[];
 }
 
 const config = reactive({
@@ -498,13 +674,28 @@ const config = reactive({
   headerBgImage: '',
   headerIcons: [] as Array<{ icon: string; name: string; link: string; size: number; transparent: boolean }>,
   faqEnabled: false,
+  faqHeaderText: '',
   faqList: [] as FaqItem[],
+  hidePageTitle: false,
+  hideOnlineStatus: false,
+  hideAiHumanLabel: false,
+  hideLogo: false,
+  headerBgImageMode: 'cover' as string,
+  headerBgPosition: 'center' as string,
+  mobileHeaderBgImage: '',
+  mobileHeaderBgImageMode: 'cover' as string,
+  mobileHeaderBgPosition: 'center' as string,
+  humanAgentEnabled: false,
+  humanAgentFields: [] as Array<{ label: string; type: string; required: boolean }>,
+  faqLinkColor: '#e8453c',
+  faqNavColor: '#1890ff',
 });
 
 // FAQ编辑器状态
 const faqEditorVisible = ref(false);
-const faqEditIndex = ref(-1); // -1=新增
-const faqEditForm = reactive<FaqItem>({ question: '', answer: '', keywords: [] });
+const faqEditPath = ref<number[]>([]);
+const faqEditIdx = ref(-1); // -1=新增
+const faqEditForm = reactive({ question: '', answer: '', keywords: [] as string[] });
 const faqEditorPlugins = 'lists image link media fullscreen paste';
 const faqEditorToolbar = 'bold italic underline strikethrough | bullist numlist | alignleft aligncenter alignright | fontsize forecolor backcolor | link image media | removeformat';
 
@@ -521,12 +712,33 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
 }
 
-function openFaqEditor(idx: number) {
-  faqEditIndex.value = idx;
-  if (idx >= 0 && config.faqList[idx]) {
-    faqEditForm.question = config.faqList[idx].question;
-    faqEditForm.answer = config.faqList[idx].answer;
-    faqEditForm.keywords = Array.isArray(config.faqList[idx].keywords) ? [...config.faqList[idx].keywords] : [];
+function resolveFaqArray(path: number[]): FaqItem[] | null {
+  let arr: FaqItem[] = config.faqList;
+  for (const idx of path) {
+    if (idx < 0 || idx >= arr.length) return null;
+    if (!arr[idx].children) {
+      arr[idx].children = [];
+    }
+    arr = arr[idx].children!;
+  }
+  return arr;
+}
+
+function openFaqEditor(path: number[], idx: number) {
+  faqEditPath.value = [...path];
+  faqEditIdx.value = idx;
+  if (idx >= 0) {
+    const arr = resolveFaqArray(path);
+    const item = arr?.[idx];
+    if (item) {
+      faqEditForm.question = item.question;
+      faqEditForm.answer = item.answer;
+      faqEditForm.keywords = Array.isArray(item.keywords) ? [...item.keywords] : [];
+    } else {
+      faqEditForm.question = '';
+      faqEditForm.answer = '';
+      faqEditForm.keywords = [];
+    }
   } else {
     faqEditForm.question = '';
     faqEditForm.answer = '';
@@ -544,22 +756,42 @@ function saveFaqItem() {
     createMessage.warning('请输入答案');
     return;
   }
-  // 过滤掉长度不足2个字符的关键词
-  const validKeywords = (faqEditForm.keywords || []).filter(k => k.trim().length >= 2).map(k => k.trim());
-  if (faqEditForm.keywords.length > 0 && validKeywords.length < faqEditForm.keywords.length) {
+  const isTopLevel = faqEditPath.value.length === 0;
+  const validKeywords = isTopLevel
+    ? (faqEditForm.keywords || []).filter(k => k.trim().length >= 2).map(k => k.trim())
+    : [];
+  if (isTopLevel && faqEditForm.keywords.length > 0 && validKeywords.length < faqEditForm.keywords.length) {
     createMessage.warning('关键词长度至少为2个字符，已自动过滤无效关键词');
   }
-  const item: FaqItem = { question: faqEditForm.question.trim(), answer: faqEditForm.answer, keywords: validKeywords };
-  if (faqEditIndex.value >= 0) {
-    config.faqList[faqEditIndex.value] = item;
+  const arr = resolveFaqArray(faqEditPath.value);
+  if (!arr) return;
+  if (faqEditIdx.value >= 0 && faqEditIdx.value < arr.length) {
+    const existing = arr[faqEditIdx.value];
+    existing.question = faqEditForm.question.trim();
+    existing.answer = faqEditForm.answer;
+    existing.keywords = isTopLevel ? validKeywords : undefined;
   } else {
-    config.faqList.push(item);
+    const newItem: FaqItem = {
+      question: faqEditForm.question.trim(),
+      answer: faqEditForm.answer,
+      keywords: isTopLevel ? validKeywords : undefined,
+      children: [],
+    };
+    arr.push(newItem);
   }
   faqEditorVisible.value = false;
 }
 
-function removeFaq(idx: number) {
-  config.faqList.splice(idx, 1);
+function removeFaq(path: number[], idx: number) {
+  const arr = resolveFaqArray(path);
+  if (arr && idx >= 0 && idx < arr.length) {
+    arr.splice(idx, 1);
+  }
+}
+
+// ==================== 人工客服字段 ====================
+function addHumanAgentField() {
+  config.humanAgentFields.push({ label: '', type: 'text', required: false });
 }
 
 // ==================== 头部图标 ====================
@@ -611,10 +843,28 @@ async function fetchConfig() {
         if (!Array.isArray(faq.keywords)) {
           faq.keywords = [];
         }
+        if (!Array.isArray(faq.children)) {
+          faq.children = [];
+        }
         if (faq.answer) {
           faq.answer = normalizeImgUrls(faq.answer);
         }
+        faq.children.forEach((child: any) => {
+          if (child.answer) {
+            child.answer = normalizeImgUrls(child.answer);
+          }
+        });
       });
+      if (!Array.isArray(config.humanAgentFields)) {
+        config.humanAgentFields = [];
+      }
+      // visitorMessageConnect 旧值兼容映射（仅 humanAgentEnabled 从未设置时生效）
+      if (parsed.visitorMessageConnect === true && parsed.humanAgentEnabled === undefined) {
+        config.humanAgentEnabled = true;
+      }
+      if (!config.headerBgImageMode) {
+        config.headerBgImageMode = 'cover';
+      }
       if (!Array.isArray(config.headerIcons)) {
         config.headerIcons = [];
       }
@@ -652,12 +902,43 @@ const previewChatStyle = computed(() => ({
   minWidth: '0',
 }));
 
+function applyBgImageStyle(s: any, bgImage: string, bgMode: string, bgPosition: string) {
+  if (!bgImage) return;
+  s.backgroundImage = `url(${resolveUrl(bgImage)})`;
+  const pos = bgPosition || 'center';
+  const mode = bgMode || 'cover';
+  switch (mode) {
+    case 'contain':
+      s.backgroundSize = 'contain';
+      s.backgroundRepeat = 'no-repeat';
+      s.backgroundPosition = pos;
+      break;
+    case 'stretch':
+      s.backgroundSize = '100% 100%';
+      s.backgroundPosition = pos;
+      break;
+    case 'repeat':
+      s.backgroundSize = 'auto';
+      s.backgroundRepeat = 'repeat';
+      s.backgroundPosition = pos;
+      break;
+    case 'center':
+      s.backgroundSize = 'auto';
+      s.backgroundPosition = pos;
+      s.backgroundRepeat = 'no-repeat';
+      break;
+    default:
+      s.backgroundSize = 'cover';
+      s.backgroundPosition = pos;
+  }
+}
+
 const previewHeaderStyle = computed(() => {
   const s: any = { background: config.themeColor || '#667eea' };
-  if (config.headerBgImage) {
-    s.backgroundImage = `url(${resolveUrl(config.headerBgImage)})`;
-    s.backgroundSize = 'cover';
-    s.backgroundPosition = 'center';
+  if (previewTab.value === 'mobile' && config.mobileHeaderBgImage) {
+    applyBgImageStyle(s, config.mobileHeaderBgImage, config.mobileHeaderBgImageMode, config.mobileHeaderBgPosition);
+  } else {
+    applyBgImageStyle(s, config.headerBgImage, config.headerBgImageMode, config.headerBgPosition);
   }
   return s;
 });
@@ -846,43 +1127,34 @@ onMounted(() => {
   flex-direction: column;
   align-items: center;
 }
-.faq-item {
+.faq-tree-node {
+  margin-bottom: 4px;
+}
+.faq-tree-main {
   display: flex;
   align-items: center;
-  padding: 10px 14px;
+  padding: 8px 12px;
   background: #fff;
   border: 1px solid #f0f0f0;
-  border-radius: 8px;
-  margin-bottom: 8px;
+  border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s;
 }
-.faq-item:hover {
+.faq-tree-main:hover {
   border-color: #d9d9d9;
   box-shadow: 0 1px 4px rgba(0,0,0,0.06);
 }
-.faq-item:last-child {
-  margin-bottom: 0;
-}
-.faq-item-num {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: #667eea;
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: 500;
+.faq-tree-prefix {
+  color: #bbb;
+  margin-right: 8px;
+  font-family: monospace;
   flex-shrink: 0;
-  margin-right: 12px;
 }
-.faq-item-body {
+.faq-tree-body {
   flex: 1;
   min-width: 0;
 }
-.faq-item-question {
+.faq-tree-question {
   font-size: 13px;
   color: #333;
   font-weight: 500;
@@ -891,7 +1163,7 @@ onMounted(() => {
   white-space: nowrap;
   margin-bottom: 2px;
 }
-.faq-item-answer {
+.faq-tree-answer {
   font-size: 12px;
   color: #999;
   overflow: hidden;
@@ -899,28 +1171,48 @@ onMounted(() => {
   white-space: nowrap;
   max-width: 380px;
 }
-.faq-item-keywords {
+.faq-tree-keywords {
   margin-top: 4px;
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
 }
-.faq-item-keywords .ant-tag {
+.faq-tree-keywords .ant-tag {
   margin: 0;
   font-size: 11px;
   line-height: 18px;
   padding: 0 6px;
 }
-.faq-item-actions {
+.faq-tree-actions {
   flex-shrink: 0;
   display: flex;
   gap: 2px;
+  align-items: center;
   opacity: 0;
   transition: opacity 0.2s;
 }
-.faq-item:hover .faq-item-actions {
+.faq-tree-main:hover .faq-tree-actions {
   opacity: 1;
 }
+
+/* ========== 人工客服字段 ========== */
+.human-agent-fields-section {
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  padding: 12px;
+  background: #fafafa;
+}
+.human-agent-field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  padding: 6px 8px;
+  background: #fff;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+}
+.human-agent-field-row:last-child { margin-bottom: 0; }
 
 /* ========== 预览区 ========== */
 .preview-container {
@@ -959,10 +1251,42 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
 }
+.p-back-btn {
+  font-size: 16px;
+  color: #fff;
+  margin-right: 8px;
+  flex-shrink: 0;
+  cursor: default;
+}
 .p-header-content {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.p-header-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.p-status-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  opacity: 0.9;
+}
+.p-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #52c41a;
+  box-shadow: 0 0 3px #52c41a;
+  flex-shrink: 0;
+}
+.p-status-text {
+  font-size: 11px;
 }
 .p-header-icons {
   display: flex;
@@ -1105,40 +1429,6 @@ onMounted(() => {
 }
 
 /* 手机端FAQ预览（输入框上方） */
-.p-faq-mobile {
-  border-top: 1px solid #f0f0f0;
-  padding: 8px 12px;
-  background: #fafafa;
-  flex-shrink: 0;
-}
-.p-faq-mobile-title {
-  font-size: 12px;
-  color: #666;
-  margin-bottom: 6px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.p-faq-mobile-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  max-height: 80px;
-  overflow-y: auto;
-}
-.p-faq-mobile-item {
-  background: #fff;
-  border: 1px solid #e8e8e8;
-  border-radius: 14px;
-  padding: 4px 10px;
-  font-size: 11px;
-  color: #333;
-  cursor: pointer;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 
 /* PC右侧区域 */
 .preview-sidebar {

@@ -4,6 +4,7 @@ import com.alibaba.fastjson.JSONObject;
 import lombok.extern.slf4j.Slf4j;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.jeecg.common.api.CommonAPI;
+import org.jeecg.common.constant.CommonConstant;
 import org.jeecg.common.system.util.JwtUtil;
 import org.jeecg.common.system.vo.LoginUser;
 import org.jeecg.common.util.oConvertUtils;
@@ -383,7 +384,12 @@ public class CsVisitorTokenServiceImpl implements ICsVisitorTokenService {
             if (user == null || user.getStatus() != 1) {
                 return false;
             }
-            return JwtUtil.verify(accessToken, username, user.getPassword());
+            if (JwtUtil.verify(accessToken, username, user.getPassword())) {
+                return true;
+            }
+            // JWT expired but user valid: check Redis cache (Shiro refreshes tokens for non-@IgnoreAuth endpoints)
+            String cacheToken = redisTemplate.opsForValue().get(CommonConstant.PREFIX_USER_TOKEN + accessToken);
+            return oConvertUtils.isNotEmpty(cacheToken);
         } catch (Exception e) {
             return false;
         }

@@ -165,9 +165,16 @@ public class CsMessageServiceImpl implements ICsMessageService {
         // 增加客服未读数
         conversationService.incrementUnread(conversationId);
         
-        // FAQ关键词匹配（最高优先级，匹配成功则跳过AI回复）
-        if (tryFaqKeywordMatch(conversationId, content)) {
-            return userMessage;
+        // FAQ关键词匹配（仅未分配会话生效，已有客服接入则跳过）
+        if (conversation.getStatus() == CsConversation.STATUS_UNASSIGNED) {
+            FaqMatchResult faqResult = tryFaqKeywordMatch(conversationId, content);
+            if (faqResult.matched) {
+                return userMessage;
+            }
+            if (faqResult.humanAgentEnabled && faqResult.faqEnabled) {
+                sendSmartAssistantNoMatchMessage(conversationId);
+                return userMessage;
+            }
         }
         
         // 根据回复模式处理
@@ -265,9 +272,16 @@ public class CsMessageServiceImpl implements ICsMessageService {
         // 增加客服未读数
         conversationService.incrementUnread(conversationId);
 
-        // FAQ关键词匹配（最高优先级，匹配成功则跳过AI回复）
-        if (tryFaqKeywordMatch(conversationId, content)) {
-            return userMessage;
+        // FAQ关键词匹配（仅未分配会话生效，已有客服接入则跳过）
+        if (conversation.getStatus() == CsConversation.STATUS_UNASSIGNED) {
+            FaqMatchResult faqResult = tryFaqKeywordMatch(conversationId, content);
+            if (faqResult.matched) {
+                return userMessage;
+            }
+            if (faqResult.humanAgentEnabled && faqResult.faqEnabled) {
+                sendSmartAssistantNoMatchMessage(conversationId);
+                return userMessage;
+            }
         }
 
         // 根据回复模式处理
@@ -289,36 +303,59 @@ public class CsMessageServiceImpl implements ICsMessageService {
     }
 
     /**
-     * FAQ关键词匹配（最高优先级）
-     * 用户发送的消息中包含FAQ配置的任意关键词时，自动发送预设答案
-     * @param conversationId 会话ID
-     * @param content 用户消息内容
-     * @return true=匹配成功并已发送答案, false=无匹配
+     * FAQ关键词匹配结果
      */
-    private boolean tryFaqKeywordMatch(String conversationId, String content) {
+    private static class FaqMatchResult {
+        boolean matched;
+        boolean faqEnabled;
+        boolean humanAgentEnabled;
+        FaqMatchResult(boolean matched, boolean faqEnabled, boolean humanAgentEnabled) {
+            this.matched = matched;
+            this.faqEnabled = faqEnabled;
+            this.humanAgentEnabled = humanAgentEnabled;
+        }
+    }
+
+    private static final FaqMatchResult FAQ_DISABLED = new FaqMatchResult(false, false, false);
+
+    /**
+     * FAQ关键词匹配（最高优先级）
+     * 用户发送的消息中包含FAQ配置的任意关键词时，发送智能助手消息
+     * @return 包含匹配结果及faqEnabled/humanAgentEnabled状态
+     */
+    private FaqMatchResult tryFaqKeywordMatch(String conversationId, String content) {
         if (oConvertUtils.isEmpty(content)) {
-            return false;
+            return FAQ_DISABLED;
         }
         try {
             String settingsJson = redisTemplate.opsForValue().get(CHAT_WINDOW_REDIS_KEY);
             if (oConvertUtils.isEmpty(settingsJson)) {
-                return false;
+                return FAQ_DISABLED;
             }
 
             JSONObject settings = JSON.parseObject(settingsJson);
-            Boolean faqEnabled = settings.getBoolean("faqEnabled");
-            if (faqEnabled == null || !faqEnabled) {
-                return false;
+            Boolean faqEnabledFlag = settings.getBoolean("faqEnabled");
+            boolean faqEnabled = faqEnabledFlag != null && faqEnabledFlag;
+            Boolean humanAgentFlag = settings.getBoolean("humanAgentEnabled");
+            boolean humanAgentEnabled = humanAgentFlag != null && humanAgentFlag;
+            if (humanAgentFlag == null) {
+                Boolean vmc = settings.getBoolean("visitorMessageConnect");
+                if (vmc != null && vmc) {
+                    humanAgentEnabled = true;
+                }
+            }
+
+            if (!faqEnabled) {
+                return new FaqMatchResult(false, false, humanAgentEnabled);
             }
 
             JSONArray faqList = settings.getJSONArray("faqList");
             if (faqList == null || faqList.isEmpty()) {
-                return false;
+                return new FaqMatchResult(false, true, humanAgentEnabled);
             }
 
             String lowerContent = content.toLowerCase().trim();
 
-            // 遍历FAQ列表，按顺序匹配（第一个命中的FAQ生效）
             for (int i = 0; i < faqList.size(); i++) {
                 JSONObject faq = faqList.getJSONObject(i);
                 if (faq == null) continue;
@@ -330,21 +367,29 @@ public class CsMessageServiceImpl implements ICsMessageService {
                     String keyword = keywords.getString(j);
                     if (oConvertUtils.isNotEmpty(keyword)
                             && lowerContent.contains(keyword.toLowerCase().trim())) {
-                        // 匹配成功，发送FAQ预设答案
                         String answer = faq.getString("answer");
                         if (oConvertUtils.isNotEmpty(answer)) {
-                            log.info("[CS-Message] FAQ关键词匹配成功: conversationId={}, keyword={}, faqIndex={}", 
+                            log.info("[CS-Message] FAQ关键词匹配成功: conversationId={}, keyword={}, faqIndex={}",
                                     conversationId, keyword, i);
-                            sendAgentMessage(conversationId, "faq_system", "智能助手", answer, 0, null);
-                            return true;
+                            JSONArray children = faq.getJSONArray("children");
+                            boolean hasChildren = children != null && !children.isEmpty();
+                            String extra;
+                            if (hasChildren) {
+                                extra = buildFaqExtra("answer", children, Collections.singletonList(i), humanAgentEnabled);
+                            } else {
+                                extra = buildFaqExtra("answer", faqList, Collections.emptyList(), humanAgentEnabled);
+                            }
+                            sendSmartAssistantMessage(conversationId, answer, extra);
+                            return new FaqMatchResult(true, true, humanAgentEnabled);
                         }
                     }
                 }
             }
+            return new FaqMatchResult(false, true, humanAgentEnabled);
         } catch (Exception e) {
             log.error("[CS-Message] FAQ关键词匹配异常", e);
         }
-        return false;
+        return FAQ_DISABLED;
     }
 
     @Override
@@ -493,6 +538,21 @@ public class CsMessageServiceImpl implements ICsMessageService {
         sendConfiguredAutoMessages(conversationId, agentId, agentName, userLang, false);
     }
 
+    @Override
+    public void sendAutoMessagesAsSystem(String conversationId, String userLang) {
+        if (oConvertUtils.isEmpty(conversationId)) {
+            return;
+        }
+        List<String> contents = resolveAutoMessageContents(userLang);
+        if (contents.isEmpty()) {
+            return;
+        }
+        for (String content : contents) {
+            sendSmartAssistantMessage(conversationId, content, null);
+        }
+        log.info("[CS-Message] 系统自动消息已发送(智能助手模式): conversationId={}, count={}", conversationId, contents.size());
+    }
+
     private void sendConfiguredAutoMessages(String conversationId, String agentId, String agentName, String userLang,
                                             boolean switchToManualMode) {
         if (oConvertUtils.isEmpty(conversationId) || oConvertUtils.isEmpty(agentId)) {
@@ -619,6 +679,251 @@ public class CsMessageServiceImpl implements ICsMessageService {
 
         aiSuggestionCache.remove(conversationId);
         return agentMessage;
+    }
+
+    // ==================== 智能助手消息 ====================
+
+    @Override
+    public CsMessage sendSmartAssistantMessage(String conversationId, String content, String faqExtraJson) {
+        log.info("[CS-Message] 发送智能助手消息: conversationId={}", conversationId);
+
+        CsConversation conversation = conversationService.getConversation(conversationId);
+        if (conversation == null) {
+            return null;
+        }
+
+        CsMessage saMessage = CsMessage.createSmartAssistantMessage(conversationId, content, faqExtraJson);
+
+        asyncTaskExecutor.submitMongo(() -> saveToMongo(saMessage));
+
+        String lastMessage = buildMessagePreview(content, null, null);
+        asyncTaskExecutor.submitConversation(() -> {
+            conversationService.updateLastMessage(conversationId, lastMessage, CsMessage.SENDER_SMART_ASSISTANT);
+            conversationService.clearUnread(conversationId);
+            conversationService.clearVisitorLastMsgTime(conversationId);
+        });
+
+        asyncTaskExecutor.submitWs(() -> {
+            pushToUser(conversationId, saMessage);
+            pushToAgents(conversation, saMessage);
+        });
+
+        return saMessage;
+    }
+
+    @Override
+    public void sendInitialFaqMessage(String conversationId) {
+        try {
+            String settingsJson = redisTemplate.opsForValue().get(CHAT_WINDOW_REDIS_KEY);
+            if (oConvertUtils.isEmpty(settingsJson)) {
+                return;
+            }
+            JSONObject settings = JSON.parseObject(settingsJson);
+            Boolean faqEnabled = settings.getBoolean("faqEnabled");
+            if (faqEnabled == null || !faqEnabled) {
+                return;
+            }
+            JSONArray faqList = settings.getJSONArray("faqList");
+            if (faqList == null || faqList.isEmpty()) {
+                return;
+            }
+
+            String headerText = settings.getString("faqHeaderText");
+            if (oConvertUtils.isEmpty(headerText)) {
+                headerText = "您好，请问有什么可以帮助您的？";
+            }
+
+            Boolean humanAgentFlag = settings.getBoolean("humanAgentEnabled");
+            boolean humanAgentEnabled = humanAgentFlag != null && humanAgentFlag;
+            if (humanAgentFlag == null) {
+                Boolean vmc = settings.getBoolean("visitorMessageConnect");
+                if (vmc != null && vmc) {
+                    humanAgentEnabled = true;
+                }
+            }
+
+            String extra = buildFaqExtra("initial", faqList, Collections.emptyList(), humanAgentEnabled);
+            sendSmartAssistantMessage(conversationId, headerText, extra);
+            log.info("[CS-Message] 初始FAQ消息已发送: conversationId={}", conversationId);
+        } catch (Exception e) {
+            log.error("[CS-Message] 发送初始FAQ消息失败", e);
+        }
+    }
+
+    @Override
+    public void handleFaqInteract(String conversationId, String action, Integer faqIndex, List<Integer> parentPath) {
+        try {
+            String settingsJson = redisTemplate.opsForValue().get(CHAT_WINDOW_REDIS_KEY);
+            if (oConvertUtils.isEmpty(settingsJson)) {
+                return;
+            }
+            JSONObject settings = JSON.parseObject(settingsJson);
+            JSONArray faqList = settings.getJSONArray("faqList");
+            if (faqList == null || faqList.isEmpty()) {
+                return;
+            }
+
+            Boolean humanAgentFlag = settings.getBoolean("humanAgentEnabled");
+            boolean humanAgentEnabled = humanAgentFlag != null && humanAgentFlag;
+            if (humanAgentFlag == null) {
+                Boolean vmc = settings.getBoolean("visitorMessageConnect");
+                if (vmc != null && vmc) {
+                    humanAgentEnabled = true;
+                }
+            }
+
+            CsConversation conversation = conversationService.getConversation(conversationId);
+            if (conversation == null) {
+                return;
+            }
+
+            if (parentPath == null) {
+                parentPath = Collections.emptyList();
+            }
+
+            switch (action) {
+                case "click": {
+                    if (faqIndex == null || faqIndex < 0) return;
+                    JSONArray currentItems = resolveFaqChildren(faqList, parentPath);
+                    if (currentItems == null || faqIndex >= currentItems.size()) return;
+
+                    JSONObject targetFaq = currentItems.getJSONObject(faqIndex);
+                    if (targetFaq == null) return;
+
+                    String question = targetFaq.getString("question");
+                    String answer = targetFaq.getString("answer");
+                    JSONArray children = targetFaq.getJSONArray("children");
+
+                    String userId = conversation.getUserId();
+                    String userName = conversation.getUserName();
+                    if (oConvertUtils.isNotEmpty(question)) {
+                        sendUserMessageRaw(conversationId, userId, userName, question);
+                    }
+
+                    if (oConvertUtils.isNotEmpty(answer)) {
+                        String extra;
+                        boolean hasChildren = children != null && !children.isEmpty();
+                        if (hasChildren) {
+                            List<Integer> newPath = new ArrayList<>(parentPath);
+                            newPath.add(faqIndex);
+                            extra = buildFaqExtra("answer", children, newPath, humanAgentEnabled);
+                        } else if (parentPath.isEmpty()) {
+                            extra = buildFaqExtra("answer", currentItems, parentPath, humanAgentEnabled);
+                        } else {
+                            extra = buildFaqExtra("answer", new JSONArray(), parentPath, humanAgentEnabled);
+                        }
+                        sendSmartAssistantMessage(conversationId, answer, extra);
+                    }
+                    break;
+                }
+                case "top": {
+                    String headerText = settings.getString("faqHeaderText");
+                    if (oConvertUtils.isEmpty(headerText)) {
+                        headerText = "您好，请问有什么可以帮助您的？";
+                    }
+                    String extra = buildFaqExtra("initial", faqList, Collections.emptyList(), humanAgentEnabled);
+                    sendSmartAssistantMessage(conversationId, headerText, extra);
+                    break;
+                }
+                case "back": {
+                    if (parentPath.isEmpty()) {
+                        String headerText = settings.getString("faqHeaderText");
+                        if (oConvertUtils.isEmpty(headerText)) {
+                            headerText = "您好，请问有什么可以帮助您的？";
+                        }
+                        String extra = buildFaqExtra("initial", faqList, Collections.emptyList(), humanAgentEnabled);
+                        sendSmartAssistantMessage(conversationId, headerText, extra);
+                    } else {
+                        List<Integer> newPath = new ArrayList<>(parentPath.subList(0, parentPath.size() - 1));
+                        if (newPath.isEmpty()) {
+                            String headerText = settings.getString("faqHeaderText");
+                            if (oConvertUtils.isEmpty(headerText)) {
+                                headerText = "您好，请问有什么可以帮助您的？";
+                            }
+                            String extra = buildFaqExtra("initial", faqList, Collections.emptyList(), humanAgentEnabled);
+                            sendSmartAssistantMessage(conversationId, headerText, extra);
+                        } else {
+                            List<Integer> grandParentPath = newPath.subList(0, newPath.size() - 1);
+                            int parentIdx = newPath.get(newPath.size() - 1);
+                            JSONArray grandParentItems = resolveFaqChildren(faqList, grandParentPath);
+                            if (grandParentItems == null || parentIdx >= grandParentItems.size()) return;
+                            JSONObject parentItem = grandParentItems.getJSONObject(parentIdx);
+                            String content = parentItem != null ? parentItem.getString("answer") : "";
+                            JSONArray items = parentItem != null ? parentItem.getJSONArray("children") : null;
+                            String extra = buildFaqExtra("answer", items, newPath, humanAgentEnabled);
+                            sendSmartAssistantMessage(conversationId, oConvertUtils.isNotEmpty(content) ? content : "", extra);
+                        }
+                    }
+                    break;
+                }
+                default:
+                    log.warn("[CS-Message] 未知FAQ交互操作: action={}", action);
+            }
+        } catch (Exception e) {
+            log.error("[CS-Message] FAQ交互处理失败", e);
+        }
+    }
+
+    private JSONArray resolveFaqChildren(JSONArray faqList, List<Integer> parentPath) {
+        JSONArray current = faqList;
+        for (Integer idx : parentPath) {
+            if (current == null || idx < 0 || idx >= current.size()) return null;
+            JSONObject node = current.getJSONObject(idx);
+            current = node != null ? node.getJSONArray("children") : null;
+        }
+        return current;
+    }
+
+    private String buildFaqExtra(String faqType, JSONArray items, List<Integer> parentPath, boolean showHumanAgent) {
+        JSONObject extra = new JSONObject();
+        int level = parentPath != null ? parentPath.size() : 0;
+        extra.put("faqType", faqType);
+        extra.put("level", level);
+        extra.put("parentPath", parentPath != null ? parentPath : Collections.emptyList());
+        extra.put("showBack", level > 0);
+        extra.put("showTop", level > 0);
+        extra.put("showHumanAgent", showHumanAgent);
+
+        JSONArray faqItems = new JSONArray();
+        if (items != null) {
+            for (int i = 0; i < items.size(); i++) {
+                JSONObject item = items.getJSONObject(i);
+                if (item == null) continue;
+                JSONObject faqItem = new JSONObject();
+                faqItem.put("question", item.getString("question"));
+                faqItem.put("index", i);
+                JSONArray children = item.getJSONArray("children");
+                faqItem.put("hasChildren", children != null && !children.isEmpty());
+                faqItems.add(faqItem);
+            }
+        }
+        extra.put("faqItems", faqItems);
+        return extra.toJSONString();
+    }
+
+    private void sendSmartAssistantNoMatchMessage(String conversationId) {
+        try {
+            String settingsJson = redisTemplate.opsForValue().get(CHAT_WINDOW_REDIS_KEY);
+            if (oConvertUtils.isEmpty(settingsJson)) {
+                return;
+            }
+            JSONObject settings = JSON.parseObject(settingsJson);
+            JSONArray faqList = settings.getJSONArray("faqList");
+            Boolean humanAgentFlag = settings.getBoolean("humanAgentEnabled");
+            boolean humanAgentEnabled = humanAgentFlag != null && humanAgentFlag;
+            if (humanAgentFlag == null) {
+                Boolean vmc = settings.getBoolean("visitorMessageConnect");
+                if (vmc != null && vmc) {
+                    humanAgentEnabled = true;
+                }
+            }
+
+            String content = "找不到对应问题内容，请联系人工客服";
+            String extra = buildFaqExtra("no_match", faqList != null ? faqList : new JSONArray(), Collections.emptyList(), humanAgentEnabled);
+            sendSmartAssistantMessage(conversationId, content, extra);
+        } catch (Exception e) {
+            log.error("[CS-Message] 发送未匹配FAQ消息失败", e);
+        }
     }
 
     /**

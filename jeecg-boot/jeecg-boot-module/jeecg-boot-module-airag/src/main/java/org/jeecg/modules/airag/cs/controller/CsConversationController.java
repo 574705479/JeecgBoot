@@ -10,9 +10,12 @@ import org.jeecg.common.system.base.controller.JeecgController;
 import org.jeecg.common.util.IpUtils;
 import org.jeecg.common.util.oConvertUtils;
 import org.jeecg.modules.airag.cs.entity.CsAgent;
+import org.jeecg.modules.airag.cs.entity.CsCollaborator;
 import org.jeecg.modules.airag.cs.entity.CsConversation;
+import org.jeecg.modules.airag.cs.mapper.CsCollaboratorMapper;
 import org.jeecg.modules.airag.cs.service.ICsAgentService;
 import org.jeecg.modules.airag.cs.service.ICsConversationService;
+import org.jeecg.modules.airag.cs.service.ICsMessageService;
 import org.jeecg.modules.airag.cs.service.ICsVisitorTokenService;
 import org.jeecg.modules.airag.cs.vo.CsAgentWorkloadVO;
 import org.jeecg.modules.airag.cs.vo.CsVisitorTokenPayload;
@@ -20,6 +23,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -44,6 +48,12 @@ public class CsConversationController extends JeecgController<CsConversation, IC
 
     @Autowired
     private ICsVisitorTokenService visitorTokenService;
+
+    @Autowired
+    private ICsMessageService messageService;
+
+    @Autowired
+    private CsCollaboratorMapper collaboratorMapper;
 
     // ==================== 会话生命周期 ====================
 
@@ -599,5 +609,110 @@ public class CsConversationController extends JeecgController<CsConversation, IC
         List<CsConversation> list = conversationService.list(qw);
         List<String> ids = list.stream().map(CsConversation::getId).collect(java.util.stream.Collectors.toList());
         return Result.OK(ids);
+    }
+
+    // ==================== 人工客服转接 ====================
+
+    @Operation(summary = "访客请求转人工客服")
+    @org.jeecg.config.shiro.IgnoreAuth
+    @PostMapping("/{id}/request-human-agent")
+    public Result<?> requestHumanAgent(@PathVariable String id,
+                                       @RequestBody Map<String, Object> params,
+                                       HttpServletRequest request) {
+        // 访客身份校验
+        boolean isAdmin = visitorTokenService.isAdminRequest(request);
+        if (!isAdmin) {
+            CsVisitorTokenPayload payload = resolveVisitorPayload(request);
+            if (payload != null) {
+                if (visitorTokenService.isBlacklisted(payload.getExternalUserId())) {
+                    return Result.error("访客已被拉黑");
+                }
+            } else if (!visitorTokenService.isTokenRequired()) {
+                if (!visitorTokenService.validateAppKey(request)) {
+                    return Result.error("接入密钥无效");
+                }
+                String devId = visitorTokenService.extractDeviceId(request);
+                if (oConvertUtils.isEmpty(devId)) {
+                    return Result.error("缺少设备码");
+                }
+                if (visitorTokenService.isBlacklisted(devId)) {
+                    return Result.error("访客已被拉黑");
+                }
+            } else {
+                return Result.error("访客凭证无效或已过期");
+            }
+        }
+
+        CsConversation conversation = conversationService.getById(id);
+        if (conversation == null) {
+            return Result.error("会话不存在");
+        }
+        if (conversation.getHumanAgentMode() == null || conversation.getHumanAgentMode() != 1) {
+            return Result.error("该会话不支持人工转接");
+        }
+        if (conversation.getStatus() == CsConversation.STATUS_ASSIGNED) {
+            return Result.error("已有客服接入");
+        }
+
+        // 保存自定义字段
+        String customFieldsJson = null;
+        Object customFields = params.get("customFields");
+        if (customFields != null) {
+            customFieldsJson = com.alibaba.fastjson.JSON.toJSONString(customFields);
+        }
+        conversation.setCustomFields(customFieldsJson);
+
+        // 分配客服
+        CsAgent assignedAgent = csAgentService.assignAgent();
+        if (assignedAgent == null) {
+            // 仅保存 customFields，不改变会话状态
+            conversationService.updateById(conversation);
+            return Result.error("暂无客服在线，请稍后再试");
+        }
+
+        // 分配成功
+        conversation.setOwnerAgentId(assignedAgent.getId());
+        conversation.setStatus(CsConversation.STATUS_ASSIGNED);
+        conversation.setReplyMode(CsConversation.REPLY_MODE_MANUAL);
+        conversation.setAssignTime(new Date());
+        conversationService.updateById(conversation);
+
+        // 创建协作者记录
+        CsCollaborator collaborator = new CsCollaborator();
+        collaborator.setConversationId(conversation.getId());
+        collaborator.setAgentId(assignedAgent.getId());
+        collaborator.setRole(CsCollaborator.ROLE_OWNER);
+        collaborator.setJoinTime(new Date());
+        collaboratorMapper.insert(collaborator);
+
+        // 通知访客客服已接入
+        Map<String, Object> extra = new HashMap<>();
+        extra.put("replyMode", CsConversation.REPLY_MODE_MANUAL);
+        extra.put("agentName", assignedAgent.getNickname());
+        extra.put("agentId", assignedAgent.getId());
+        extra.put("agentAvatar", assignedAgent.getAvatar());
+        conversationService.notifyUser(conversation.getId(), "agent_connected",
+                "客服 " + assignedAgent.getNickname() + " 为您服务", extra);
+
+        // 广播给客服工作台（含完整分配数据，前端需要agentId等更新会话列表）
+        Map<String, Object> assignData = new HashMap<>();
+        assignData.put("conversationId", conversation.getId());
+        assignData.put("agentId", assignedAgent.getId());
+        assignData.put("agentName", assignedAgent.getNickname());
+        assignData.put("agentAvatar", assignedAgent.getAvatar());
+        assignData.put("assignTime", new Date());
+        if (customFieldsJson != null) {
+            assignData.put("customFields", customFieldsJson);
+        }
+        conversationService.notifyRelatedAgents(conversation.getId(),
+                "conversation_assigned", "访客已转人工", assignData);
+
+        log.info("[CS-Conversation] 访客转人工成功: conversationId={}, agentId={}", id, assignedAgent.getId());
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("success", true);
+        result.put("agentName", assignedAgent.getNickname());
+        result.put("agentId", assignedAgent.getId());
+        return Result.OK(result);
     }
 }
