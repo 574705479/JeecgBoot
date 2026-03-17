@@ -171,6 +171,10 @@
                 <label>AI气泡</label>
                 <input type="color" :value="customTheme.bubbleAi" @input="onColorInput('bubbleAi', $event)" />
               </div>
+              <div class="color-row">
+                <label>助手气泡</label>
+                <input type="color" :value="customTheme.bubbleAssistant" @input="onColorInput('bubbleAssistant', $event)" />
+              </div>
               <a-divider style="margin: 8px 0;">面板与文字</a-divider>
               <div class="color-row">
                 <label>面板背景</label>
@@ -549,31 +553,19 @@
                 </div>
               </div>
             </template>
-            <!-- 智能助手消息 (senderType=4, 显示在左侧访客方向) -->
-            <template v-else-if="msg.senderType === 4">
-              <a-avatar :size="messageAvatarSize" class="msg-avatar" style="background: #13c2c2">助</a-avatar>
-              <div class="msg-body">
-                <div class="msg-info">
-                  <span class="sender-name">{{ msg.senderName || '智能助手' }}</span>
-                  <a-tag color="cyan" size="small">助手</a-tag>
-                </div>
-                <div class="msg-bubble user-bubble">
-                  <div v-if="msg.content" class="msg-text" v-html="renderMessage(msg.content)"></div>
-                </div>
-                <div class="msg-meta">{{ formatMessageTime(msg.createTime) }}</div>
-              </div>
-            </template>
-            <!-- 客服/AI消息 (显示在右边，类似Telegram自己发送的消息) -->
+            <!-- 客服/AI/智能助手消息 (显示在右边) -->
             <template v-else>
               <div class="msg-body">
                 <div class="msg-info">
-                  <span class="sender-name">{{ msg.actualSenderName || msg.senderName }}</span>
-                  <a-tag v-if="isAiMessage(msg)" color="purple" size="small">AI</a-tag>
-                  <a-avatar :size="messageAvatarSize" class="msg-avatar-inline" :src="getMessageAvatarUrl(msg)">
+                  <span class="sender-name">{{ isSmartAssistant(msg) ? (msg.senderName || '智能助手') : (msg.actualSenderName || msg.senderName) }}</span>
+                  <a-tag v-if="isSmartAssistant(msg)" color="cyan" size="small">助手</a-tag>
+                  <a-tag v-else-if="isAiMessage(msg)" color="purple" size="small">AI</a-tag>
+                  <a-avatar v-if="isSmartAssistant(msg)" :size="messageAvatarSize" class="msg-avatar-inline" style="background: #13c2c2">助</a-avatar>
+                  <a-avatar v-else :size="messageAvatarSize" class="msg-avatar-inline" :src="getMessageAvatarUrl(msg)">
                     {{ (msg.actualSenderName || msg.senderName)?.charAt(0) || (isAiMessage(msg) ? 'AI' : '客') }}
                   </a-avatar>
                 </div>
-                <div class="msg-bubble agent-bubble" :class="{ 'ai-bubble': isAiMessage(msg) }">
+                <div class="msg-bubble agent-bubble" :class="{ 'ai-bubble': isAiMessage(msg), 'assistant-bubble': isSmartAssistant(msg) }">
                   <div v-if="msg.content" class="msg-text" v-html="msg.isStreaming ? renderStreamingText(msg.content) : renderMessage(msg.content)"></div>
                   <div
                     v-if="getMediaGridData(msg).items.length"
@@ -704,9 +696,9 @@
                 </a-popover>
                 <a-popover v-else-if="item.msgType === 5" placement="topLeft" trigger="hover" :overlayStyle="{ maxWidth: '450px' }">
                   <template #content>
-                    <div class="quick-reply-preview-richtext" v-html="item.content"></div>
+                    <div class="quick-reply-preview-richtext" v-html="sanitizeHtml(item.content || '')"></div>
                   </template>
-                  <div class="quick-reply-content quick-reply-richtext" v-html="item.content"></div>
+                  <div class="quick-reply-content quick-reply-richtext" v-html="sanitizeHtml(item.content || '')"></div>
                 </a-popover>
                 <div class="quick-reply-content" v-else-if="item.msgType === 2">
                   <PaperClipOutlined style="margin-right: 4px" />{{ item.content?.split('/').pop() || '文件' }}
@@ -1100,10 +1092,12 @@ import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
 import { getBrandSetting } from '/@/settings/brandSetting';
 import { resolveBrandUrl } from '/@/utils/brand';
 import { createImgPreview } from '/@/components/Preview';
+import { getToken } from '/@/utils/auth';
 import EmojiPicker from '../components/EmojiPicker.vue';
 import { computeFileMd5 } from '../utils/fileHash';
 // ★ 为回复建议保留Markdown渲染能力
 import MarkdownIt from 'markdown-it';
+import DOMPurify from 'dompurify';
 import hljs from 'highlight.js';
 
 const silentRequestOptions = { successMessageMode: 'none' as const };
@@ -1124,6 +1118,8 @@ interface ThemeConfig {
   bubbleUser: string;
   bubbleAi: string;
   bubbleAiEnd: string;
+  bubbleAssistant: string;
+  bubbleAssistantEnd: string;
   bgSurface: string;
   bgCard: string;
   bgInput: string;
@@ -1152,6 +1148,7 @@ const THEME_PRESETS: Record<string, ThemeConfig> = {
     bubbleAgent: '#dbeafe', bubbleAgentEnd: '#e0f0ff',
     bubbleUser: '#ffffff',
     bubbleAi: '#e8f4ff', bubbleAiEnd: '#dbeafe',
+    bubbleAssistant: '#e6fffb', bubbleAssistantEnd: '#b5f5ec',
     ...LIGHT_COMMON,
   },
   green: {
@@ -1162,6 +1159,7 @@ const THEME_PRESETS: Record<string, ThemeConfig> = {
     bubbleAgent: '#d9f7be', bubbleAgentEnd: '#e6ffe0',
     bubbleUser: '#ffffff',
     bubbleAi: '#e6ffe0', bubbleAiEnd: '#d9f7be',
+    bubbleAssistant: '#e6fffb', bubbleAssistantEnd: '#b5f5ec',
     ...LIGHT_COMMON,
   },
   orange: {
@@ -1172,6 +1170,7 @@ const THEME_PRESETS: Record<string, ThemeConfig> = {
     bubbleAgent: '#fff7e6', bubbleAgentEnd: '#ffe7ba',
     bubbleUser: '#ffffff',
     bubbleAi: '#fff1d6', bubbleAiEnd: '#ffe7ba',
+    bubbleAssistant: '#e6fffb', bubbleAssistantEnd: '#b5f5ec',
     ...LIGHT_COMMON,
   },
   cyan: {
@@ -1182,6 +1181,7 @@ const THEME_PRESETS: Record<string, ThemeConfig> = {
     bubbleAgent: '#b5f5ec', bubbleAgentEnd: '#d6fff8',
     bubbleUser: '#ffffff',
     bubbleAi: '#d6fff8', bubbleAiEnd: '#b5f5ec',
+    bubbleAssistant: '#e6fffb', bubbleAssistantEnd: '#87e8de',
     ...LIGHT_COMMON,
   },
   rose: {
@@ -1192,6 +1192,7 @@ const THEME_PRESETS: Record<string, ThemeConfig> = {
     bubbleAgent: '#ffd6e7', bubbleAgentEnd: '#ffecf3',
     bubbleUser: '#ffffff',
     bubbleAi: '#ffecf3', bubbleAiEnd: '#ffd6e7',
+    bubbleAssistant: '#e6fffb', bubbleAssistantEnd: '#b5f5ec',
     ...LIGHT_COMMON,
   },
   pureWhite: {
@@ -1205,6 +1206,7 @@ const THEME_PRESETS: Record<string, ThemeConfig> = {
     bubbleAgent: '#dbeafe', bubbleAgentEnd: '#e0f0ff',
     bubbleUser: '#ffffff',
     bubbleAi: '#e8f4ff', bubbleAiEnd: '#dbeafe',
+    bubbleAssistant: '#e6fffb', bubbleAssistantEnd: '#b5f5ec',
     textPrimary: '#1a1a1a', textSecondary: '#595959', textMuted: '#a6a6a6',
     border: '#e8e8e8',
   },
@@ -1232,6 +1234,8 @@ const themeVars = computed(() => {
     '--cs-bubble-user': t.bubbleUser,
     '--cs-bubble-ai': t.bubbleAi,
     '--cs-bubble-ai-end': t.bubbleAiEnd,
+    '--cs-bubble-assistant': t.bubbleAssistant,
+    '--cs-bubble-assistant-end': t.bubbleAssistantEnd,
     '--cs-bg-surface': t.bgSurface,
     '--cs-bg-card': t.bgCard,
     '--cs-bg-input': t.bgInput,
@@ -2063,6 +2067,10 @@ function removeAttachment(index: number) {
 
 function getAttachmentUrl(attachment: any) {
   return getFileAccessHttpUrl(attachment?.url);
+}
+
+function isSmartAssistant(msg: any): boolean {
+  return Number(msg?.senderType) === 4;
 }
 
 function isAiMessage(msg: any): boolean {
@@ -3271,9 +3279,11 @@ async function sendMessage() {
     // ★ 发送消息后清除未读数（无论当前计数是否为0）
     currentConversation.value.unreadCount = 0;
     
+    // 重新查找 listItem（await 期间 conversations 可能已被替换）
+    const listItemAfterSend = conversations.value.find(c => c.id === currentConversation.value?.id);
     // 同步更新会话列表中的未读数
-    if (listItem) {
-      listItem.unreadCount = 0;
+    if (listItemAfterSend) {
+      listItemAfterSend.unreadCount = 0;
     }
     
     // 如果之前是待接入状态，刷新会话列表（因为后端会自动接入）
@@ -3281,9 +3291,9 @@ async function sendMessage() {
       currentConversation.value.status = 1;
       currentConversation.value.ownerAgentId = agentId.value;
       currentReplyMode.value = 1; // 手动模式
-      if (listItem) {
-        listItem.status = 1;
-        listItem.ownerAgentId = agentId.value;
+      if (listItemAfterSend) {
+        listItemAfterSend.status = 1;
+        listItemAfterSend.ownerAgentId = agentId.value;
       }
       if (filter.value === 'unassigned' && listItem) {
         const idx = conversations.value.findIndex(c => c.id === listItem.id);
@@ -3753,7 +3763,8 @@ function connectWebSocket() {
     wsReconnectTimer = null;
   }
   const wsBase = getWsBaseUrl();
-  const wsUrl = `${wsBase}/ws/cs/agent?userId=${agentId.value}`;
+  const token = getToken();
+  const wsUrl = `${wsBase}/ws/cs/agent?userId=${agentId.value}&token=${encodeURIComponent(token || '')}`;
   
   console.log('[CS-WS] 连接WebSocket:', wsUrl);
   ws = new WebSocket(wsUrl);
@@ -3880,8 +3891,8 @@ function handleWsMessage(data: any) {
       loadStatsDebounced();
 
       // 浏览器弹窗通知（仅用户消息且页面不在前台）
-      if (data.senderType === 0) {
-        notifyNewMessage(conv || currentConversation.value, data);
+      if (data.senderType === 0 && conv) {
+        notifyNewMessage(conv, data);
       }
       break;
     case 'delivery_failed': {
@@ -4339,12 +4350,6 @@ function handleWsMessage(data: any) {
       }
       break;
     }
-    case 'conversation_closed':
-      if (currentConversation.value?.id === data.conversationId) {
-        currentConversation.value.status = 2;
-      }
-      loadConversations();
-      break;
     case 'agent_timeout_reminder':
       // 客服超时未回复提醒（后端定时任务推送）
       if (data.conversationId) {
@@ -4627,7 +4632,7 @@ function getStatusName(status: number) {
 function getMessageClass(msg: any) {
   if (msg.isDateSeparator) return 'date-sep';
   if (msg.senderType === 3) return 'system';
-  if (msg.senderType === 4) return 'smart-assistant';
+  if (msg.senderType === 4) return 'agent smart-assistant';
   return msg.senderType === 0 ? 'user' : 'agent';
 }
 
@@ -4667,6 +4672,14 @@ function renderStreamingText(content: string) {
     .replace(/\n/g, '<br>');
 }
 
+function sanitizeHtml(html: string): string {
+  return DOMPurify.sanitize(html, {
+    ADD_TAGS: ['iframe'],
+    ADD_ATTR: ['target', 'allowfullscreen', 'frameborder'],
+    ALLOW_DATA_ATTR: false,
+  });
+}
+
 // 渲染消息内容（支持富文本HTML、Markdown、纯文本）
 function renderMessage(content: string) {
   if (!content) return '';
@@ -4677,20 +4690,20 @@ function renderMessage(content: string) {
     return cached;
   }
   let rendered = '';
-  // 1. 检测是否为完整HTML（TinyMCE富文本，如FAQ答案）— 直接返回，不经markdown-it二次处理
+  // 1. 检测是否为完整HTML（TinyMCE富文本，如FAQ答案）— sanitize 后返回
   const isRichHtml = /^\s*<(?:p|div|ul|ol|h[1-6]|table|blockquote)\b/i.test(content.trim());
   if (isRichHtml) {
-    rendered = content;
+    rendered = sanitizeHtml(content);
   } else {
     // 2. Markdown 检测
     const hasMarkdown = /!\[[^\]]*]\([^)]*\)|\*\*[^*]+\*\*|```|^\s*#/m.test(content);
     if (hasMarkdown) {
-      rendered = md.render(content);
+      rendered = sanitizeHtml(md.render(content));
     } else {
       // 3. 检测内联HTML（如 <a>、<img>、<br> 等）
       const hasInlineHtml = /<([a-z][\s\S]*?)>/i.test(content);
       if (hasInlineHtml) {
-        rendered = md.render(content);
+        rendered = sanitizeHtml(md.render(content));
       } else {
         // 4. 纯文本：转义并保留换行
         rendered = content
@@ -4717,7 +4730,7 @@ function renderMarkdown(content: string) {
     return cached;
   }
   try {
-    const rendered = md.render(content);
+    const rendered = sanitizeHtml(md.render(content));
     if (renderCache.size >= maxRenderCacheSize) {
       renderCache.clear();
     }
@@ -4725,7 +4738,7 @@ function renderMarkdown(content: string) {
     return rendered;
   } catch (e) {
     console.error('Markdown渲染失败', e);
-    return renderMessage(content); // 降级到普通文本
+    return renderMessage(content);
   }
 }
 
@@ -5548,13 +5561,9 @@ function restoreMessageScroll() {
     }
   }
 
-  // 智能助手消息（左侧，与用户消息同方向）
+  // 智能助手消息（右侧，与客服消息同方向）
   &.smart-assistant {
-    .msg-body { align-items: flex-start; max-width: 65%; }
     .msg-bubble { overflow-wrap: anywhere; }
-    .msg-avatar {
-      background: #13c2c2;
-    }
   }
 
   // 客服/AI消息
@@ -5636,6 +5645,10 @@ function restoreMessageScroll() {
 
     &.ai-bubble {
       background: linear-gradient(135deg, var(--cs-bubble-ai), var(--cs-bubble-ai-end));
+    }
+
+    &.assistant-bubble {
+      background: linear-gradient(135deg, var(--cs-bubble-assistant), var(--cs-bubble-assistant-end));
     }
   }
 

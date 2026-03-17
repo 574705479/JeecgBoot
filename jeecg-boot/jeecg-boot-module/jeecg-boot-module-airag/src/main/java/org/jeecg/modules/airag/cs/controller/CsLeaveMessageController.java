@@ -9,13 +9,17 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.shiro.SecurityUtils;
 import org.jeecg.common.api.vo.Result;
 import org.jeecg.common.system.vo.LoginUser;
+import org.jeecg.common.util.oConvertUtils;
 import org.jeecg.modules.airag.cs.entity.CsAgent;
 import org.jeecg.modules.airag.cs.entity.CsLeaveMessage;
 import org.jeecg.modules.airag.cs.service.ICsAgentService;
 import org.jeecg.modules.airag.cs.service.ICsLeaveMessageService;
+import org.jeecg.modules.airag.cs.service.ICsVisitorTokenService;
+import org.jeecg.modules.airag.cs.vo.CsVisitorTokenPayload;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 import java.util.Map;
 
@@ -36,6 +40,9 @@ public class CsLeaveMessageController {
 
     @Autowired
     private ICsAgentService agentService;
+
+    @Autowired
+    private ICsVisitorTokenService visitorTokenService;
 
     /**
      * 访客提交留言（无需登录）
@@ -140,11 +147,21 @@ public class CsLeaveMessageController {
     @Operation(summary = "查询用户未读的留言回复")
     @org.jeecg.config.shiro.IgnoreAuth
     @GetMapping("/byUser")
-    public Result<List<CsLeaveMessage>> getByUser(@RequestParam String userId) {
+    public Result<List<CsLeaveMessage>> getByUser(@RequestParam String userId, HttpServletRequest request) {
         if (userId == null || userId.isEmpty()) {
             return Result.error("用户ID不能为空");
         }
+        String verifiedUserId = resolveVisitorUserId(request);
+        if (verifiedUserId == null || !verifiedUserId.equals(userId)) {
+            return Result.error("无权查看他人留言");
+        }
         List<CsLeaveMessage> replies = leaveMessageService.getUnreadReplies(userId);
+        for (CsLeaveMessage msg : replies) {
+            msg.setPhone(null);
+            msg.setEmail(null);
+            msg.setQq(null);
+            msg.setWechat(null);
+        }
         return Result.OK(replies);
     }
 
@@ -154,12 +171,37 @@ public class CsLeaveMessageController {
     @Operation(summary = "标记留言回复为已读")
     @org.jeecg.config.shiro.IgnoreAuth
     @PutMapping("/markRead")
-    public Result<String> markRead(@RequestBody Map<String, String> params) {
+    public Result<String> markRead(@RequestBody Map<String, String> params, HttpServletRequest request) {
         String userId = params.get("userId");
         if (userId == null || userId.isEmpty()) {
             return Result.error("用户ID不能为空");
         }
+        String verifiedUserId = resolveVisitorUserId(request);
+        if (verifiedUserId == null || !verifiedUserId.equals(userId)) {
+            return Result.error("无权操作他人留言");
+        }
         leaveMessageService.markAsRead(userId);
         return Result.OK("标记成功");
+    }
+
+    private String resolveVisitorUserId(HttpServletRequest request) {
+        String sessionToken = visitorTokenService.extractSessionToken(request);
+        if (oConvertUtils.isNotEmpty(sessionToken)) {
+            CsVisitorTokenPayload payload = visitorTokenService.parseSessionToken(sessionToken);
+            if (payload != null) {
+                return payload.getExternalUserId();
+            }
+        }
+        String shortToken = visitorTokenService.extractToken(request);
+        if (oConvertUtils.isNotEmpty(shortToken)) {
+            CsVisitorTokenPayload payload = visitorTokenService.parseToken(shortToken);
+            if (payload != null) {
+                return payload.getExternalUserId();
+            }
+        }
+        if (!visitorTokenService.isTokenRequired()) {
+            return visitorTokenService.extractDeviceId(request);
+        }
+        return null;
     }
 }

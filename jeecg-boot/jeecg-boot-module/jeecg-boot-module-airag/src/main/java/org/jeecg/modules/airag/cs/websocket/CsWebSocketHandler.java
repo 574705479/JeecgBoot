@@ -392,6 +392,11 @@ public class CsWebSocketHandler implements WebSocketHandler {
     public void handleTransportError(WebSocketSession session, Throwable exception) throws Exception {
         log.error("[CS-WebSocket] 传输错误: userId={}, error={}", 
                   sessionManager.getUserId(session), exception.getMessage());
+        try {
+            sessionManager.removeSession(session);
+        } catch (Exception e) {
+            log.warn("[CS-WebSocket] 传输错误后清理会话失败", e);
+        }
     }
 
     @Override

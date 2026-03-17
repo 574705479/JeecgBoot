@@ -549,10 +549,52 @@ public class CsConversationController extends JeecgController<CsConversation, IC
     @Operation(summary = "评价会话")
     @org.jeecg.config.shiro.IgnoreAuth
     @PostMapping("/{id}/rate")
-    public Result<String> rate(@PathVariable String id, @RequestBody Map<String, Object> params) {
-        Integer satisfaction = (Integer) params.get("satisfaction");
+    public Result<String> rate(@PathVariable String id, @RequestBody Map<String, Object> params, HttpServletRequest request) {
+        // 校验会话存在
+        CsConversation conversation = conversationService.getById(id);
+        if (conversation == null) {
+            return Result.error("会话不存在");
+        }
+
+        // 访客身份校验
+        boolean isAdmin = visitorTokenService.isAdminRequest(request);
+        if (!isAdmin) {
+            CsVisitorTokenPayload payload = resolveVisitorPayload(request);
+            if (payload != null) {
+                if (!payload.getExternalUserId().equals(conversation.getUserId())) {
+                    return Result.error("无权评价此会话");
+                }
+            } else if (!visitorTokenService.isTokenRequired()) {
+                String devId = visitorTokenService.extractDeviceId(request);
+                if (oConvertUtils.isEmpty(devId) || !devId.equals(conversation.getUserId())) {
+                    return Result.error("无权评价此会话");
+                }
+            } else {
+                return Result.error("访客凭证无效或已过期");
+            }
+        }
+
+        // 类型安全转换
+        Object satObj = params.get("satisfaction");
+        if (satObj == null) {
+            return Result.error("satisfaction不能为空");
+        }
+        int satisfaction;
+        if (satObj instanceof Number) {
+            satisfaction = ((Number) satObj).intValue();
+        } else {
+            return Result.error("satisfaction参数类型错误");
+        }
+        if (satisfaction < 1 || satisfaction > 5) {
+            return Result.error("satisfaction取值范围为1-5");
+        }
+
+        // 防止重复评价
+        if (conversation.getSatisfaction() != null && conversation.getSatisfaction() > 0) {
+            return Result.error("该会话已评价，不能重复评价");
+        }
+
         String comment = (String) params.get("comment");
-        
         conversationService.rateConversation(id, satisfaction, comment);
         return Result.OK("评价成功");
     }
@@ -597,6 +639,25 @@ public class CsConversationController extends JeecgController<CsConversation, IC
         if (oConvertUtils.isEmpty(userId)) {
             return Result.error("userId不能为空");
         }
+
+        // 访客身份校验：确保只能查询自己的历史
+        boolean isAdmin = visitorTokenService.isAdminRequest(request);
+        if (!isAdmin) {
+            CsVisitorTokenPayload payload = resolveVisitorPayload(request);
+            if (payload != null) {
+                if (!payload.getExternalUserId().equals(userId)) {
+                    return Result.error("无权查看他人会话历史");
+                }
+            } else if (!visitorTokenService.isTokenRequired()) {
+                String devId = visitorTokenService.extractDeviceId(request);
+                if (oConvertUtils.isEmpty(devId) || !devId.equals(userId)) {
+                    return Result.error("无权查看他人会话历史");
+                }
+            } else {
+                return Result.error("访客凭证无效或已过期");
+            }
+        }
+
         com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<CsConversation> qw =
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
         qw.eq(CsConversation::getUserId, userId)
@@ -667,7 +728,7 @@ public class CsConversationController extends JeecgController<CsConversation, IC
         if (assignedAgent == null) {
             // 仅保存 customFields，不改变会话状态
             conversationService.updateById(conversation);
-            return Result.error("暂无客服在线，请稍后再试");
+            return Result.error("暂无客服在线，请留言");
         }
 
         // 分配成功

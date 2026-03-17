@@ -93,7 +93,8 @@ public class CsMessageServiceImpl implements ICsMessageService {
     @Autowired
     private CsAsyncTaskExecutor asyncTaskExecutor;
 
-    // AI建议缓存 (conversationId -> suggestion)
+    // AI建议缓存 (conversationId -> suggestion)，限制最大容量防止内存泄漏
+    private static final int MAX_AI_SUGGESTION_CACHE_SIZE = 500;
     private final Map<String, String> aiSuggestionCache = new ConcurrentHashMap<>();
 
     // AI流式回复取消标记 (conversationId -> cancelled flag)
@@ -398,9 +399,13 @@ public class CsMessageServiceImpl implements ICsMessageService {
         log.info("[CS-Message] 客服发送消息: conversationId={}, agentId={}", conversationId, agentId);
         
         CsConversation conversation = conversationService.getConversation(conversationId);
+        if (conversation == null) {
+            log.warn("[CS-Message] 会话不存在，忽略客服消息: conversationId={}", conversationId);
+            return null;
+        }
         
         // ★ 如果会话是待接入状态，客服发送消息时自动接入该会话（排除FAQ系统）
-        if (conversation != null && conversation.getStatus() == CsConversation.STATUS_UNASSIGNED
+        if (conversation.getStatus() == CsConversation.STATUS_UNASSIGNED
                 && !"faq_system".equals(agentId)) {
             boolean assigned = conversationService.assignToAgent(conversationId, agentId);
             if (assigned) {
@@ -1045,6 +1050,9 @@ public class CsMessageServiceImpl implements ICsMessageService {
                             
                             // 缓存完整建议
                             if (oConvertUtils.isNotEmpty(suggestion)) {
+                                if (aiSuggestionCache.size() >= MAX_AI_SUGGESTION_CACHE_SIZE) {
+                                    aiSuggestionCache.clear();
+                                }
                                 aiSuggestionCache.put(conversationId, suggestion);
                             }
                             
@@ -1896,6 +1904,9 @@ public class CsMessageServiceImpl implements ICsMessageService {
             
             if (oConvertUtils.isNotEmpty(suggestion)) {
                 // 缓存建议
+                if (aiSuggestionCache.size() >= MAX_AI_SUGGESTION_CACHE_SIZE) {
+                    aiSuggestionCache.clear();
+                }
                 aiSuggestionCache.put(conversationId, suggestion);
                 
                 // 推送给客服

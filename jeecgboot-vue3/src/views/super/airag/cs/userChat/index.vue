@@ -67,7 +67,7 @@
       <div class="chat-outer-layout" :style="dynamicCssVars">
       <!-- 全宽头部（在 chat-main-layout 之上） -->
       <div class="chat-header" v-if="chatWindowConfig.headerVisible !== false" :style="headerStyle">
-        <LeftOutlined class="mobile-back-btn" @click="goBack" />
+        <LeftOutlined v-if="!chatWindowConfig.hideBackButton" class="mobile-back-btn" :style="{ color: chatWindowConfig.backButtonColor || '#fff' }" @click="goBack" />
         <div class="header-info">
           <img v-if="!chatWindowConfig.hideLogo" class="app-avatar" :src="chatWindowConfig.logo ? resolveFileUrl(chatWindowConfig.logo) : (appInfo.avatar ? resolveFileUrl(appInfo.avatar) : defaultAvatar)" />
           <div class="app-info">
@@ -457,6 +457,7 @@
 <script setup lang="ts" name="UserChatPage">
 import { ref, reactive, onMounted, onUnmounted, nextTick, computed, watch } from 'vue';
 import MarkdownIt from 'markdown-it';
+import DOMPurify from 'dompurify';
 import { message } from 'ant-design-vue';
 import {
   MessageOutlined, SendOutlined, BulbOutlined, CheckCircleOutlined,
@@ -591,6 +592,8 @@ const chatWindowConfig = reactive({
   hideOnlineStatus: false,
   hideAiHumanLabel: false,
   hideLogo: false,
+  hideBackButton: false,
+  backButtonColor: '#ffffff',
   headerBgImageMode: 'cover' as string,
   headerBgPosition: 'center' as string,
   mobileHeaderBgImage: '',
@@ -1038,6 +1041,7 @@ const displayMessages = computed(() => {
 let ws: WebSocket | null = null;
 const wsConnected = ref(false);
 const agentTyping = ref(false);
+let typingTimer: number | null = null;
 let wsReconnectTimer: number | null = null;
 let wsManuallyClosed = false;
 let wsReconnectAttempts = 0;
@@ -1350,6 +1354,7 @@ onUnmounted(() => {
   disconnectWebSocket();
   stopFallbackPoll();
   stopTokenValidateTimer();
+  if (typingTimer) { clearTimeout(typingTimer); typingTimer = null; }
   window.removeEventListener('resize', onResizeCheck);
   if (tokenRafId) { cancelAnimationFrame(tokenRafId); tokenRafId = null; }
   if (scrollRafId) { cancelAnimationFrame(scrollRafId); scrollRafId = null; }
@@ -1675,14 +1680,27 @@ async function submitHumanAgent() {
       data: { customFields },
     });
     if (res?.success === false || res?.code === 500) {
-      message.error(res?.message || '暂无客服在线，请稍后再试');
+      const errMsg = res?.message || '';
+      if (errMsg.includes('暂无客服在线')) {
+        showHumanAgentModal.value = false;
+        await loadMessageBoardConfig();
+        showLeaveMessageBoard.value = true;
+        return;
+      }
+      message.error(errMsg || '请求失败，请稍后再试');
       return;
     }
     showHumanAgentModal.value = false;
     message.success('已为您转接人工客服');
   } catch (err: any) {
-    const errMsg = err?.response?.data?.message || err?.message || '暂无客服在线，请稍后再试';
-    message.error(errMsg);
+    const errMsg = err?.response?.data?.message || err?.data?.message || err?.message || '';
+    if (errMsg.includes('暂无客服在线')) {
+      showHumanAgentModal.value = false;
+      await loadMessageBoardConfig();
+      showLeaveMessageBoard.value = true;
+      return;
+    }
+    message.error(errMsg || '暂无客服在线，请留言');
   } finally {
     humanAgentSubmitting.value = false;
   }
@@ -2259,14 +2277,24 @@ function startFallbackPoll() {
   }, wsFallbackPollIntervalMs);
 }
 
-// 心跳
+// 心跳 + 超时检测
 let heartbeatTimer: any = null;
+const HEARTBEAT_INTERVAL = 30000;
+const HEARTBEAT_TIMEOUT = 90000;
+
 function startHeartbeat() {
+  stopHeartbeat();
   heartbeatTimer = setInterval(() => {
     if (ws && ws.readyState === WebSocket.OPEN) {
+      // 检测是否超时（超过3个心跳周期没收到任何消息）
+      if (lastWsMessageAt && Date.now() - lastWsMessageAt > HEARTBEAT_TIMEOUT) {
+        console.warn('[UserChat] 心跳超时，主动重连');
+        ws.close();
+        return;
+      }
       ws.send(JSON.stringify({ type: 'ping' }));
     }
-  }, 30000);
+  }, HEARTBEAT_INTERVAL);
 }
 
 function stopHeartbeat() {
@@ -2336,8 +2364,10 @@ function handleWsMessage(data: any) {
     case 'typing':
       // 客服正在输入
       agentTyping.value = true;
-      setTimeout(() => {
+      if (typingTimer) clearTimeout(typingTimer);
+      typingTimer = window.setTimeout(() => {
         agentTyping.value = false;
+        typingTimer = null;
       }, 3000);
       break;
 
@@ -2931,25 +2961,33 @@ function renderStreamingText(content: string) {
     .replace(/\n/g, '<br>');
 }
 
+function sanitizeHtml(html: string): string {
+  return DOMPurify.sanitize(html, {
+    ADD_TAGS: ['iframe'],
+    ADD_ATTR: ['target', 'allowfullscreen', 'frameborder'],
+    ALLOW_DATA_ATTR: false,
+  });
+}
+
 // 渲染消息内容（支持富文本HTML、Markdown、纯文本）
 function renderMessage(content: string) {
   if (!content) return '';
   content = content.replace(/#\s*\{\s*domainURL\s*\}/g, globSetting.domainUrl);
   content = normalizeImgUrls(content);
-  // 1. 检测是否为完整HTML（TinyMCE富文本，如FAQ答案）— 直接返回，不经markdown-it二次处理
+  // 1. 检测是否为完整HTML（TinyMCE富文本，如FAQ答案）— sanitize 后返回
   const isRichHtml = /^\s*<(?:p|div|ul|ol|h[1-6]|table|blockquote)\b/i.test(content.trim());
   if (isRichHtml) {
-    return content;
+    return sanitizeHtml(content);
   }
   // 2. Markdown 检测
   const hasMarkdown = /!\[[^\]]*]\([^)]*\)|\*\*[^*]+\*\*|```|^\s*#/m.test(content);
   if (hasMarkdown) {
-    return md.render(content);
+    return sanitizeHtml(md.render(content));
   }
   // 3. 检测内联HTML（如 <a>、<img>、<br> 等）
   const hasInlineHtml = /<([a-z][\s\S]*?)>/i.test(content);
   if (hasInlineHtml) {
-    return md.render(content);
+    return sanitizeHtml(md.render(content));
   }
   // 4. 纯文本：转义并保留换行
   return content

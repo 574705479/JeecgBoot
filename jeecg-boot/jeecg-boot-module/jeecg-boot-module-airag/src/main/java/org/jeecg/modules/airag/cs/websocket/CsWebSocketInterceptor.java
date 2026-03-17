@@ -1,7 +1,14 @@
 package org.jeecg.modules.airag.cs.websocket;
 
 import lombok.extern.slf4j.Slf4j;
+import org.jeecg.common.api.CommonAPI;
+import org.jeecg.common.constant.CommonConstant;
+import org.jeecg.common.system.util.JwtUtil;
+import org.jeecg.common.system.vo.LoginUser;
+import org.jeecg.common.util.RedisUtil;
 import org.jeecg.common.util.oConvertUtils;
+import org.jeecg.modules.airag.cs.entity.CsAgent;
+import org.jeecg.modules.airag.cs.service.ICsAgentService;
 import org.jeecg.modules.airag.cs.service.ICsVisitorTokenService;
 import org.jeecg.modules.airag.cs.vo.CsVisitorTokenPayload;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -39,6 +46,15 @@ public class CsWebSocketInterceptor implements HandshakeInterceptor {
     @Autowired
     private ICsVisitorTokenService visitorTokenService;
 
+    @Autowired
+    private ICsAgentService agentService;
+
+    @Autowired
+    private RedisUtil redisUtil;
+
+    @Autowired
+    private CommonAPI commonApi;
+
     @Override
     public boolean beforeHandshake(ServerHttpRequest request, ServerHttpResponse response,
                                    WebSocketHandler wsHandler, Map<String, Object> attributes) throws Exception {
@@ -61,6 +77,48 @@ public class CsWebSocketInterceptor implements HandshakeInterceptor {
                 userType = USER_TYPE_AGENT;
             } else {
                 userType = oConvertUtils.getString(userType, USER_TYPE_USER);
+            }
+
+            // 客服连接校验：验证JWT Token
+            if (USER_TYPE_AGENT.equals(userType)) {
+                String token = servletRequest.getServletRequest().getParameter("token");
+                if (oConvertUtils.isEmpty(token)) {
+                    token = servletRequest.getServletRequest().getHeader(CommonConstant.X_ACCESS_TOKEN);
+                }
+                if (oConvertUtils.isEmpty(token)) {
+                    log.warn("[CS-WebSocket] 客服握手失败：缺少认证Token");
+                    return false;
+                }
+                String username = JwtUtil.getUsername(token);
+                if (oConvertUtils.isEmpty(username)) {
+                    log.warn("[CS-WebSocket] 客服握手失败：Token无效");
+                    return false;
+                }
+                Object cacheToken = redisUtil.get(CommonConstant.PREFIX_USER_TOKEN + token);
+                if (cacheToken == null) {
+                    log.warn("[CS-WebSocket] 客服握手失败：Token已过期, username={}", username);
+                    return false;
+                }
+                // 通过username查找系统用户，再查agent
+                CsAgent agent = null;
+                try {
+                    LoginUser loginUser = commonApi.getUserByName(username);
+                    if (loginUser != null) {
+                        agent = agentService.getByUserId(loginUser.getId());
+                        if (agent == null) {
+                            agent = agentService.getByUserId(loginUser.getUsername());
+                        }
+                    }
+                } catch (Exception e) {
+                    log.warn("[CS-WebSocket] 查找客服用户异常: username={}", username, e);
+                }
+                if (agent == null) {
+                    log.warn("[CS-WebSocket] 客服握手失败：非客服用户, username={}", username);
+                    return false;
+                }
+                userId = agent.getId();
+                userName = agent.getNickname();
+                log.info("[CS-WebSocket] 客服身份验证通过: username={}, agentId={}", username, userId);
             }
 
             // 访客连接校验

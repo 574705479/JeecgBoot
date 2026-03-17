@@ -994,6 +994,10 @@ async function ensureWidgetScript() {
   }
   await new Promise<void>((resolve, reject) => {
     if (widgetScriptEl) {
+      if (w.JeecgCsWidget) {
+        resolve();
+        return;
+      }
       widgetScriptEl.addEventListener('load', () => resolve());
       widgetScriptEl.addEventListener('error', () => reject(new Error('load failed')));
       return;

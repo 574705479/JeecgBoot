@@ -164,7 +164,7 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onBeforeUnmount } from 'vue';
 import { defHttp } from '/@/utils/http/axios';
 import { useMessage } from '/@/hooks/web/useMessage';
 
@@ -288,6 +288,13 @@ function incrementVisitorNotifyTimeout() {
     saveConfig();
   }
 }
+
+onBeforeUnmount(() => {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+});
 </script>
 
 <style lang="less" scoped>

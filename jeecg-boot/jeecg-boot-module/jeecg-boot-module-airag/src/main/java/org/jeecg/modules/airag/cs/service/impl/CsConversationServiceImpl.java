@@ -589,17 +589,8 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         
         CsConversation conversation = getById(conversationId);
         if (conversation == null) {
-            // 会话不存在，创建新会话
-            conversation = new CsConversation();
-            conversation.setId(conversationId);
-            conversation.setUserId(conversationId);
-            conversation.setUserName("访客");
-            conversation.setStatus(CsConversation.STATUS_UNASSIGNED);
-            conversation.setReplyMode(CsConversation.REPLY_MODE_AI_AUTO);
-            conversation.setUnreadCount(0);
-            conversation.setMessageCount(0);
-            conversation.setCreateTime(new Date());
-            save(conversation);
+            log.warn("[CS-Conversation] 会话不存在，无法接入: conversationId={}", conversationId);
+            return false;
         }
         
         // 检查客服状态
@@ -840,6 +831,14 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         
         CsConversation conversation = getById(conversationId);
         if (conversation == null) {
+            return false;
+        }
+        
+        // 校验发起转接的客服是否为会话当前负责人
+        if (oConvertUtils.isNotEmpty(fromAgentId) && oConvertUtils.isNotEmpty(conversation.getOwnerAgentId())
+                && !conversation.getOwnerAgentId().equals(fromAgentId)) {
+            log.warn("[CS-Conversation] 非当前负责人发起转接: conversationId={}, ownerAgentId={}, fromAgentId={}",
+                    conversationId, conversation.getOwnerAgentId(), fromAgentId);
             return false;
         }
         

@@ -51,6 +51,19 @@
                   <a-switch v-model:checked="config.hideLogo" />
                 </a-form-item>
               </a-col>
+              <a-col :span="6">
+                <a-form-item label="隐藏头部返回键(手机)">
+                  <a-switch v-model:checked="config.hideBackButton" />
+                </a-form-item>
+              </a-col>
+              <a-col :span="6" v-if="!config.hideBackButton">
+                <a-form-item label="返回键颜色">
+                  <div class="color-picker-row">
+                    <input type="color" v-model="config.backButtonColor" class="color-input" />
+                    <a-input v-model:value="config.backButtonColor" size="small" style="width:100px" />
+                  </div>
+                </a-form-item>
+              </a-col>
             </a-row>
 
             <!-- 头部 -->
@@ -465,7 +478,7 @@
             <div class="preview-wrapper" :style="previewWrapperStyle">
               <!-- 全宽头部（独立于 preview-chat，横跨整个 preview-wrapper） -->
               <div v-if="config.headerVisible" class="p-header-full" :style="previewHeaderStyle">
-                <LeftOutlined v-if="previewTab === 'mobile'" class="p-back-btn" />
+                <LeftOutlined v-if="previewTab === 'mobile' && !config.hideBackButton" class="p-back-btn" :style="{ color: config.backButtonColor || '#fff' }" />
                 <div class="p-header-content">
                   <img v-if="config.logo && !config.hideLogo" :src="resolveUrl(config.logo)" class="p-logo" alt="logo" />
                   <div class="p-header-info">
@@ -680,6 +693,8 @@ const config = reactive({
   hideOnlineStatus: false,
   hideAiHumanLabel: false,
   hideLogo: false,
+  hideBackButton: false,
+  backButtonColor: '#ffffff',
   headerBgImageMode: 'cover' as string,
   headerBgPosition: 'center' as string,
   mobileHeaderBgImage: '',
