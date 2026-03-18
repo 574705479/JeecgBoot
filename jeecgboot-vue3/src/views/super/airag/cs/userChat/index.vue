@@ -164,7 +164,7 @@
                     <a v-if="getSmartAssistantFaqData(msg).showBack" href="javascript:void(0)"
                        class="sa-nav-link" @click="onFaqNavigate('back', getSmartAssistantFaqData(msg))">返回上一层</a>
                     <a v-if="getSmartAssistantFaqData(msg).showHumanAgent && !hasAgent" href="javascript:void(0)"
-                       class="sa-nav-link sa-human-agent" @click="showHumanAgentModal = true">
+                       class="sa-nav-link sa-human-agent" @click="requestHumanAgent()">
                       <CustomerServiceOutlined /> 人工客服
                     </a>
                   </div>
@@ -1658,12 +1658,30 @@ function selectPresetQuestion(question: string) {
 }
 
 
+function requestHumanAgent() {
+  if (chatWindowConfig.humanAgentFields?.length) {
+    showHumanAgentModal.value = true;
+  } else {
+    submitHumanAgent();
+  }
+}
+
 // 提交人工客服转接请求
 async function submitHumanAgent() {
-  // 校验必填字段
+  const phoneReg = /^1[3-9]\d{9}$/;
+  const emailReg = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   for (const field of chatWindowConfig.humanAgentFields) {
-    if (field.required && !humanAgentForm[field.label]?.trim()) {
+    const val = humanAgentForm[field.label]?.trim() || '';
+    if (field.required && !val) {
       message.warning(`请填写${field.label}`);
+      return;
+    }
+    if (val && field.type === 'phone' && !phoneReg.test(val)) {
+      message.warning(`${field.label}格式不正确，请输入11位手机号`);
+      return;
+    }
+    if (val && field.type === 'email' && !emailReg.test(val)) {
+      message.warning(`${field.label}格式不正确，请输入有效的邮箱地址`);
       return;
     }
   }
