@@ -2947,16 +2947,29 @@ function openMediaViewer(msg: any) {
 // Unicode emoji 正则（覆盖绝大部分 emoji 字符范围）
 const emojiRegex = /([\u{1F300}-\u{1F9FF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{200D}\u{20E3}\u{E0020}-\u{E007F}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{2702}-\u{27B0}\u{1F1E0}-\u{1F1FF}]+)/gu;
 
+/** 纯文本 URL 自动识别：在 HTML 转义前检测 URL，转为可点击的 <a> 标签 */
+function linkifyPlainText(text: string): string {
+  const urlPattern = /(https?:\/\/[^\s<>]*[^\s<>.,;:!?。，；：！？)\]】]|www\.[^\s<>]*[^\s<>.,;:!?。，；：！？)\]】])/gi;
+  let lastIndex = 0;
+  let result = '';
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  let match: RegExpExecArray | null;
+  urlPattern.lastIndex = 0;
+  while ((match = urlPattern.exec(text)) !== null) {
+    result += esc(text.slice(lastIndex, match.index));
+    const url = match[0];
+    const href = url.startsWith('www.') ? 'https://' + url : url;
+    result += `<a class="auto-link" href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(url)}</a>`;
+    lastIndex = match.index + url.length;
+  }
+  result += esc(text.slice(lastIndex));
+  return result.replace(/\n/g, '<br>');
+}
+
 /** 渲染用户消息（纯文本，表情字符用 span.emoji 包裹以避免被 color 覆盖） */
 function renderUserMessage(content: string) {
   if (!content) return '';
-  // 先转义 HTML
-  const escaped = content
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\n/g, '<br>');
-  // 把 emoji 字符包裹在 <span class="emoji"> 中
+  const escaped = linkifyPlainText(content);
   return escaped.replace(emojiRegex, '<span class="emoji">$1</span>');
 }
 
@@ -3008,12 +3021,8 @@ function renderMessage(content: string) {
   if (hasInlineHtml) {
     return sanitizeHtml(md.render(content));
   }
-  // 4. 纯文本：转义并保留换行
-  return content
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\n/g, '<br>');
+  // 4. 纯文本：转义并保留换行，自动识别超链接
+  return linkifyPlainText(content);
 }
 
 // 监听新增消息，自动滚动（浅监听 length 变化，不再 deep watch 避免流式 content 修改触发）
@@ -3497,6 +3506,13 @@ watch(() => messages.value.length, () => {
     line-height: 1.6;
     overflow-wrap: anywhere;
 
+    :deep(a) {
+      color: inherit;
+      text-decoration: underline;
+      overflow-wrap: anywhere;
+      word-break: break-all;
+    }
+
     :deep(.emoji) {
       color: initial;
       font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', 'Twemoji Mozilla', sans-serif;
@@ -3565,6 +3581,11 @@ watch(() => messages.value.length, () => {
     :deep(a) {
       overflow-wrap: anywhere;
       word-break: break-all;
+    }
+
+    :deep(.auto-link) {
+      color: #1890ff;
+      text-decoration: underline;
     }
 
     :deep(p) {

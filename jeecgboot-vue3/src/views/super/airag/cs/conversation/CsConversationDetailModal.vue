@@ -310,6 +310,25 @@ function normalizeImgUrls(html: string): string {
   } catch { return html; }
 }
 
+/** 纯文本 URL 自动识别：在 HTML 转义前检测 URL，转为可点击的 <a> 标签 */
+function linkifyPlainText(text: string): string {
+  const urlPattern = /(https?:\/\/[^\s<>]*[^\s<>.,;:!?。，；：！？)\]】]|www\.[^\s<>]*[^\s<>.,;:!?。，；：！？)\]】])/gi;
+  let lastIndex = 0;
+  let result = '';
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  let match: RegExpExecArray | null;
+  urlPattern.lastIndex = 0;
+  while ((match = urlPattern.exec(text)) !== null) {
+    result += esc(text.slice(lastIndex, match.index));
+    const url = match[0];
+    const href = url.startsWith('www.') ? 'https://' + url : url;
+    result += `<a class="auto-link" href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(url)}</a>`;
+    lastIndex = match.index + url.length;
+  }
+  result += esc(text.slice(lastIndex));
+  return result.replace(/\n/g, '<br>');
+}
+
 function renderMessage(content: string) {
   if (!content) return '';
   content = content.replace(/#\s*\{\s*domainURL\s*\}/g, globSetting.domainUrl);
@@ -320,11 +339,7 @@ function renderMessage(content: string) {
   if (hasMarkdown) return md.render(content);
   const hasInlineHtml = /<([a-z][\s\S]*?)>/i.test(content);
   if (hasInlineHtml) return md.render(content);
-  return content
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\n/g, '<br>');
+  return linkifyPlainText(content);
 }
 
 // ==================== 附件解析辅助函数 ====================

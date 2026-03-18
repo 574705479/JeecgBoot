@@ -4663,6 +4663,25 @@ function normalizeImgUrls(html: string): string {
   } catch { return html; }
 }
 
+/** 纯文本 URL 自动识别：在 HTML 转义前检测 URL，转为可点击的 <a> 标签 */
+function linkifyPlainText(text: string): string {
+  const urlPattern = /(https?:\/\/[^\s<>]*[^\s<>.,;:!?。，；：！？)\]】]|www\.[^\s<>]*[^\s<>.,;:!?。，；：！？)\]】])/gi;
+  let lastIndex = 0;
+  let result = '';
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  let match: RegExpExecArray | null;
+  urlPattern.lastIndex = 0;
+  while ((match = urlPattern.exec(text)) !== null) {
+    result += esc(text.slice(lastIndex, match.index));
+    const url = match[0];
+    const href = url.startsWith('www.') ? 'https://' + url : url;
+    result += `<a class="auto-link" href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(url)}</a>`;
+    lastIndex = match.index + url.length;
+  }
+  result += esc(text.slice(lastIndex));
+  return result.replace(/\n/g, '<br>');
+}
+
 // 流式消息轻量渲染（跳过 markdown 解析，完成后由 renderMessage 接管）
 function renderStreamingText(content: string) {
   return content
@@ -4705,12 +4724,8 @@ function renderMessage(content: string) {
       if (hasInlineHtml) {
         rendered = sanitizeHtml(md.render(content));
       } else {
-        // 4. 纯文本：转义并保留换行
-        rendered = content
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;')
-          .replace(/\n/g, '<br>');
+        // 4. 纯文本：转义并保留换行，自动识别超链接
+        rendered = linkifyPlainText(content);
       }
     }
   }
@@ -5660,6 +5675,11 @@ function restoreMessageScroll() {
     :deep(a) {
       overflow-wrap: anywhere;
       word-break: break-all;
+    }
+
+    :deep(.auto-link) {
+      color: #1890ff;
+      text-decoration: underline;
     }
 
     :deep(p) {
