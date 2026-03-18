@@ -355,7 +355,7 @@
       </a-modal>
       </div><!-- chat-main-column end -->
       <!-- PC右侧区域（广告+FAQ） -->
-      <div v-if="chatWindowConfig.pcAdImage || (chatWindowConfig.faqEnabled && chatWindowConfig.faqList?.length > 0)" class="chat-sidebar">
+      <div v-if="chatWindowConfig.pcAdImage || (chatWindowConfig.faqEnabled && chatWindowConfig.faqList?.length > 0)" class="chat-sidebar" :style="{ width: (chatWindowConfig.rightSidebarWidth || 200) + 'px' }">
         <div v-if="chatWindowConfig.pcAdImage" class="sidebar-ad">
           <a :href="chatWindowConfig.pcAdLink || '#'" target="_blank" rel="noopener">
             <img :src="resolveFileUrl(chatWindowConfig.pcAdImage)" class="ad-sidebar-img" alt="广告" />
@@ -584,6 +584,7 @@ const chatWindowConfig = reactive({
   backgroundImage: '',
   headerBgImage: '',
   headerIcons: [] as Array<{ icon: string; name: string; link: string; size: number; transparent: boolean }>,
+  rightSidebarWidth: 200,
   pcAdLink: '',
   pcAdImage: '',
   faqEnabled: false,

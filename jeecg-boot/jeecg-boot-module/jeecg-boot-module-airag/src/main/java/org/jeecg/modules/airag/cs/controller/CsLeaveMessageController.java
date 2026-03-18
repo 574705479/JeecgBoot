@@ -70,10 +70,14 @@ public class CsLeaveMessageController {
     public Result<IPage<CsLeaveMessage>> list(
             @RequestParam(name = "pageNo", defaultValue = "1") Integer pageNo,
             @RequestParam(name = "pageSize", defaultValue = "10") Integer pageSize,
-            @RequestParam(name = "status", required = false) Integer status) {
+            @RequestParam(name = "status", required = false) Integer status,
+            @RequestParam(name = "userId", required = false) String userId) {
         LambdaQueryWrapper<CsLeaveMessage> queryWrapper = new LambdaQueryWrapper<>();
         if (status != null) {
             queryWrapper.eq(CsLeaveMessage::getStatus, status);
+        }
+        if (oConvertUtils.isNotEmpty(userId)) {
+            queryWrapper.like(CsLeaveMessage::getUserId, userId);
         }
         queryWrapper.orderByDesc(CsLeaveMessage::getCreateTime);
         Page<CsLeaveMessage> page = new Page<>(pageNo, pageSize);

@@ -327,6 +327,16 @@
             <!-- PC广告位 -->
             <a-divider orientation="left">PC右侧广告位</a-divider>
             <a-row :gutter="16">
+              <a-col :span="24">
+                <a-form-item label="右侧功能栏宽度(PC)">
+                  <div style="display:flex;align-items:center;gap:12px">
+                    <a-slider v-model:value="config.rightSidebarWidth" :min="150" :max="400" :step="10" style="flex:1" />
+                    <a-input-number v-model:value="config.rightSidebarWidth" :min="150" :max="400" :step="10" style="width:90px" />
+                    <span style="color:#999;font-size:12px">px</span>
+                  </div>
+                  <div class="upload-hint">控制PC端右侧广告位和常见问题区域的宽度</div>
+                </a-form-item>
+              </a-col>
               <a-col :span="12">
                 <a-form-item label="广告链接">
                   <a-input v-model:value="config.pcAdLink" placeholder="点击广告图片跳转的链接" />
@@ -335,7 +345,7 @@
               <a-col :span="12">
                 <a-form-item label="广告图片">
                   <CropperUpload v-model:value="config.pcAdImage" :uploadApi="uploadImg" btnText="上传广告图" inputWidth="160px" />
-                  <div class="upload-hint">建议尺寸 200×540 px</div>
+                  <div class="upload-hint">建议尺寸 {{ config.rightSidebarWidth || 200 }}×540 px</div>
                 </a-form-item>
               </a-col>
             </a-row>
@@ -557,7 +567,7 @@
                   </div>
                 </div>
                 <!-- PC右侧区域（广告+FAQ） -->
-                <div v-if="previewTab === 'pc' && hasSidebar" class="preview-sidebar">
+                <div v-if="previewTab === 'pc' && hasSidebar" class="preview-sidebar" :style="{ width: (config.rightSidebarWidth || 200) + 'px' }">
                   <div v-if="config.pcAdImage" class="preview-ad">
                     <a :href="config.pcAdLink || '#'" target="_blank" rel="noopener">
                       <img :src="resolveUrl(config.pcAdImage)" class="preview-ad-img" alt="ad" />
@@ -682,6 +692,7 @@ const config = reactive({
   scrollTextColor: '#ffffff',
   scrollTextBgColor: '#1890ff',
   backgroundImage: '',
+  rightSidebarWidth: 200,
   pcAdLink: '',
   pcAdImage: '',
   headerBgImage: '',
@@ -907,7 +918,8 @@ async function handleSave() {
 const previewWrapperStyle = computed(() => {
   if (previewTab.value === 'pc') {
     const needSidebar = hasSidebar.value;
-    return { width: needSidebar ? '680px' : '480px', height: '600px' };
+    const sidebarW = config.rightSidebarWidth || 200;
+    return { width: needSidebar ? `${480 + sidebarW}px` : '480px', height: '600px' };
   }
   return { width: '375px', height: '667px' };
 });
