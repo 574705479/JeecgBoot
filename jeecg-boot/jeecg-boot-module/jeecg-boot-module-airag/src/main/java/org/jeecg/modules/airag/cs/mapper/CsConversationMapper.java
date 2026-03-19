@@ -3,6 +3,7 @@ package org.jeecg.modules.airag.cs.mapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -115,4 +116,16 @@ public interface CsConversationMapper extends BaseMapper<CsConversation> {
     List<CsAgentWorkloadVO> selectAgentWorkload(@Param("startTime") Date startTime,
                                                 @Param("endTime") Date endTime,
                                                 @Param("limit") Integer limit);
+
+    /**
+     * 查询超期已结束会话的ID（物理删除前先收集，用于级联清理）
+     */
+    @Select("SELECT id FROM cs_conversation WHERE status = 2 AND end_time < #{deadline} LIMIT #{limit}")
+    List<String> selectExpiredClosedIds(@Param("deadline") Date deadline, @Param("limit") int limit);
+
+    /**
+     * 物理删除已结束的超期会话（绕过 @TableLogic）
+     */
+    @Delete("DELETE FROM cs_conversation WHERE status = 2 AND end_time < #{deadline} LIMIT #{limit}")
+    int physicalDeleteExpired(@Param("deadline") Date deadline, @Param("limit") int limit);
 }

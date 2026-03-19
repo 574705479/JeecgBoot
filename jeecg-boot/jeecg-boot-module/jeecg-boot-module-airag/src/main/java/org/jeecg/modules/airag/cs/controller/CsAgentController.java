@@ -72,6 +72,10 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     private static final String AUTO_MESSAGES_REDIS_KEY = "cs:global:auto_messages";
     private static final String AUTO_MESSAGES_CONFIG_KEY = "auto_messages";
 
+    /** 数据清理配置 */
+    private static final String DATA_CLEANUP_REDIS_KEY = "cs:global:data_cleanup";
+    private static final String DATA_CLEANUP_CONFIG_KEY = "data_cleanup";
+
     /** 管理员客服角色编码 */
     private static final String ADMIN_AGENT_ROLE_CODE = "cs_admin_agent";
     /** 子客服角色编码 */
@@ -91,6 +95,13 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
 
     @Autowired
     private CsAgentLoginLogMapper csAgentLoginLogMapper;
+
+    @Autowired
+    private org.jeecg.modules.airag.cs.mapper.CsCleanupLogMapper csCleanupLogMapper;
+
+    @Autowired
+    @org.springframework.context.annotation.Lazy
+    private org.jeecg.modules.airag.cs.task.CsDataCleanupTask csDataCleanupTask;
 
     @Autowired(required = false)
     private org.jeecg.common.license.core.LicenseClientService licenseClientService;
@@ -849,6 +860,73 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
             data.put("allowedMenus", new JSONArray());
         }
         return Result.OK(data);
+    }
+
+    // ==================== 数据清理配置 ====================
+
+    @Operation(summary = "获取数据清理配置")
+    @GetMapping("/global/data-cleanup")
+    public Result<JSONObject> getDataCleanupConfig() {
+        String json = redisTemplate.opsForValue().get(DATA_CLEANUP_REDIS_KEY);
+        if (json == null || json.isEmpty()) {
+            json = getGlobalConfigValue(DATA_CLEANUP_CONFIG_KEY);
+            if (json != null && !json.isEmpty()) {
+                redisTemplate.opsForValue().set(DATA_CLEANUP_REDIS_KEY, json);
+            }
+        }
+        JSONObject result;
+        if (json != null && !json.isEmpty()) {
+            result = JSONObject.parseObject(json);
+        } else {
+            result = new JSONObject();
+            result.put("enabled", true);
+            result.put("conversationDays", 90);
+            result.put("logAndVisitorDays", 90);
+            result.put("cacheDays", 180);
+        }
+        return Result.OK(result);
+    }
+
+    @Operation(summary = "保存数据清理配置")
+    @PutMapping("/global/data-cleanup")
+    public Result<String> saveDataCleanupConfig(@RequestBody JSONObject config) {
+        int convDays = config.getIntValue("conversationDays");
+        int logDays = config.getIntValue("logAndVisitorDays");
+        int cacheDays = config.getIntValue("cacheDays");
+        if (convDays < 1) config.put("conversationDays", 1);
+        if (logDays < 1) config.put("logAndVisitorDays", 1);
+        if (cacheDays < 1) config.put("cacheDays", 1);
+
+        String json = config.toJSONString();
+        saveGlobalConfigValue(DATA_CLEANUP_CONFIG_KEY, json);
+        redisTemplate.opsForValue().set(DATA_CLEANUP_REDIS_KEY, json);
+        log.info("[CS-Agent] 数据清理配置已更新");
+        return Result.OK("保存成功");
+    }
+
+    @Operation(summary = "手动触发数据清理")
+    @PostMapping("/global/data-cleanup/trigger")
+    public Result<Map<String, Integer>> triggerDataCleanup() {
+        LoginUser loginUser = (LoginUser) SecurityUtils.getSubject().getPrincipal();
+        String operator = loginUser != null ? loginUser.getUsername() : "unknown";
+        Map<String, Integer> results = csDataCleanupTask.triggerCleanup(operator);
+        if (results.isEmpty()) {
+            return Result.error("清理任务正在执行中，请稍后重试");
+        }
+        return Result.OK(results);
+    }
+
+    @Operation(summary = "查询数据清理日志")
+    @GetMapping("/global/data-cleanup/logs")
+    public Result<IPage<org.jeecg.modules.airag.cs.entity.CsCleanupLog>> getDataCleanupLogs(
+            @RequestParam(defaultValue = "1") Integer pageNo,
+            @RequestParam(defaultValue = "10") Integer pageSize) {
+        Page<org.jeecg.modules.airag.cs.entity.CsCleanupLog> page = new Page<>(pageNo, pageSize);
+        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<org.jeecg.modules.airag.cs.entity.CsCleanupLog> wrapper =
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
+        wrapper.orderByDesc(org.jeecg.modules.airag.cs.entity.CsCleanupLog::getStartTime);
+        IPage<org.jeecg.modules.airag.cs.entity.CsCleanupLog> result = csCleanupLogMapper.selectPage(page, wrapper);
+        return Result.OK(result);
     }
 
     private void saveGlobalConfigValue(String configKey, String configValue) {

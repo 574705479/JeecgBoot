@@ -482,6 +482,28 @@ public class ChatMessageServiceImpl implements IChatMessageService {
         }
     }
 
+    // ==================== 数据清理 ====================
+
+    @Override
+    public long physicalDeleteByConversationIds(List<String> conversationIds, int conversationType) {
+        if (conversationIds == null || conversationIds.isEmpty()) {
+            return 0;
+        }
+        // conversationType 参数保留兼容，但实际按 conversationId 删除即可
+        // 因为已知这些 ID 来自 cs_conversation，且历史数据可能没有 conversationType 字段
+        Query query = new Query(Criteria.where("conversationId").in(conversationIds));
+        com.mongodb.client.result.DeleteResult result = mongoTemplate.remove(query, ChatMessage.class);
+        return result.getDeletedCount();
+    }
+
+    @Override
+    public long physicalDeleteSoftDeleted(Date deadline) {
+        Query query = new Query(Criteria.where("deleted").is(true)
+                .and("deleteTime").lt(deadline));
+        com.mongodb.client.result.DeleteResult result = mongoTemplate.remove(query, ChatMessage.class);
+        return result.getDeletedCount();
+    }
+
     // ==================== 私有方法 ====================
 
     private String truncateContent(String content, int maxLength) {

@@ -139,4 +139,16 @@ public interface IChatMessageService {
      * 从MySQL迁移客服聊天记录
      */
     void migrateFromMysql(String conversationId, List<Map<String, Object>> messages);
+
+    // ==================== 数据清理 ====================
+
+    /**
+     * 按会话ID列表物理删除消息
+     */
+    long physicalDeleteByConversationIds(List<String> conversationIds, int conversationType);
+
+    /**
+     * 物理删除已软删除且超期的消息
+     */
+    long physicalDeleteSoftDeleted(java.util.Date deadline);
 }
