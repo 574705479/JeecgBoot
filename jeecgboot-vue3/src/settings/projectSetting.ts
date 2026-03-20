@@ -13,7 +13,7 @@ import {
 import { darkMode } from '/@/settings/designSetting';
 import { getConfigByMenuType } from '../utils/getConfigByMenuType';
 // 修改此属性，实现默认的四个系统主题快速切换
-const menuType = MenuTypeEnum.SIDEBAR;
+const menuType = MenuTypeEnum.MIX_SIDEBAR;
 
 // update-begin--author:liaozhiyang---date:20251201---for【QQYUN-14176】修改一个配置就能切换默认四个主题，不需要额外修改颜色等
 const { themeColor, headerBgColor, sideBgColor, split, mode } = getConfigByMenuType(menuType);
@@ -141,7 +141,7 @@ const setting: ProjectConfig = {
     // 刷新后是否保留已经打开的标签页
     cache: false,
     // 开启
-    show: true,
+    show: false,
     // 是否可以拖拽
     canDrag: true,
     // 开启快速操作

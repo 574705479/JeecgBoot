@@ -1,5 +1,5 @@
 <template>
-  <div class="cs-workbench" :style="themeVars">
+  <div class="cs-workbench" :style="[themeVars, workbenchLayoutStyle]">
     <!-- 左侧会话列表 -->
     <div class="sidebar">
       <!-- 客服状态栏 -->
@@ -1074,7 +1074,8 @@
 
 <script setup lang="ts">
 defineOptions({ name: 'CsWorkbench' });
-import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, watch, nextTick } from 'vue';
+import { ref, computed, unref, onMounted, onUnmounted, onActivated, onDeactivated, watch, nextTick } from 'vue';
+import { usePageContext } from '/@/hooks/component/usePageContext';
 import { message } from 'ant-design-vue';
 import { 
   StarFilled, StarOutlined, SwapOutlined, MenuUnfoldOutlined, MenuFoldOutlined,
@@ -1247,6 +1248,20 @@ const themeVars = computed(() => {
     '--cs-brand-text': t.brandText,
     '--cs-bar-start': t.barStart || t.brandStart,
     '--cs-bar-end': t.barEnd || t.brandEnd,
+  };
+});
+
+/** 与布局顶栏/多标签占位一致的可视高度（关标签等会自动变），无注入时走样式表 fallback */
+const { contentHeight } = usePageContext();
+const workbenchLayoutStyle = computed(() => {
+  const h = contentHeight != null ? unref(contentHeight) : null;
+  if (h == null || h <= 0) {
+    return {};
+  }
+  const px = `${h}px`;
+  return {
+    height: px,
+    maxHeight: px,
   };
 });
 
@@ -4951,6 +4966,7 @@ function restoreMessageScroll() {
 
 .cs-workbench {
   display: flex;
+  /* 无 PageContext 时兜底；有 contentHeight 时由内联 style 覆盖 */
   height: calc(100vh - 110px);
   max-height: calc(100vh - 110px);
   background: var(--cs-bg-page);

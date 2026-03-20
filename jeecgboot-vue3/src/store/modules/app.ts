@@ -131,7 +131,17 @@ export const useAppStore = defineStore({
 
     async resetAllState() {
       resetRouter();
-      Persistent.clearAll();
+      // 保留界面布局/主题等用户配置，避免退出登录后重新登录恢复成代码默认样式
+      const projCfgRaw = Persistent.getLocal(PROJ_CFG_KEY) as ProjectConfig | null | undefined;
+      const projCfgBackup =
+        projCfgRaw != null ? (JSON.parse(JSON.stringify(projCfgRaw)) as ProjectConfig) : null;
+      Persistent.clearAll(true);
+      if (projCfgBackup) {
+        Persistent.setLocal(PROJ_CFG_KEY, projCfgBackup, true);
+        this.projectConfig = projCfgBackup;
+      } else {
+        this.projectConfig = null;
+      }
     },
     async setPageLoadingAction(loading: boolean): Promise<void> {
       if (loading) {

@@ -29,8 +29,8 @@ export function getConfigByMenuType(menuType: MenuTypeEnum): {
     sideBgColor = SIDE_BAR_BG_COLOR_LIST[3];
     split = true;
   } else if (menuType === MenuTypeEnum.MIX_SIDEBAR) {
-    // 侧边折叠导航模式
-    themeColor = APP_PRESET_COLOR_LIST[1];
+    // 侧边折叠导航模式（主题色/顶栏/侧栏均取各预设列表第一项）
+    themeColor = APP_PRESET_COLOR_LIST[0];
     headerBgColor = HEADER_PRESET_BG_COLOR_LIST[0];
     sideBgColor = SIDE_BAR_BG_COLOR_LIST[0];
   } else if (menuType === MenuTypeEnum.SIDEBAR) {
