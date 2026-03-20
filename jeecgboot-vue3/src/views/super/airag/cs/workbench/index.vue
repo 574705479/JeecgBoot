@@ -1625,6 +1625,24 @@ const handleVisibilityChange = () => {
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     connectWebSocket();
   }
+  if (currentConversation.value?.id && Date.now() - lastWsMessageAt > 30000) {
+    loadMessages(currentConversation.value.id);
+  }
+  nextTick(() => scrollToBottom());
+};
+
+const handleElectronNavigate = (e: Event) => {
+  const { query } = (e as CustomEvent).detail;
+  const conversationId = query?.conversationId;
+  if (!conversationId) return;
+  if (currentConversation.value?.id === conversationId) {
+    nextTick(() => scrollToBottom());
+  } else {
+    const targetConv = conversations.value.find(c => c.id === conversationId);
+    if (targetConv) {
+      selectConversation(targetConv);
+    }
+  }
 };
 
 const handleNetworkOnline = () => {
@@ -1800,6 +1818,7 @@ onMounted(async () => {
   document.addEventListener('visibilitychange', handleVisibilityChange);
   window.addEventListener('online', handleNetworkOnline);
   window.addEventListener('beforeunload', handleBeforeUnload);
+  window.addEventListener('electron-navigate', handleElectronNavigate);
 });
 
 onUnmounted(() => {
@@ -1816,6 +1835,7 @@ onUnmounted(() => {
   if (suggestionRafId) { cancelAnimationFrame(suggestionRafId); suggestionRafId = null; }
   window.removeEventListener('online', handleNetworkOnline);
   window.removeEventListener('beforeunload', handleBeforeUnload);
+  window.removeEventListener('electron-navigate', handleElectronNavigate);
   document.removeEventListener('visibilitychange', handleVisibilityChange);
   if (messagesEl) {
     messagesEl.removeEventListener('scroll', handleMessageScroll);
@@ -4426,7 +4446,8 @@ function handleWsMessage(data: any) {
 }
 
 function notifyNewMessage(conv: any, data: any) {
-  if (!document.hidden) return;
+  const isInBackground = globSetting.isElectronPlatform ? !document.hasFocus() : document.hidden;
+  if (!isInBackground) return;
 
   const conversationId = data.conversationId;
   const now = Date.now();

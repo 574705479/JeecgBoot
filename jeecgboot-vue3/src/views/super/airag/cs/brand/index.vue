@@ -155,11 +155,11 @@ const formState = reactive({
 });
 
 const previewLogoUrl = computed(() => {
-  return formState.logoUrl ? resolveBrandUrl(formState.logoUrl) : '/logo.svg';
+  return resolveBrandUrl(formState.logoUrl || '/logo.svg');
 });
 
 const previewFaviconUrl = computed(() => {
-  return formState.faviconUrl ? resolveBrandUrl(formState.faviconUrl) : '/favicon.ico';
+  return resolveBrandUrl(formState.faviconUrl || '/logo.svg');
 });
 
 const previewBgStyle = computed(() => {

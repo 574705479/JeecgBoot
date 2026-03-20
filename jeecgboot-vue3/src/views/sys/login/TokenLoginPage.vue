@@ -20,11 +20,13 @@
   import { useUserStore } from '/@/store/modules/user';
   import { useI18n } from '/@/hooks/web/useI18n';
   import { getBrandSetting } from '/@/settings/brandSetting';
-  
+  import { resolveBrandUrl } from '/@/utils/brand';
+
   export default {
     name: "TokenLogin",
     setup(){
-      const { appTitle, logoUrl } = getBrandSetting();
+      const { appTitle, logoUrl: rawLogoUrl } = getBrandSetting();
+      const logoUrl = resolveBrandUrl(rawLogoUrl);
       const route = useRoute();
       let router = useRouter();
       const {createMessage, notification} = useMessage()

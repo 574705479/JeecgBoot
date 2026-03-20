@@ -47,7 +47,16 @@ function hookNavigate() {
     return;
   }
   nav((path) => {
-    router.push(path);
+    const qIdx = path.indexOf('?');
+    const targetPath = qIdx > -1 ? path.substring(0, qIdx) : path;
+    if (qIdx > -1 && targetPath === router.currentRoute.value.path) {
+      const params = new URLSearchParams(path.substring(qIdx));
+      const query: Record<string, string> = {};
+      params.forEach((v, k) => { query[k] = v; });
+      window.dispatchEvent(new CustomEvent('electron-navigate', { detail: { path: targetPath, query } }));
+    } else {
+      router.push(path);
+    }
   });
 }
 function hookWindowOpen() {

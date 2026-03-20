@@ -4,6 +4,8 @@ productName: '在线客服系统'
 files:
   # 仅包含 dist 目录下所有文件
   - 'dist/**/*'
+  # 托盘/Dock 等运行时图标
+  - 'electron/icons/**/*'
   # 特别排除 node_modules 目录
   - '!node_modules'
 directories:

@@ -47,7 +47,7 @@
   const { prefixCls } = useDesign('j-user-tenant-setting-container');
 
   const IconFont = createFromIconfontCN({
-    scriptUrl: '//at.alicdn.com/t/font_2316098_umqusozousr.js',
+    scriptUrl: 'https://at.alicdn.com/t/font_2316098_umqusozousr.js',
   });
   const userStore = useUserStore();
 

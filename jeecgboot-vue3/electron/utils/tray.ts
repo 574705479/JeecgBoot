@@ -8,9 +8,7 @@ import {$env, isDev} from '../env';
 const TrayIcons = {
   // 代码逻辑说明: 【JHHB-13】桌面应用消息通知
   normal: nativeImage.createFromPath(
-    process.platform === 'win32'
-      ? path.join(_PATHS.publicRoot, 'logo.png')
-      : path.join(_PATHS.electronRoot, './icons/mac/tray-icon.png').replace(/[\\/]dist[\\/]/, '/')
+    path.join(_PATHS.electronRoot, process.platform === 'darwin' ? './icons/mac/tray-icon.png' : './icons/mac/tray-icon@2x.png').replace(/[\\/]dist[\\/]/, '/')
   ),
   empty: nativeImage.createEmpty(),
 };
@@ -21,7 +19,7 @@ export function createTray(win: BrowserWindow) {
 
   const TrayUtils = useTray(tray, win);
 
-  tray.setToolTip($env.VITE_GLOB_APP_TITLE! + (isDev ? ' (开发环境)' : ''));
+  tray.setToolTip(app.getName() + (isDev ? ' (开发环境)' : ''));
 
   // 左键托盘图标显示主窗口
   tray.on('click', () => TrayUtils.showMainWindow());

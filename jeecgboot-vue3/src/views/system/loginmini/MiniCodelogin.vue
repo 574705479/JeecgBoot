@@ -75,7 +75,7 @@
   import { GithubFilled, WechatFilled, DingtalkCircleFilled, createFromIconfontCN } from '@ant-design/icons-vue';
 
   const IconFont = createFromIconfontCN({
-    scriptUrl: '//at.alicdn.com/t/font_2316098_umqusozousr.js',
+    scriptUrl: 'https://at.alicdn.com/t/font_2316098_umqusozousr.js',
   });
   const { prefixCls } = useDesign('minilogin');
   const { t } = useI18n();

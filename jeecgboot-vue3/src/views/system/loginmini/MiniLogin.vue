@@ -117,7 +117,7 @@
   import { defHttp } from "@/utils/http/axios";
 
   const IconFont = createFromIconfontCN({
-    scriptUrl: '//at.alicdn.com/t/font_2316098_umqusozousr.js',
+    scriptUrl: 'https://at.alicdn.com/t/font_2316098_umqusozousr.js',
   });
   const { prefixCls } = useDesign('mini-login');
   const { appTitle, appSubtitle, logoUrl, loginBgUrl } = getBrandSetting();

@@ -182,17 +182,24 @@
       </div>
       <script>
         (function () {
+          var isFileProtocol = location.protocol === 'file:';
+          function fixPath(url) {
+            if (isFileProtocol && url && url.charAt(0) === '/' && url.indexOf('/', 1) === -1) {
+              return '.' + url;
+            }
+            return url;
+          }
           var brand = window.__APP_BRAND__ || {};
           var el = document.getElementById('app-loading-title');
           if (el) el.textContent = brand.loadingTitle || brand.title || el.textContent || '';
           // 根据品牌配置替换 loading logo（优先使用预解析的完整URL）
-          var logoUrl = brand._resolvedLogoUrl || brand.logoUrl;
+          var logoUrl = fixPath(brand._resolvedLogoUrl || brand.logoUrl);
           if (logoUrl) {
             var logoEl = document.getElementById('app-loading-logo');
             if (logoEl) logoEl.src = logoUrl;
           }
           // 根据品牌配置替换 favicon
-          var faviconUrl = brand._resolvedFaviconUrl || brand.faviconUrl || logoUrl;
+          var faviconUrl = fixPath(brand._resolvedFaviconUrl || brand.faviconUrl || logoUrl);
           if (faviconUrl) {
             var iconLinks = document.querySelectorAll("link[rel='icon'], link[rel='shortcut icon']");
             for (var i = 0; i < iconLinks.length; i++) {

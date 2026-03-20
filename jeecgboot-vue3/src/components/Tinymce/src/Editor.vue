@@ -26,11 +26,28 @@
 
   // tinymce插件可按自己的需要进行导入
   // 更多插件参考：https://www.tiny.cloud/docs/plugins/
+  import 'tinymce/plugins/advlist';
+  import 'tinymce/plugins/anchor';
+  import 'tinymce/plugins/autolink';
+  import 'tinymce/plugins/autosave';
+  import 'tinymce/plugins/code';
+  import 'tinymce/plugins/codesample';
+  import 'tinymce/plugins/directionality';
   import 'tinymce/plugins/fullscreen';
+  import 'tinymce/plugins/image';
+  import 'tinymce/plugins/insertdatetime';
   import 'tinymce/plugins/link';
   import 'tinymce/plugins/lists';
+  import 'tinymce/plugins/media';
+  import 'tinymce/plugins/nonbreaking';
+  import 'tinymce/plugins/pagebreak';
   import 'tinymce/plugins/preview';
-  import 'tinymce/plugins/image';
+  import 'tinymce/plugins/save';
+  import 'tinymce/plugins/searchreplace';
+  import 'tinymce/plugins/template';
+  import 'tinymce/plugins/visualblocks';
+  import 'tinymce/plugins/visualchars';
+  import 'tinymce/plugins/wordcount';
   import { defineComponent, computed, nextTick, ref, unref, watch, onDeactivated, onBeforeUnmount, onMounted } from 'vue';
   import ImgUpload from './ImgUpload.vue';
   import ProcessMask from './ProcessMask.vue';

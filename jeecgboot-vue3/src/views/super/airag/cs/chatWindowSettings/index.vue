@@ -722,7 +722,7 @@ const faqEditorVisible = ref(false);
 const faqEditPath = ref<number[]>([]);
 const faqEditIdx = ref(-1); // -1=新增
 const faqEditForm = reactive({ question: '', answer: '', keywords: [] as string[] });
-const faqEditorPlugins = 'lists image link media fullscreen paste';
+const faqEditorPlugins = 'lists image link media fullscreen';
 const faqEditorToolbar = 'bold italic underline strikethrough | bullist numlist | alignleft aligncenter alignright | fontsize forecolor backcolor | link image media | removeformat';
 
 // 判断富文本内容是否实质为空（去掉HTML标签后检查）

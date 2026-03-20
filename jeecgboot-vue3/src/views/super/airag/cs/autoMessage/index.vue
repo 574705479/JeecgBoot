@@ -147,7 +147,7 @@ const config = reactive<AutoMessagesConfig>({
 });
 
 // Tinymce 编辑器配置
-const editorPlugins = 'lists image link media fullscreen paste';
+const editorPlugins = 'lists image link media fullscreen';
 const editorToolbar =
   'bold italic underline strikethrough | bullist numlist | subscript superscript | alignleft aligncenter alignright | fontsize styles | forecolor backcolor | blockquote hr | removeformat | link image media';
 

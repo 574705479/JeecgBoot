@@ -106,7 +106,7 @@
   const FormItem = Form.Item;
   const InputPassword = Input.Password;
   const IconFont = createFromIconfontCN({
-    scriptUrl: '//at.alicdn.com/t/font_2316098_umqusozousr.js',
+    scriptUrl: 'https://at.alicdn.com/t/font_2316098_umqusozousr.js',
   });
   const { t } = useI18n();
   const { notification, createErrorModal } = useMessage();
