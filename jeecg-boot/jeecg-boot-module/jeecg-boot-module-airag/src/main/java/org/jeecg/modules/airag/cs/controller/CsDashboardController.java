@@ -22,7 +22,6 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * 首页仪表盘
@@ -114,10 +113,9 @@ public class CsDashboardController {
                         .lt(CsLeaveMessage::getCreateTime, todayEnd));
         stats.put("todayLeaveMessages", todayLeaveMessages);
 
-        // 7. 在线客服数 / 总客服数
+        // 7. 在线客服数 / 总客服数（含子客服）
         int onlineAgents = sessionManager.getOnlineAgentCount();
-        long totalAgents = agentService.count(new LambdaQueryWrapper<CsAgent>()
-                .isNull(CsAgent::getParentAgentId).or().eq(CsAgent::getParentAgentId, ""));
+        long totalAgents = agentService.count();
         stats.put("onlineAgents", onlineAgents);
         stats.put("totalAgents", totalAgents);
 
