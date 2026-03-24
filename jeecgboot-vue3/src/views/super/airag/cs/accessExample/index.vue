@@ -3,18 +3,18 @@
     <aside class="side-nav">
       <div class="nav-group">
         <div class="nav-title">Settings</div>
-        <a class="nav-link" href="#security">安全配置</a>
+        <a class="nav-link" href="javascript:void(0)" @click="scrollToSection('security')">安全配置</a>
       </div>
       <div class="nav-group">
         <div class="nav-title">Start Here</div>
-        <a class="nav-link" href="#start">快速开始</a>
-        <a class="nav-link" v-if="tokenMode" href="#token">获取 Token</a>
-        <a class="nav-link" href="#access">接入方式</a>
-        <a class="nav-link" href="#preview">预览效果</a>
+        <a class="nav-link" href="javascript:void(0)" @click="scrollToSection('start')">快速开始</a>
+        <a class="nav-link" v-if="tokenMode" href="javascript:void(0)" @click="scrollToSection('token')">获取 Token</a>
+        <a class="nav-link" href="javascript:void(0)" @click="scrollToSection('access')">接入方式</a>
+        <a class="nav-link" href="javascript:void(0)" @click="scrollToSection('preview')">预览效果</a>
       </div>
       <div class="nav-group">
         <div class="nav-title">Help</div>
-        <a class="nav-link" href="#faq">常见问题</a>
+        <a class="nav-link" href="javascript:void(0)" @click="scrollToSection('faq')">常见问题</a>
       </div>
     </aside>
 
@@ -333,11 +333,31 @@ expireAt: {{ expireAt || '' }}</pre>
           <div class="card" v-if="accessType === 'url'">
             <div class="card-desc">访客页预览</div>
             <a-alert v-if="tokenMode && !token" message="请先测试获取token后再预览效果" type="warning" show-icon />
+            <template v-else-if="isElectron">
+              <div class="electron-preview-placeholder">
+                <p>桌面客户端下无法直接预览，请在外部浏览器中查看效果</p>
+                <div class="electron-preview-url">{{ accessUrl }}</div>
+                <div style="display:flex;gap:8px;margin-top:8px">
+                  <a-button type="primary" size="small" @click="openInBrowser(accessUrl)">在浏览器中打开</a-button>
+                  <a-button size="small" @click="copyText(accessUrl)">复制链接</a-button>
+                </div>
+              </div>
+            </template>
             <iframe v-else class="preview" :src="accessUrl" />
           </div>
           <div class="card" v-if="accessType === 'iframe'">
             <div class="card-desc">iframe 预览</div>
             <a-alert v-if="tokenMode && !token" message="请先测试获取token后再预览效果" type="warning" show-icon />
+            <template v-else-if="isElectron">
+              <div class="electron-preview-placeholder">
+                <p>桌面客户端下无法直接预览，请在外部浏览器中查看效果</p>
+                <div class="electron-preview-url">{{ accessUrl }}</div>
+                <div style="display:flex;gap:8px;margin-top:8px">
+                  <a-button type="primary" size="small" @click="openInBrowser(accessUrl)">在浏览器中打开</a-button>
+                  <a-button size="small" @click="copyText(accessUrl)">复制链接</a-button>
+                </div>
+              </div>
+            </template>
             <iframe v-else class="preview" :src="accessUrl" />
           </div>
           <div class="card" v-if="accessType === 'widget'">
@@ -359,12 +379,12 @@ expireAt: {{ expireAt || '' }}</pre>
 
     <aside class="toc">
       <div class="toc-title">On this page</div>
-      <a class="toc-link" href="#security">安全配置</a>
-      <a class="toc-link" href="#start">快速开始</a>
-      <a class="toc-link" v-if="tokenMode" href="#token">获取 Token</a>
-      <a class="toc-link" href="#access">接入方式</a>
-      <a class="toc-link" href="#preview">预览效果</a>
-      <a class="toc-link" href="#faq">常见问题</a>
+      <a class="toc-link" href="javascript:void(0)" @click="scrollToSection('security')">安全配置</a>
+      <a class="toc-link" href="javascript:void(0)" @click="scrollToSection('start')">快速开始</a>
+      <a class="toc-link" v-if="tokenMode" href="javascript:void(0)" @click="scrollToSection('token')">获取 Token</a>
+      <a class="toc-link" href="javascript:void(0)" @click="scrollToSection('access')">接入方式</a>
+      <a class="toc-link" href="javascript:void(0)" @click="scrollToSection('preview')">预览效果</a>
+      <a class="toc-link" href="javascript:void(0)" @click="scrollToSection('faq')">常见问题</a>
     </aside>
   </div>
 </template>
@@ -381,8 +401,31 @@ import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
 
 const globSetting = useGlobSetting();
+const isElectron = globSetting.isElectronPlatform;
+
+function scrollToSection(id: string) {
+  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function openInBrowser(url: string) {
+  const electronApi = (window as any)._ELECTRON_PRELOAD_UTILS_;
+  if (isElectron && electronApi?.openInBrowser) {
+    electronApi.openInBrowser(url);
+  } else {
+    window.open(url, '_blank');
+  }
+}
+
+function copyText(text: string) {
+  navigator.clipboard.writeText(text).then(() => {
+    message.success('已复制到剪贴板');
+  }).catch(() => {
+    message.error('复制失败');
+  });
+}
+
 function getOriginUrl() {
-  return globSetting.isElectronPlatform ? globSetting.apiUrl : window.location.origin;
+  return isElectron ? globSetting.apiUrl : window.location.origin;
 }
 const baseUrl = ref(getOriginUrl());
 const domainOptions = ref<string[]>([]);
@@ -1355,6 +1398,23 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 560px;
   border: 0;
+}
+.electron-preview-placeholder {
+  padding: 32px 20px;
+  text-align: center;
+  background: #fafafa;
+  border: 1px dashed #d9d9d9;
+  border-radius: 6px;
+  p { color: #999; margin-bottom: 12px; }
+}
+.electron-preview-url {
+  word-break: break-all;
+  font-size: 12px;
+  color: #666;
+  background: #f0f0f0;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-family: monospace;
 }
 
 @media (max-width: 1200px) {
