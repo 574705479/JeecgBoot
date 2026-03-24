@@ -291,10 +291,28 @@ export const usePermissionStore = defineStore({
           // === 子客服菜单过滤 ===
           try {
             const menuRes = await defHttp.get({ url: '/cs/agent/current-menus' });
-            if (menuRes && menuRes.isAgent === true) {
+            const isAgent = menuRes && menuRes.isAgent === true;
+            const isSubAgent = menuRes && menuRes.isSubAgent === true;
+            if (isAgent) {
               userStore.getUserInfo.homePath = '/cs/workbench';
             }
-            if (menuRes && menuRes.isSubAgent === true) {
+            // 获取客服头像信息
+            if (isAgent || isSubAgent) {
+              try {
+                const agentRes = await defHttp.get({ url: '/cs/agent/current' });
+                if (agentRes) {
+                  userStore.setCsAgentInfo({
+                    isAgent: !!isAgent,
+                    isSubAgent: !!isSubAgent,
+                    avatar: agentRes.avatar || '',
+                    nickname: agentRes.nickname || '',
+                  });
+                }
+              } catch (e) {
+                console.warn('[CS-Agent] 获取客服信息失败，头像回退到用户头像', e);
+              }
+            }
+            if (isSubAgent) {
               const allowedMenuIds: string[] = menuRes.allowedMenus || [];
               if (allowedMenuIds.length > 0) {
                 const allowedSet = new Set(allowedMenuIds);

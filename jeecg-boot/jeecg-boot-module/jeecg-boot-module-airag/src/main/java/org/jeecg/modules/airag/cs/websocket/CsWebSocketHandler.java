@@ -12,6 +12,9 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.*;
 
+import org.springframework.scheduling.annotation.Scheduled;
+
+import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -40,6 +43,8 @@ public class CsWebSocketHandler implements WebSocketHandler {
     private static final int GRACE_PERIOD_NORMAL = 5;
     /** 异常断连（1006等）的宽限期（秒） */
     private static final int GRACE_PERIOD_ABNORMAL = 10;
+    /** 客服 ping 超时阈值（毫秒），超过此时间未收到 ping 则主动断开 */
+    private static final long AGENT_PING_TIMEOUT_MS = 60_000;
 
     private final CsWebSocketSessionManager sessionManager;
     private final ICsMessageService messageService;
@@ -239,6 +244,14 @@ public class CsWebSocketHandler implements WebSocketHandler {
         if (sessionManager.isSessionExpired(session)) {
             sendExpiredAndClose(session);
             return;
+        }
+        // 记录客服最后 ping 时间，用于服务端空闲检测
+        String userType = sessionManager.getUserType(session);
+        if (CsWebSocketInterceptor.USER_TYPE_AGENT.equals(userType)) {
+            String agentId = sessionManager.getUserId(session);
+            if (oConvertUtils.isNotEmpty(agentId)) {
+                sessionManager.updateAgentPingTime(agentId);
+            }
         }
         CsWebSocketMessage pong = CsWebSocketMessage.builder()
                 .type("pong")
@@ -521,6 +534,37 @@ public class CsWebSocketHandler implements WebSocketHandler {
         return msg != null && (msg.contains("dataSource already closed") 
                 || msg.contains("DataSource")
                 || msg.contains("closed"));
+    }
+
+    /**
+     * 定时扫描客服 WebSocket 空闲状态
+     * 客户端每 15s 发一次 ping，若 60s 内未收到任何 ping 则判定为僵尸连接并主动关闭
+     */
+    @Scheduled(fixedRate = 30000)
+    public void checkStaleAgentSessions() {
+        try {
+            Map<String, Long> pingSnapshot = sessionManager.getAgentLastPingTimeSnapshot();
+            long now = System.currentTimeMillis();
+            for (Map.Entry<String, Long> entry : pingSnapshot.entrySet()) {
+                String agentId = entry.getKey();
+                long lastPing = entry.getValue();
+                if (now - lastPing > AGENT_PING_TIMEOUT_MS) {
+                    WebSocketSession session = sessionManager.getAgentSession(agentId);
+                    if (session != null && session.isOpen()) {
+                        log.warn("[CS-WebSocket] 客服 ping 超时({}ms)，主动断开: agentId={}", now - lastPing, agentId);
+                        try {
+                            session.close(new CloseStatus(4003, "ping_timeout"));
+                        } catch (Exception e) {
+                            log.warn("[CS-WebSocket] 关闭超时会话失败: agentId={}, error={}", agentId, e.getMessage());
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            if (!isShutdownError(e)) {
+                log.error("[CS-WebSocket] 空闲检测扫描异常: {}", e.getMessage());
+            }
+        }
     }
 
     @Override

@@ -4,6 +4,21 @@ import { openInBrowser } from '../utils';
 import { omit } from 'lodash-es';
 
 ipcMain.on('open-in-browser', (event: IpcMainInvokeEvent, url: string) => openInBrowser(url));
+
+// 窗口控制
+ipcMain.on('window-minimize', () => {
+  const win = BrowserWindow.getAllWindows()[0];
+  if (win) win.minimize();
+});
+ipcMain.on('window-maximize', () => {
+  const win = BrowserWindow.getAllWindows()[0];
+  if (!win) return;
+  win.isMaximized() ? win.unmaximize() : win.maximize();
+});
+ipcMain.on('window-close', () => {
+  const win = BrowserWindow.getAllWindows()[0];
+  if (win) win.close();
+});
 // 处理任务栏闪烁
 ipcMain.on('notify-flash', (event: IpcMainInvokeEvent, count: number = 0) => {
   const win = BrowserWindow.getAllWindows()[0];

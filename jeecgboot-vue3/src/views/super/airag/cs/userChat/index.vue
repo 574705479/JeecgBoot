@@ -95,6 +95,22 @@
           </a>
         </div>
       </div>
+      <!-- WebSocket 连接状态提示条 -->
+      <transition name="ws-banner">
+        <div v-if="wsShowBanner" class="ws-status-banner" :class="'ws-' + wsStatus">
+          <template v-if="wsStatus === 'reconnecting'">
+            <LoadingOutlined spin /> 正在重连...
+          </template>
+          <template v-else-if="wsStatus === 'disconnected'">
+            <template v-if="wsReconnectCountdown > 0">{{ wsReconnectCountdown }}秒后自动重连</template>
+            <template v-else>连接已断开</template>
+            <a @click="connectWebSocket()" style="margin-left:8px">立即重连</a>
+          </template>
+          <template v-else-if="wsStatus === 'connected'">
+            <CheckCircleOutlined /> 已重新连接
+          </template>
+        </div>
+      </transition>
       <!-- 主内容区域 -->
       <div class="chat-main-layout">
       <div class="chat-main-column">
@@ -462,7 +478,7 @@ import { message } from 'ant-design-vue';
 import {
   MessageOutlined, SendOutlined, BulbOutlined, CheckCircleOutlined,
   SmileOutlined, PictureOutlined, VideoCameraOutlined, FilePdfOutlined, QuestionCircleOutlined,
-  PauseCircleOutlined, LeftOutlined, CustomerServiceOutlined,
+  PauseCircleOutlined, LeftOutlined, CustomerServiceOutlined, LoadingOutlined,
 } from '@ant-design/icons-vue';
 import { defHttp } from '/@/utils/http/axios';
 import axios from 'axios';
@@ -1049,6 +1065,12 @@ let wsReconnectAttempts = 0;
 let wsFallbackPollTimer: number | null = null;
 let lastWsMessageAt = 0;
 const wsFallbackPollIntervalMs = 20000;
+const wsStatus = ref<'connected' | 'reconnecting' | 'disconnected'>('disconnected');
+const wsShowBanner = ref(false);
+const wsReconnectCountdown = ref(0);
+let hasConnectedOnce = false;
+let wsConnectedBannerTimer: number | null = null;
+let wsCountdownTimer: number | null = null;
 
 // AI回复中状态（用于限制用户快速发送）
 const aiResponding = ref(false);
@@ -1355,6 +1377,8 @@ onUnmounted(() => {
   disconnectWebSocket();
   stopFallbackPoll();
   stopTokenValidateTimer();
+  stopWsCountdown();
+  if (wsConnectedBannerTimer) { clearTimeout(wsConnectedBannerTimer); wsConnectedBannerTimer = null; }
   if (typingTimer) { clearTimeout(typingTimer); typingTimer = null; }
   window.removeEventListener('resize', onResizeCheck);
   if (tokenRafId) { cancelAnimationFrame(tokenRafId); tokenRafId = null; }
@@ -2174,6 +2198,11 @@ function connectWebSocket() {
     wsReconnectTimer = null;
   }
   wsManuallyClosed = false;
+  stopWsCountdown();
+  if (hasConnectedOnce) {
+    wsStatus.value = 'reconnecting';
+    wsShowBanner.value = true;
+  }
 
   const wsBase = getWsBaseUrl();
   let authParams = '';
@@ -2200,6 +2229,17 @@ function connectWebSocket() {
     wsReconnectAttempts = 0;
     lastWsMessageAt = Date.now();
     startHeartbeat();
+    if (hasConnectedOnce) {
+      wsStatus.value = 'connected';
+      if (wsConnectedBannerTimer) clearTimeout(wsConnectedBannerTimer);
+      wsConnectedBannerTimer = window.setTimeout(() => {
+        if (wsStatus.value === 'connected') {
+          wsShowBanner.value = false;
+        }
+        wsConnectedBannerTimer = null;
+      }, 1500);
+    }
+    hasConnectedOnce = true;
   };
 
   ws.onmessage = (event) => {
@@ -2254,6 +2294,14 @@ function disconnectWebSocket() {
   }
   wsConnected.value = false;
   stopAiResponding();
+  wsShowBanner.value = false;
+  stopWsCountdown();
+  if (wsConnectedBannerTimer) { clearTimeout(wsConnectedBannerTimer); wsConnectedBannerTimer = null; }
+}
+
+function stopWsCountdown() {
+  if (wsCountdownTimer) { clearInterval(wsCountdownTimer); wsCountdownTimer = null; }
+  wsReconnectCountdown.value = 0;
 }
 
 function scheduleWsReconnect() {
@@ -2262,8 +2310,21 @@ function scheduleWsReconnect() {
   const jitter = Math.floor(Math.random() * 1000);
   const delay = Math.min(30000, 1000 * Math.pow(2, wsReconnectAttempts)) + jitter;
   wsReconnectAttempts += 1;
+  if (hasConnectedOnce) {
+    wsStatus.value = 'disconnected';
+    wsShowBanner.value = true;
+    if (wsCountdownTimer) { clearInterval(wsCountdownTimer); wsCountdownTimer = null; }
+    wsReconnectCountdown.value = Math.ceil(delay / 1000);
+    wsCountdownTimer = window.setInterval(() => {
+      wsReconnectCountdown.value -= 1;
+      if (wsReconnectCountdown.value <= 0) {
+        if (wsCountdownTimer) { clearInterval(wsCountdownTimer); wsCountdownTimer = null; }
+      }
+    }, 1000);
+  }
   wsReconnectTimer = window.setTimeout(() => {
     wsReconnectTimer = null;
+    stopWsCountdown();
     connectWebSocket();
   }, delay);
 }
@@ -2558,7 +2619,6 @@ async function sendMessage() {
   const msgType = attachments.length > 0 ? 5 : 0;
   const extra = attachments.length > 0 ? JSON.stringify({ attachments: attachments.map(a => ({ name: a.name, url: a.url, size: a.size, type: a.type })) }) : undefined;
 
-  // 先添加到本地显示
   const localMsg: any = {
     id: 'local_' + Date.now(),
     conversationId: conversationId.value,
@@ -2570,15 +2630,6 @@ async function sendMessage() {
     msgType,
     extra: extra ? JSON.parse(extra) : undefined,
   };
-  messages.value.push(localMsg);
-  
-  // 清空输入框和附件列表
-  inputMessage.value = '';
-  attachmentList.value.forEach(a => { if (a.previewUrl) URL.revokeObjectURL(a.previewUrl); });
-  attachmentList.value = [];
-  await nextTick();
-  
-  scrollToBottom();
 
   sending.value = true;
   
@@ -2613,6 +2664,13 @@ async function sendMessage() {
         },
       });
     }
+    // 发送成功后才展示消息气泡并清空输入
+    messages.value.push(localMsg);
+    inputMessage.value = '';
+    attachmentList.value.forEach(a => { if (a.previewUrl) URL.revokeObjectURL(a.previewUrl); });
+    attachmentList.value = [];
+    await nextTick();
+    scrollToBottom();
   } catch (e) {
     console.error('发送消息失败', e);
     message.error('发送失败，请重试');
@@ -3313,6 +3371,20 @@ watch(() => messages.value.length, () => {
     }
   }
 }
+
+.ws-status-banner {
+  padding: 4px 12px;
+  font-size: 12px;
+  text-align: center;
+  overflow: hidden;
+  a { cursor: pointer; text-decoration: underline; }
+}
+.ws-reconnecting { background: #fff7e6; color: #d46b08; }
+.ws-disconnected { background: #fff2f0; color: #cf1322; }
+.ws-connected { background: #f6ffed; color: #389e0d; }
+.ws-banner-enter-active, .ws-banner-leave-active { transition: all 0.3s ease; }
+.ws-banner-enter-from, .ws-banner-leave-to { max-height: 0; padding-top: 0; padding-bottom: 0; opacity: 0; }
+.ws-banner-enter-to, .ws-banner-leave-from { max-height: 30px; opacity: 1; }
 
 .chat-header {
   display: flex;

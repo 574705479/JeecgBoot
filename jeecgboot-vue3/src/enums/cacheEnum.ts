@@ -41,6 +41,9 @@ export const OAUTH2_THIRD_LOGIN_TENANT_ID = 'THIRD_LOGIN_TENANT_ID';
 // ai助手标识（退出需要记录一下）
 export const AIDE_FLAG = 'AIDE_FLAG';
 
+// 客服信息 key
+export const CS_AGENT_INFO_KEY = 'CS__AGENT__INFO__';
+
 // ai助手标识（退出需要记录一下）
 export const JEECG_CHAT_KEY = 'JEECG-CHAT-KEY';
 

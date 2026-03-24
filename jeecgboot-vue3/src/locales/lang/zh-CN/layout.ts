@@ -10,6 +10,8 @@ export default {
     dropdownItemSwitchAccount: '账户设置',
     dropdownItemSwitchDefaultHomePage: '切换首页',
 
+    dropdownItemThemeStyle: '主题样式',
+
     dropdownItemSwitchDefaultWeb: '桌面应用',
     dropdownItemSwitchDefaultAndroid: '移动App',
 
@@ -25,6 +27,10 @@ export default {
     lockScreenPassword: '锁屏密码',
     lockScreen: '锁定屏幕',
     lockScreenBtn: '锁定',
+
+    windowMinimize: '最小化',
+    windowMaximize: '最大化',
+    windowClose: '关闭',
 
     home: '首页',
     welcomeIn:"欢迎进入",

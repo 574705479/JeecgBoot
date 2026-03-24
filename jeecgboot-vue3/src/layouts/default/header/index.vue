@@ -33,13 +33,11 @@
 
       <LockScreen v-if="getUseLockPage" />
 
-      <AppLocalePicker v-if="getShowLocalePicker" :reload="true" :showText="false" :class="`${prefixCls}-action__item`" />
-
       <UserDropDown :theme="getHeaderTheme" />
-
-      <SettingDrawer v-if="getShowSetting" :class="`${prefixCls}-action__item`" />
       <!-- ai助手 -->
       <Aide v-if="getAiIconShow"></Aide>
+      <!-- Electron 窗口控制按钮 -->
+      <WindowControls v-if="isElectron" />
     </div>
   </Header>
   <LoginSelect ref="loginSelectRef" @success="loginSelectOk"></LoginSelect>
@@ -61,15 +59,10 @@
   import { useRootSetting } from '/@/hooks/setting/useRootSetting';
 
   import { MenuModeEnum, MenuSplitTyeEnum } from '/@/enums/menuEnum';
-  import { SettingButtonPositionEnum } from '/@/enums/appEnum';
-  import { AppLocalePicker } from '/@/components/Application';
 
-  import { UserDropDown, LayoutBreadcrumb, FullScreen, Notify, ErrorAction, LockScreen } from './components';
+  import { UserDropDown, LayoutBreadcrumb, FullScreen, Notify, ErrorAction, LockScreen, WindowControls } from './components';
   import { useAppInject } from '/@/hooks/web/useAppInject';
   import { useDesign } from '/@/hooks/web/useDesign';
-
-  import { createAsyncComponent } from '/@/utils/factory/createAsyncComponent';
-  import { useLocale } from '/@/locales/useLocale';
 
   import LoginSelect from '/@/views/sys/login/LoginSelect.vue';
   import { useUserStore } from '/@/store/modules/user';
@@ -86,16 +79,13 @@
       LayoutBreadcrumb,
       LayoutMenu,
       UserDropDown,
-      AppLocalePicker,
       FullScreen,
       Notify,
       AppSearch,
       ErrorAction,
       LockScreen,
       LoginSelect,
-      SettingDrawer: createAsyncComponent(() => import('/@/layouts/default/setting/index.vue'), {
-        loading: true,
-      }),
+      WindowControls,
       Aide
     },
     props: {
@@ -105,8 +95,10 @@
       const { prefixCls } = useDesign('layout-header');
       const userStore = useUserStore();
       const { getShowTopMenu, getShowHeaderTrigger, getSplit, getIsMixMode, getMenuWidth, getIsMixSidebar } = useMenuSetting();
-      const { getUseErrorHandle, getShowSettingButton, getSettingButtonPosition, getAiIconShow } = useRootSetting();
-      const { title } = useGlobSetting();
+      const { getUseErrorHandle, getAiIconShow } = useRootSetting();
+      const glob = useGlobSetting();
+      const { title } = glob;
+      const isElectron = glob.isElectronPlatform;
 
       const {
         getHeaderTheme,
@@ -115,13 +107,10 @@
         getShowContent,
         getShowBread,
         getShowHeaderLogo,
-        getShowHeader,
         getShowSearch,
         getUseLockPage,
         getShowBreadTitle,
       } = useHeaderSetting();
-
-      const { getShowLocalePicker } = useLocale();
 
       const { getIsMobile } = useAppInject();
 
@@ -135,18 +124,6 @@
             [`${prefixCls}--${theme}`]: theme,
           },
         ];
-      });
-
-      const getShowSetting = computed(() => {
-        if (!unref(getShowSettingButton)) {
-          return false;
-        }
-        const settingButtonPosition = unref(getSettingButtonPosition);
-
-        if (settingButtonPosition === SettingButtonPositionEnum.AUTO) {
-          return unref(getShowHeader);
-        }
-        return settingButtonPosition === SettingButtonPositionEnum.HEADER;
       });
 
       const getLogoWidth = computed(() => {
@@ -200,20 +177,18 @@
         getSplit,
         getMenuMode,
         getShowTopMenu,
-        getShowLocalePicker,
         getShowFullScreen,
         getShowNotice,
         getUseErrorHandle,
         getLogoWidth,
         getIsMixSidebar,
-        getShowSettingButton,
-        getShowSetting,
         getShowSearch,
         getUseLockPage,
         loginSelectOk,
         loginSelectRef,
         title,
         t,
+        isElectron,
         getAiIconShow
       };
     },

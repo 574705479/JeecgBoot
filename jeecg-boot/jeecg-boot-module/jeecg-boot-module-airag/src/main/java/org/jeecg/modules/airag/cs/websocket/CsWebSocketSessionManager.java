@@ -40,6 +40,11 @@ public class CsWebSocketSessionManager {
     private final Map<String, WebSocketSession> agentSessions = new ConcurrentHashMap<>();
 
     /**
+     * 客服最后一次 ping 时间 (agentId -> timestamp)  用于服务端空闲检测
+     */
+    private final Map<String, Long> agentLastPingTime = new ConcurrentHashMap<>();
+
+    /**
      * 会话到用户ID的映射 (sessionId -> userId)
      */
     private final Map<String, String> sessionUserMap = new ConcurrentHashMap<>();
@@ -65,7 +70,16 @@ public class CsWebSocketSessionManager {
         sessionUserMap.put(session.getId(), userId);
 
         if (CsWebSocketInterceptor.USER_TYPE_AGENT.equals(userType)) {
-            agentSessions.put(userId, session);
+            WebSocketSession oldSession = agentSessions.put(userId, session);
+            agentLastPingTime.put(userId, System.currentTimeMillis());
+            // 关闭被覆盖的旧僵尸 session
+            if (oldSession != null && oldSession.isOpen() && !oldSession.getId().equals(session.getId())) {
+                try {
+                    oldSession.close(new CloseStatus(4002, "replaced_by_new_session"));
+                } catch (Exception e) {
+                    log.warn("[CS-WebSocket] 关闭旧客服会话失败: agentId={}, error={}", userId, e.getMessage());
+                }
+            }
             log.info("[CS-WebSocket] 客服上线: agentId={}, 当前在线客服IDs={}", userId, agentSessions.keySet());
         } else {
             // 添加到用户会话集合（支持多设备）
@@ -94,8 +108,11 @@ public class CsWebSocketSessionManager {
         
         if (CsWebSocketInterceptor.USER_TYPE_AGENT.equals(userType)) {
             // 客服只移除匹配的session（防止新session被错误移除）
-            agentSessions.remove(userId, session);
-            log.info("[CS-WebSocket] 客服下线: agentId={}, 当前在线客服数={}", userId, agentSessions.size());
+            boolean removed = agentSessions.remove(userId, session);
+            if (removed) {
+                agentLastPingTime.remove(userId);
+            }
+            log.info("[CS-WebSocket] 客服下线: agentId={}, removed={}, 当前在线客服数={}", userId, removed, agentSessions.size());
         } else {
             // 从用户会话集合中移除当前session
             Set<WebSocketSession> sessions = userSessions.get(userId);
@@ -392,6 +409,27 @@ public class CsWebSocketSessionManager {
      */
     public int getOnlineAgentCount() {
         return agentSessions.size();
+    }
+
+    /**
+     * 获取客服 WebSocket session
+     */
+    public WebSocketSession getAgentSession(String agentId) {
+        return agentSessions.get(agentId);
+    }
+
+    /**
+     * 更新客服 ping 时间
+     */
+    public void updateAgentPingTime(String agentId) {
+        agentLastPingTime.put(agentId, System.currentTimeMillis());
+    }
+
+    /**
+     * 获取客服最后 ping 时间快照（用于空闲检测扫描）
+     */
+    public Map<String, Long> getAgentLastPingTimeSnapshot() {
+        return new ConcurrentHashMap<>(agentLastPingTime);
     }
 
     /**

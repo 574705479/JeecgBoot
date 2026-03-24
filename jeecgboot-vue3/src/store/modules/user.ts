@@ -4,7 +4,7 @@ import { defineStore } from 'pinia';
 import { store } from '/@/store';
 import { RoleEnum } from '/@/enums/roleEnum';
 import { PageEnum } from '/@/enums/pageEnum';
-import { ROLES_KEY, TOKEN_KEY, USER_INFO_KEY, LOGIN_INFO_KEY, DB_DICT_DATA_KEY, TENANT_ID, OAUTH2_THIRD_LOGIN_TENANT_ID } from '/@/enums/cacheEnum';
+import { ROLES_KEY, TOKEN_KEY, USER_INFO_KEY, LOGIN_INFO_KEY, DB_DICT_DATA_KEY, TENANT_ID, OAUTH2_THIRD_LOGIN_TENANT_ID, CS_AGENT_INFO_KEY } from '/@/enums/cacheEnum';
 import { getAuthCache, setAuthCache, removeAuthCache } from '/@/utils/auth';
 import { GetUserInfoModel, LoginParams, ThirdLoginParams } from '/@/api/sys/model/userModel';
 import { doLogout, getUserInfo, loginApi, phoneLoginApi, thirdLogin } from '/@/api/sys/user';
@@ -23,6 +23,12 @@ import { getUrlParam } from "@/utils";
 interface dictType {
   [key: string]: any;
 }
+export interface CsAgentInfo {
+  isAgent: boolean;
+  isSubAgent: boolean;
+  avatar: string;
+  nickname: string;
+}
 interface UserState {
   userInfo: Nullable<UserInfo>;
   token?: string;
@@ -33,6 +39,7 @@ interface UserState {
   tenantid?: string | number;
   shareTenantId?: Nullable<string | number>;
   loginInfo?: Nullable<LoginInfo>;
+  csAgentInfo: Nullable<CsAgentInfo>;
 }
 
 export const useUserStore = defineStore({
@@ -57,6 +64,8 @@ export const useUserStore = defineStore({
     shareTenantId: null,
     //登录返回信息
     loginInfo: null,
+    // 客服信息
+    csAgentInfo: null,
   }),
   getters: {
     getUserInfo(): UserInfo {
@@ -89,6 +98,9 @@ export const useUserStore = defineStore({
     // 是否有分享租户id
     hasShareTenantId(): boolean {
       return this.shareTenantId != null && this.shareTenantId !== '';
+    },
+    getCsAgentInfo(): CsAgentInfo | null {
+      return this.csAgentInfo || getAuthCache<CsAgentInfo>(CS_AGENT_INFO_KEY) || null;
     },
   },
   actions: {
@@ -132,12 +144,17 @@ export const useUserStore = defineStore({
     setSessionTimeout(flag: boolean) {
       this.sessionTimeout = flag;
     },
+    setCsAgentInfo(info: CsAgentInfo | null) {
+      this.csAgentInfo = info;
+      setAuthCache(CS_AGENT_INFO_KEY, info);
+    },
     resetState() {
       this.userInfo = null;
       this.dictItems = null;
       this.token = '';
       this.roleList = [];
       this.sessionTimeout = false;
+      this.csAgentInfo = null;
     },
     /**
      * 登录事件
@@ -277,6 +294,9 @@ export const useUserStore = defineStore({
      * 退出登录
      */
     async logout(goLogin = false) {
+      // 登出前通知客服工作台关闭 WebSocket（此时 token 仍有效）
+      window.dispatchEvent(new CustomEvent('app-logout'));
+
       if (this.getToken) {
         try {
           await doLogout();
@@ -296,6 +316,7 @@ export const useUserStore = defineStore({
       this.setUserInfo(null);
       this.setLoginInfo(null);
       this.setTenant(null);
+      this.setCsAgentInfo(null);
       // 代码逻辑说明: 【TV360X-23】退出登录后会提示「Token时效，请重新登录」
       setTimeout(() => {
         this.setAllDictItems(null);

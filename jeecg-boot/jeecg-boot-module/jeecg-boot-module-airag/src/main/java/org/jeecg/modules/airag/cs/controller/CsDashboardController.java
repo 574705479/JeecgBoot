@@ -50,6 +50,9 @@ public class CsDashboardController {
     @Autowired
     private CsWebSocketSessionManager sessionManager;
 
+    @Autowired
+    private org.jeecg.modules.airag.cs.mapper.CsSubAgentMapper csSubAgentMapper;
+
     /**
      * 首页综合统计数据
      */
@@ -128,10 +131,7 @@ public class CsDashboardController {
     @Operation(summary = "坐席实时状态列表")
     @GetMapping("/agent-status")
     public Result<List<Map<String, Object>>> getAgentStatus() {
-        // 查询所有客服（排除子客服，如果需要也可以包含）
-        List<CsAgent> agents = agentService.list(
-                new LambdaQueryWrapper<CsAgent>()
-                        .and(w -> w.isNull(CsAgent::getParentAgentId).or().eq(CsAgent::getParentAgentId, "")));
+        List<CsAgent> agents = agentService.list();
 
         Date todayStart = getTodayStart();
         Date todayEnd = getTodayEnd();
@@ -142,6 +142,13 @@ public class CsDashboardController {
             row.put("agentId", agent.getId());
             row.put("userId", agent.getUserId());
             row.put("nickname", agent.getNickname());
+            // 补充登录账号
+            String username = "";
+            if (org.jeecg.common.util.oConvertUtils.isNotEmpty(agent.getUserId())) {
+                username = csSubAgentMapper.getUsernameByUserId(agent.getUserId());
+            }
+            row.put("username", username != null ? username : "");
+            row.put("isSubAgent", org.jeecg.common.util.oConvertUtils.isNotEmpty(agent.getParentAgentId()));
             row.put("currentSessions", agent.getCurrentSessions() != null ? agent.getCurrentSessions() : 0);
 
             // 查询该客服今日好评量和好评率

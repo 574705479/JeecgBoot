@@ -10,10 +10,23 @@ declare global {
     };
     lastBuildTime: string;
   };
-  // declare interface Window {
-  //   // Global vue app instance
-  //   __APP__: App<Element>;
-  // }
+  interface ElectronPreloadAPI {
+    openInBrowser: (url: string) => void;
+    sendNotification: (title: string, body: string, path: string) => void;
+    onNavigate: (cb: (path: string) => void) => void;
+    sendNotifyFlash: (count?: number) => void;
+    trayFlash: () => void;
+    trayFlashStop: () => void;
+    windowMinimize: () => void;
+    windowMaximize: () => void;
+    windowClose: () => void;
+    onMaximizedChange: (cb: (isMaximized: boolean) => void) => void;
+  }
+
+  interface Window {
+    _ELECTRON_PRELOAD_UTILS_?: ElectronPreloadAPI;
+    _CONFIG?: Record<string, any>;
+  }
 
   // vue
   declare type PropType<T> = VuePropType<T>;

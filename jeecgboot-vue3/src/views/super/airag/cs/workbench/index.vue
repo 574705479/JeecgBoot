@@ -22,6 +22,26 @@
           </a-tooltip>
         </div>
       </div>
+      <!-- WebSocket 连接状态提示条 -->
+      <transition name="ws-banner">
+        <div v-if="wsShowBanner" class="ws-status-banner" :class="'ws-' + wsStatus">
+          <template v-if="wsStatus === 'connecting'">
+            <LoadingOutlined spin /> 正在连接服务器...
+          </template>
+          <template v-else-if="wsStatus === 'reconnecting'">
+            <LoadingOutlined spin /> 连接断开，正在重连...
+          </template>
+          <template v-else-if="wsStatus === 'disconnected'">
+            <ExclamationCircleOutlined />
+            <template v-if="wsReconnectCountdown > 0"> {{ wsReconnectCountdown }}秒后自动重连</template>
+            <template v-else> 连接已断开</template>
+            <a @click="connectWebSocket()" style="margin-left:8px">立即重连</a>
+          </template>
+          <template v-else-if="wsStatus === 'connected'">
+            <CheckCircleOutlined /> 已重新连接
+          </template>
+        </div>
+      </transition>
       
       <!-- 设置抽屉 -->
       <a-drawer
@@ -1083,7 +1103,8 @@ import {
   SmileOutlined, ThunderboltOutlined, RobotOutlined, SettingOutlined,
   MoreOutlined, DeleteOutlined, PaperClipOutlined, EnvironmentOutlined, GlobalOutlined,
   TeamOutlined, CaretRightOutlined, CaretDownOutlined, DownOutlined, SearchOutlined,
-  CheckCircleOutlined, BgColorsOutlined, UndoOutlined
+  CheckCircleOutlined, BgColorsOutlined, UndoOutlined,
+  LoadingOutlined, ExclamationCircleOutlined
 } from '@ant-design/icons-vue';
 import { useRoute, useRouter } from 'vue-router';
 import { defHttp } from '/@/utils/http/axios';
@@ -1633,6 +1654,12 @@ let lastWsMessageAt = 0;
 let lastMessageLoadAt = 0;
 const wsHeartbeatIntervalMs = 15000;
 const wsFallbackPollIntervalMs = 20000;
+const wsStatus = ref<'connected' | 'connecting' | 'reconnecting' | 'disconnected'>('connecting');
+const wsShowBanner = ref(false);
+const wsReconnectCountdown = ref(0);
+let hasConnectedOnce = false;
+let wsConnectedBannerTimer: number | null = null;
+let wsCountdownTimer: number | null = null;
 
 const handleVisibilityChange = () => {
   if (!hasMounted.value) return;
@@ -1646,17 +1673,21 @@ const handleVisibilityChange = () => {
   nextTick(() => scrollToBottom());
 };
 
-const handleElectronNavigate = (e: Event) => {
+const handleElectronNavigate = async (e: Event) => {
   const { query } = (e as CustomEvent).detail;
   const conversationId = query?.conversationId;
   if (!conversationId) return;
   if (currentConversation.value?.id === conversationId) {
     nextTick(() => scrollToBottom());
-  } else {
-    const targetConv = conversations.value.find(c => c.id === conversationId);
-    if (targetConv) {
-      selectConversation(targetConv);
-    }
+    return;
+  }
+  let targetConv = conversations.value.find(c => c.id === conversationId);
+  if (!targetConv) {
+    await loadConversations();
+    targetConv = conversations.value.find(c => c.id === conversationId);
+  }
+  if (targetConv) {
+    selectConversation(targetConv);
   }
 };
 
@@ -1666,11 +1697,14 @@ const handleNetworkOnline = () => {
 };
 
 const handleBeforeUnload = () => {
-  // 页面刷新/关闭前优雅关闭 WebSocket，发送正常 close frame 避免 1006
   if (ws && ws.readyState === WebSocket.OPEN) {
     wsManuallyClosed = true;
     ws.close(1000, 'page_refresh');
   }
+};
+
+const handleAppLogout = () => {
+  closeWebSocket();
 };
 
 function closeWebSocket() {
@@ -1689,6 +1723,9 @@ function closeWebSocket() {
     }
   }
   ws = null;
+  wsShowBanner.value = false;
+  stopWsCountdown();
+  if (wsConnectedBannerTimer) { clearTimeout(wsConnectedBannerTimer); wsConnectedBannerTimer = null; }
 }
 
 function stopWsHeartbeat() {
@@ -1716,7 +1753,16 @@ function startFallbackPoll() {
   stopFallbackPoll();
   wsFallbackPollTimer = window.setInterval(async () => {
     if (document.hidden) return;
-    if (!agentId.value) return;
+    if (!agentId.value) {
+      try {
+        await loadAgentInfo();
+        if (agentId.value) {
+          connectWebSocket();
+          await loadConversations();
+        }
+      } catch { /* ignore */ }
+      return;
+    }
     if (loadingConversations.value) return;
     if (ws && ws.readyState === WebSocket.OPEN && lastWsMessageAt) {
       const now = Date.now();
@@ -1740,14 +1786,32 @@ function startFallbackPoll() {
   }, wsFallbackPollIntervalMs);
 }
 
+function stopWsCountdown() {
+  if (wsCountdownTimer) { clearInterval(wsCountdownTimer); wsCountdownTimer = null; }
+  wsReconnectCountdown.value = 0;
+}
+
 function scheduleWsReconnect() {
   if (wsManuallyClosed) return;
   if (wsReconnectTimer) return;
   const jitter = Math.floor(Math.random() * 1000);
   const delay = Math.min(30000, 1000 * Math.pow(2, wsReconnectAttempts)) + jitter;
   wsReconnectAttempts += 1;
+  if (hasConnectedOnce) {
+    wsStatus.value = 'disconnected';
+    wsShowBanner.value = true;
+    if (wsCountdownTimer) { clearInterval(wsCountdownTimer); wsCountdownTimer = null; }
+    wsReconnectCountdown.value = Math.ceil(delay / 1000);
+    wsCountdownTimer = window.setInterval(() => {
+      wsReconnectCountdown.value -= 1;
+      if (wsReconnectCountdown.value <= 0) {
+        if (wsCountdownTimer) { clearInterval(wsCountdownTimer); wsCountdownTimer = null; }
+      }
+    }, 1000);
+  }
   wsReconnectTimer = window.setTimeout(() => {
     wsReconnectTimer = null;
+    stopWsCountdown();
     connectWebSocket();
   }, delay);
 }
@@ -1800,15 +1864,20 @@ const filteredQuickReplies = computed(() => {
   });
 });
 
-// Electron 通知点击后通过 route query 定位会话
-watch(() => route.query.conversationId, (newId) => {
-  if (newId && typeof newId === 'string') {
-    const targetConv = conversations.value.find(c => c.id === newId);
-    if (targetConv) {
-      selectConversation(targetConv);
-    }
-    router.replace({ query: {} });
+// Electron 通知点击后通过 route query 定位会话（同页面内 query 变化时触发，跨页面跳转由 onActivated 处理）
+watch(() => route.query.conversationId, async (newId) => {
+  if (!newId || typeof newId !== 'string') return;
+  if (route.path !== '/cs/workbench') return;
+  await nextTick();
+  let targetConv = conversations.value.find(c => c.id === newId);
+  if (!targetConv) {
+    await loadConversations();
+    targetConv = conversations.value.find(c => c.id === newId);
   }
+  if (targetConv) {
+    selectConversation(targetConv);
+  }
+  router.replace({ query: {} });
 });
 
 // 初始化
@@ -1834,6 +1903,7 @@ onMounted(async () => {
   window.addEventListener('online', handleNetworkOnline);
   window.addEventListener('beforeunload', handleBeforeUnload);
   window.addEventListener('electron-navigate', handleElectronNavigate);
+  window.addEventListener('app-logout', handleAppLogout);
 });
 
 onUnmounted(() => {
@@ -1844,6 +1914,8 @@ onUnmounted(() => {
     stopWsHealthCheck();
   }
   refreshTimer && clearInterval(refreshTimer);
+  stopWsCountdown();
+  if (wsConnectedBannerTimer) { clearTimeout(wsConnectedBannerTimer); wsConnectedBannerTimer = null; }
   stopWaitingTimer();
   if (tokenRafId) { cancelAnimationFrame(tokenRafId); tokenRafId = null; }
   if (scrollRafId) { cancelAnimationFrame(scrollRafId); scrollRafId = null; }
@@ -1851,6 +1923,7 @@ onUnmounted(() => {
   window.removeEventListener('online', handleNetworkOnline);
   window.removeEventListener('beforeunload', handleBeforeUnload);
   window.removeEventListener('electron-navigate', handleElectronNavigate);
+  window.removeEventListener('app-logout', handleAppLogout);
   document.removeEventListener('visibilitychange', handleVisibilityChange);
   if (messagesEl) {
     messagesEl.removeEventListener('scroll', handleMessageScroll);
@@ -1864,8 +1937,28 @@ onUnmounted(() => {
 onActivated(async () => {
   if (keepConnectionOnDeactivate) {
     restoreMessageScroll();
-    // 刷新客服信息（头像、昵称等可能在其他页面修改）
-    loadAgentInfo();
+    if (isActivating.value) return;
+    isActivating.value = true;
+    try {
+      await loadAgentInfo();
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        connectWebSocket();
+      }
+      if (!wsFallbackPollTimer) {
+        startFallbackPoll();
+      }
+      await loadConversations();
+      const pendingConvId = route.query.conversationId;
+      if (pendingConvId && typeof pendingConvId === 'string') {
+        const targetConv = conversations.value.find(c => c.id === pendingConvId);
+        if (targetConv) {
+          selectConversation(targetConv);
+        }
+        router.replace({ query: {} });
+      }
+    } finally {
+      isActivating.value = false;
+    }
     return;
   }
   // 菜单切换返回时，确保客服在线、会话和WebSocket正常
@@ -3797,19 +3890,39 @@ function connectWebSocket() {
     clearTimeout(wsReconnectTimer);
     wsReconnectTimer = null;
   }
+  stopWsCountdown();
+  if (hasConnectedOnce) {
+    wsStatus.value = wsReconnectAttempts > 0 ? 'reconnecting' : 'connecting';
+    wsShowBanner.value = true;
+  }
   const wsBase = getWsBaseUrl();
   const token = getToken();
   const wsUrl = `${wsBase}/ws/cs/agent?userId=${agentId.value}&token=${encodeURIComponent(token || '')}`;
   
   console.log('[CS-WS] 连接WebSocket:', wsUrl);
   ws = new WebSocket(wsUrl);
+  const thisWs = ws;
   
-  ws.onopen = () => {
-    console.log('[CS-WS] 连接成功');
+  ws.onopen = async () => {
+    const isReconnect = wsReconnectAttempts > 0;
     wsReconnectAttempts = 0;
     lastWsMessageAt = Date.now();
     startWsHeartbeat();
     startWsHealthCheck();
+    if (isReconnect) {
+      console.log('[CS-WS] 重连成功，恢复业务数据');
+      await loadAgentInfo();
+      await loadConversations();
+    }
+    if (ws === thisWs && hasConnectedOnce) {
+      wsStatus.value = 'connected';
+      if (wsConnectedBannerTimer) clearTimeout(wsConnectedBannerTimer);
+      wsConnectedBannerTimer = window.setTimeout(() => {
+        wsShowBanner.value = false;
+        wsConnectedBannerTimer = null;
+      }, 1500);
+    }
+    hasConnectedOnce = true;
   };
   ws.onmessage = (event) => {
     try {
@@ -3819,7 +3932,7 @@ function connectWebSocket() {
     }
   };
   ws.onerror = () => {
-    if (!wsManuallyClosed) {
+    if (!wsManuallyClosed && ws === thisWs) {
       try {
         ws?.close();
       } catch {
@@ -3827,10 +3940,17 @@ function connectWebSocket() {
       }
     }
   };
-  ws.onclose = () => {
-    ws = null;
-    if (!wsManuallyClosed) {
-      scheduleWsReconnect();
+  ws.onclose = (event) => {
+    if (ws === thisWs) {
+      ws = null;
+      if (event.code === 4002) {
+        stopWsHeartbeat();
+        stopWsHealthCheck();
+        stopFallbackPoll();
+        if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+      } else if (!wsManuallyClosed) {
+        scheduleWsReconnect();
+      }
     }
   };
 }
@@ -4479,7 +4599,7 @@ function notifyNewMessage(conv: any, data: any) {
     api.sendNotifyFlash();
     api.trayFlash();
     const convId = data.conversationId || conv?.id || '';
-    api.sendNotification(title, body, route.path + '?conversationId=' + convId);
+    api.sendNotification(title, body, '/cs/workbench?conversationId=' + convId);
     return;
   }
 
@@ -5039,6 +5159,25 @@ function restoreMessageScroll() {
     }
   }
 }
+
+.ws-status-banner {
+  padding: 4px 12px;
+  font-size: 12px;
+  text-align: center;
+  overflow: hidden;
+}
+.ws-banner-enter-active, .ws-banner-leave-active {
+  transition: all 0.3s ease;
+}
+.ws-banner-enter-from, .ws-banner-leave-to {
+  opacity: 0;
+  max-height: 0;
+  padding: 0 12px;
+}
+.ws-connecting { background: #fffbe6; color: #ad8b00; }
+.ws-reconnecting { background: #fff7e6; color: #d46b08; }
+.ws-disconnected { background: #fff2f0; color: #cf1322; }
+.ws-connected { background: #f6ffed; color: #389e0d; }
 
 // ==================== 搜索框 ====================
 .search-bar {

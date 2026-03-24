@@ -17,4 +17,11 @@ contextBridge.exposeInMainWorld(ElectronEnum.ELECTRON_API, {
   trayFlash: () => ipcRenderer.send('tray-flash'),
   // 托盘停止闪动
   trayFlashStop: () => ipcRenderer.send('tray-flash-stop'),
+  // 窗口控制
+  windowMinimize: () => ipcRenderer.send('window-minimize'),
+  windowMaximize: () => ipcRenderer.send('window-maximize'),
+  windowClose: () => ipcRenderer.send('window-close'),
+  onMaximizedChange: (cb: (isMaximized: boolean) => void) => {
+    ipcRenderer.on('window-maximized-change', (_, val) => cb(val));
+  },
 });

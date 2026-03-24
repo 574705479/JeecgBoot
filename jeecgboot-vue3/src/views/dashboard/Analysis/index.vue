@@ -288,7 +288,7 @@ const agentStatusList = ref<any[]>([]);
 const agentLoading = ref(false);
 
 const agentColumns = [
-  { title: '客服账号', dataIndex: 'userId', key: 'userId', width: 120 },
+  { title: '客服账号', dataIndex: 'username', key: 'username', width: 120 },
   { title: '客服昵称', dataIndex: 'nickname', key: 'nickname', width: 120 },
   { title: '正在对话', dataIndex: 'currentSessions', key: 'currentSessions', width: 90, align: 'center' },
   { title: '好评量', dataIndex: 'goodCount', key: 'goodCount', width: 80, align: 'center' },

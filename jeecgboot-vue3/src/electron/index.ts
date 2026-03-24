@@ -37,6 +37,7 @@ export function setupElectron(_: App) {
   if (!$electron.isElectron()) {
     return;
   }
+  document.documentElement.classList.add('electron-app');
   hookWindowOpen();
   // 代码逻辑说明: 【JHHB-13】桌面应用消息通知
   hookNavigate();

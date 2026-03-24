@@ -9,6 +9,8 @@ export default {
     dropdownItemRefreshCache: 'Clean cache',
     dropdownItemSwitchAccount: 'Account Setting',
     dropdownItemSwitchDefaultHomePage: 'Switch Home Page',
+    dropdownItemThemeStyle: 'Theme Style',
+
     dropdownItemSwitchDefaultWeb: 'Web Download',
     dropdownItemSwitchDefaultAndroid: 'Android Apk Download',
 
@@ -23,6 +25,10 @@ export default {
     lockScreenPassword: 'Password',
     lockScreen: 'Lock screen',
     lockScreenBtn: 'Locking',
+
+    windowMinimize: 'Minimize',
+    windowMaximize: 'Maximize',
+    windowClose: 'Close',
 
     home: 'Home',
     welcomeIn: 'Welcome in',

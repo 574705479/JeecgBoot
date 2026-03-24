@@ -10,6 +10,7 @@ export function getBrowserWindowOptions(options?: BrowserWindowConstructorOption
   return {
     width: 1200,
     height: 800,
+    frame: false,
     webPreferences: {
       preload: path.join(_PATHS.preloadRoot, 'index.js'),
       nodeIntegration: false,
@@ -39,6 +40,14 @@ export function createBrowserWindow(options?: BrowserWindowConstructorOptions) {
       // 覆写新窗口的选项，用于调整默认尺寸和加载preload脚本等
       overrideBrowserWindowOptions: getBrowserWindowOptions(),
     }
+  });
+
+  // 窗口最大化状态变化时通知渲染进程
+  win.on('maximize', () => {
+    win.webContents.send('window-maximized-change', true);
+  });
+  win.on('unmaximize', () => {
+    win.webContents.send('window-maximized-change', false);
   });
 
   // 当 beforeunload 阻止窗口关闭时触发

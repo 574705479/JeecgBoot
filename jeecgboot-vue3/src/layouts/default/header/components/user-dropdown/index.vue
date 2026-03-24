@@ -13,16 +13,9 @@
       <Menu @click="handleMenuClick">
         <MenuItem itemKey="doc" :text="t('layout.header.dropdownItemDoc')" icon="ion:document-text-outline" v-if="getShowDoc" />
         <MenuDivider v-if="getShowDoc" />
-        <MenuItem itemKey="account" :text="t('layout.header.dropdownItemSwitchAccount')" icon="ant-design:setting-outlined" />
         <MenuItem itemKey="password" :text="t('layout.header.dropdownItemSwitchPassword')" icon="ant-design:edit-outlined" />
-        <MenuItem itemKey="depart" :text="t('layout.header.dropdownItemSwitchDepart')" icon="ant-design:cluster-outlined" />
         <MenuItem itemKey="cache" :text="t('layout.header.dropdownItemRefreshCache')" icon="ion:sync-outline" />
-        <!-- <MenuItem
-            v-if="getUseLockPage"
-            itemKey="lock"
-            :text="t('layout.header.tooltipLock')"
-            icon="ion:lock-closed-outline"
-        />-->
+        <MenuItem itemKey="setting" :text="t('layout.header.dropdownItemThemeStyle')" icon="ion:color-palette-outline" />
         <MenuItem itemKey="logout" :text="t('layout.header.dropdownItemLoginOut')" icon="ion:power-outline" />
       </Menu>
     </template>
@@ -30,12 +23,13 @@
   <LockAction v-if="lockActionVisible" ref="lockActionRef" @register="register" />
   <DepartSelect ref="loginSelectRef" />
   <UpdatePassword v-if="passwordVisible" ref="updatePasswordRef" />
+  <SettingDrawer @register="registerDrawer" />
 </template>
 <script lang="ts">
   // components
   import { Dropdown, Menu } from 'ant-design-vue';
 
-  import { defineComponent, computed, ref, nextTick } from 'vue';
+  import { defineComponent, computed, ref } from 'vue';
 
   import { SITE_URL } from '/@/settings/siteSetting';
 
@@ -44,8 +38,8 @@
   import { useI18n } from '/@/hooks/web/useI18n';
   import { useDesign } from '/@/hooks/web/useDesign';
   import { useModal } from '/@/components/Modal';
+  import { useDrawer } from '/@/components/Drawer';
   import { useMessage } from '/src/hooks/web/useMessage';
-  import { useGo } from '/@/hooks/web/usePage';
   import headerImg from '/@/assets/images/header.jpg';
   import { propTypes } from '/@/utils/propTypes';
   import { openWindow } from '/@/utils';
@@ -59,7 +53,7 @@
   import { getRefPromise } from '/@/utils/index';
   import { refreshDragCache } from "@/api/common/api";
 
-  type MenuEvent = 'logout' | 'doc' | 'lock' | 'cache' | 'depart' | 'defaultHomePage' | 'password' | 'account';
+  type MenuEvent = 'logout' | 'doc' | 'lock' | 'cache' | 'depart' | 'defaultHomePage' | 'password' | 'account' | 'setting';
   const { createMessage } = useMessage();
   export default defineComponent({
     name: 'UserDropdown',
@@ -71,6 +65,7 @@
       LockAction: createAsyncComponent(() => import('../lock/LockModal.vue')),
       DepartSelect: createAsyncComponent(() => import('./DepartSelect.vue')),
       UpdatePassword: createAsyncComponent(() => import('./UpdatePassword.vue')),
+      SettingDrawer: createAsyncComponent(() => import('/@/layouts/default/setting/SettingDrawer')),
     },
     props: {
       theme: propTypes.oneOf(['dark', 'light']),
@@ -80,7 +75,6 @@
       const { t } = useI18n();
       const { getShowDoc, getUseLockPage } = useHeaderSetting();
       const userStore = useUserStore();
-      const go = useGo();
       const passwordVisible = ref(false);
       const lockActionVisible = ref(false);
       const lockActionRef = ref(null);
@@ -91,6 +85,10 @@
       });
 
       const getAvatarUrl = computed(() => {
+        const csAgent = userStore.getCsAgentInfo;
+        if (csAgent?.avatar) {
+          return getFileAccessHttpUrl(csAgent.avatar);
+        }
         let { avatar } = getUserInfo.value;
         if (avatar == headerImg) {
           return avatar;
@@ -100,6 +98,7 @@
       });
 
       const [register, { openModal }] = useModal();
+      const [registerDrawer, { openDrawer }] = useDrawer();
       /**
        * 多部门弹窗逻辑
        */
@@ -167,9 +166,8 @@
           case 'password':
             updatePassword();
             break;
-          case 'account':
-            // 代码逻辑说明: 进入用户设置页面------------
-            go(`/system/usersetting`);
+          case 'setting':
+            openDrawer(true);
             break;
         }
       }
@@ -182,6 +180,7 @@
         handleMenuClick,
         getShowDoc,
         register,
+        registerDrawer,
         getUseLockPage,
         loginSelectRef,
         updatePasswordRef,
