@@ -1,5 +1,7 @@
 <template>
-  <div class="cs-login-page" :style="loginBgStyle">
+  <div class="cs-login-page" :style="{ ...loginBgStyle, ...(isElectron ? { '-webkit-app-region': 'drag' } : {}) }">
+    <!-- Electron 窗口控制按钮 -->
+    <WindowControls v-if="isElectron" class="cs-login-window-controls" />
     <!-- 登录卡片 -->
     <div v-show="type === 'login'" class="cs-login-card">
       <!-- Logo + 品牌 -->
@@ -115,10 +117,14 @@
   import { ExceptionEnum } from "@/enums/exceptionEnum";
   import { encryptAESCBC } from '/@/utils/cipher';
   import { defHttp } from "@/utils/http/axios";
+  import WindowControls from '/@/layouts/default/header/components/window-controls/index.vue';
+  import { useGlobSetting } from '/@/hooks/setting';
 
   const IconFont = createFromIconfontCN({
     scriptUrl: 'https://at.alicdn.com/t/font_2316098_umqusozousr.js',
   });
+  const globSetting = useGlobSetting();
+  const isElectron = globSetting.isElectronPlatform;
   const { prefixCls } = useDesign('mini-login');
   const { appTitle, appSubtitle, logoUrl, loginBgUrl } = getBrandSetting();
   const hideExtraLogin = true;
@@ -513,6 +519,16 @@
 </script>
 
 <style lang="less" scoped>
+/* ============ Electron 窗口控制 ============ */
+.cs-login-window-controls {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 9999;
+  height: 36px;
+  -webkit-app-region: no-drag;
+}
+
 /* ============ 聊天软件风格登录页 ============ */
 
 .cs-login-page {
@@ -552,6 +568,7 @@
   padding: 40px 36px 30px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(255,255,255,0.1);
   animation: cs-card-in 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  -webkit-app-region: no-drag;
 }
 
 @keyframes cs-card-in {
