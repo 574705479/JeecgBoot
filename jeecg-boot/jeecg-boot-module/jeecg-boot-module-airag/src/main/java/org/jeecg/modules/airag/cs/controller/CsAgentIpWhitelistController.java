@@ -19,9 +19,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.web.bind.annotation.*;
 
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * 客服IP白名单Controller
@@ -127,6 +130,17 @@ public class CsAgentIpWhitelistController {
         return Result.OK(result);
     }
 
+    @Operation(summary = "获取当前客服IP及白名单匹配状态")
+    @GetMapping("/current-ip")
+    public Result<Map<String, Object>> getCurrentIp(HttpServletRequest request) {
+        String clientIp = getClientIp(request);
+        boolean inWhitelist = checkIpInWhitelist(clientIp);
+        Map<String, Object> result = new HashMap<>();
+        result.put("ip", clientIp);
+        result.put("inWhitelist", inWhitelist);
+        return Result.OK(result);
+    }
+
     @Operation(summary = "设置白名单开关")
     @PutMapping("/enabled")
     public Result<String> setEnabled(@RequestBody Map<String, Object> params) {
@@ -155,5 +169,32 @@ public class CsAgentIpWhitelistController {
 
         log.info("[CS-Security] 客服IP白名单开关: enabled={}", enabled);
         return Result.OK("设置成功");
+    }
+
+    private boolean checkIpInWhitelist(String clientIp) {
+        if (oConvertUtils.isEmpty(clientIp)) {
+            return false;
+        }
+        List<CsAgentIpWhitelist> records = whitelistMapper.selectList(null);
+        if (records == null || records.isEmpty()) {
+            return false;
+        }
+        List<String> ipPatterns = records.stream()
+                .map(CsAgentIpWhitelist::getIp)
+                .collect(Collectors.toList());
+        return CsIpMatchUtil.isInAnyRange(clientIp, ipPatterns);
+    }
+
+    private String getClientIp(HttpServletRequest request) {
+        String ip = request.getHeader("X-Forwarded-For");
+        if (oConvertUtils.isNotEmpty(ip)) {
+            int idx = ip.indexOf(',');
+            return idx > -1 ? ip.substring(0, idx).trim() : ip.trim();
+        }
+        ip = request.getHeader("X-Real-IP");
+        if (oConvertUtils.isNotEmpty(ip)) {
+            return ip.trim();
+        }
+        return request.getRemoteAddr();
     }
 }

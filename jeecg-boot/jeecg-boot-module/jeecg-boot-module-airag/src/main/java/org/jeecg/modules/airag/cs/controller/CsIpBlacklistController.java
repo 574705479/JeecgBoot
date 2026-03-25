@@ -96,6 +96,18 @@ public class CsIpBlacklistController {
         // 通知所有在线客服
         notifyBlacklistChanged("ip", "block", ipValue.trim(), null);
 
+        // 实时踢出匹配IP的在线访客
+        try {
+            CsWebSocketMessage kickMsg = CsWebSocketMessage.builder()
+                    .type(CsWebSocketMessage.TYPE_VISITOR_BLOCKED)
+                    .content("您已被禁止访问")
+                    .timestamp(new Date())
+                    .build();
+            sessionManager.sendToUsersByIpAndClose(ipValue.trim(), kickMsg);
+        } catch (Exception e) {
+            log.warn("[CS-Security] IP拉黑实时踢出失败: ip={}", ipValue, e);
+        }
+
         return Result.OK("添加成功");
     }
 

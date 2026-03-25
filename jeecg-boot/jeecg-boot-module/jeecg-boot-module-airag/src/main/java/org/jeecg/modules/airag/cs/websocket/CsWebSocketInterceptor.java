@@ -37,6 +37,7 @@ public class CsWebSocketInterceptor implements HandshakeInterceptor {
     public static final String ATTR_APP_ID = "appId";
     public static final String ATTR_CONVERSATION_ID = "conversationId";
     public static final String ATTR_TOKEN_EXPIRE_AT = "tokenExpireAt";
+    public static final String ATTR_CLIENT_IP = "clientIp";
 
     /** 用户类型：普通用户 */
     public static final String USER_TYPE_USER = "user";
@@ -194,6 +195,7 @@ public class CsWebSocketInterceptor implements HandshakeInterceptor {
             attributes.put(ATTR_USER_TYPE, userType);
             attributes.put(ATTR_APP_ID, appId);
             attributes.put(ATTR_CONVERSATION_ID, conversationId);
+            attributes.put(ATTR_CLIENT_IP, clientIp);
 
             log.info("[CS-WebSocket] 握手成功: userId={}, userType={}, appId={}", userId, userType, appId);
             return true;

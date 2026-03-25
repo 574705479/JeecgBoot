@@ -675,13 +675,17 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
                     .build();
             sessionManager.sendToAllAgents(msg);
 
-            if ("block".equals(action) && "user".equals(blacklistType) && oConvertUtils.isNotEmpty(target)) {
+            if ("block".equals(action) && oConvertUtils.isNotEmpty(target)) {
                 CsWebSocketMessage kickMsg = CsWebSocketMessage.builder()
                         .type(CsWebSocketMessage.TYPE_VISITOR_BLOCKED)
                         .content("您已被禁止访问")
                         .timestamp(new Date())
                         .build();
-                sessionManager.sendToUser(target, kickMsg);
+                if ("user".equals(blacklistType)) {
+                    sessionManager.sendToUser(target, kickMsg);
+                } else if ("ip".equals(blacklistType)) {
+                    sessionManager.sendToUsersByIpAndClose(target, kickMsg);
+                }
             }
         } catch (Exception e) {
             log.warn("[CS-Visitor] 发送黑名单变更通知失败", e);

@@ -7,6 +7,12 @@
         <a-switch v-model:checked="whitelistEnabled" @change="handleSwitchChange" :loading="switchLoading" />
         <span class="text-gray-400 text-sm">{{ whitelistEnabled ? '已启用：仅白名单IP的客服可登录系统' : '已关闭：所有客服可从任意IP登录' }}</span>
       </div>
+      <div class="current-ip-info" v-if="currentIp">
+        <span>当前您的IP：</span>
+        <span class="ip-value">{{ currentIp }}</span>
+        <a-tag v-if="currentIpInWhitelist" color="green" class="ip-tag">已在白名单中</a-tag>
+        <a-tag v-else color="orange" class="ip-tag">不在白名单中</a-tag>
+      </div>
     </a-card>
 
     <BasicTable @register="registerTable">
@@ -16,7 +22,7 @@
       <template #action="{ record }">
         <TableAction :actions="[
           { label: '编辑', onClick: () => handleEdit(record) },
-          { label: '删除', color: 'error', icon: 'ant-design:delete-outlined', popConfirm: { title: '确定删除该白名单记录吗?', confirm: () => handleDelete(record) } },
+          { label: '删除', color: 'error', icon: 'ant-design:delete-outlined', popConfirm: { title: getDeleteConfirmTitle(record), confirm: () => handleDelete(record) } },
         ]" />
       </template>
     </BasicTable>
@@ -41,6 +47,7 @@ import { BasicTable, useTable, TableAction } from '/@/components/Table';
 import { BasicModal, useModal } from '/@/components/Modal';
 import { defHttp } from '/@/utils/http/axios';
 import { useMessage } from '/@/hooks/web/useMessage';
+import { Modal } from 'ant-design-vue';
 
 const { createMessage } = useMessage();
 
@@ -49,6 +56,8 @@ const [registerModal, { openModal, closeModal }] = useModal();
 const whitelistEnabled = ref(false);
 const switchLoading = ref(false);
 const isEdit = ref(false);
+const currentIp = ref('');
+const currentIpInWhitelist = ref(false);
 
 const formState = reactive({
   id: '',
@@ -87,8 +96,18 @@ const [registerTable, { reload }] = useTable({
 });
 
 onMounted(async () => {
-  await loadSwitchState();
+  await Promise.all([loadSwitchState(), refreshCurrentIpStatus()]);
 });
+
+async function refreshCurrentIpStatus() {
+  try {
+    const res = await defHttp.get({ url: '/cs/security/agent-ip-whitelist/current-ip' });
+    currentIp.value = res?.ip || '';
+    currentIpInWhitelist.value = res?.inWhitelist === true;
+  } catch (e) {
+    console.error('获取当前IP状态失败', e);
+  }
+}
 
 async function loadSwitchState() {
   try {
@@ -100,10 +119,30 @@ async function loadSwitchState() {
 }
 
 async function handleSwitchChange(checked: boolean) {
+  if (checked && !currentIpInWhitelist.value && currentIp.value) {
+    Modal.confirm({
+      title: '安全提示',
+      content: `您当前的IP（${currentIp.value}）不在白名单中，开启后您可能无法继续访问系统。是否确认开启？`,
+      okText: '确认开启',
+      cancelText: '取消',
+      onOk: async () => {
+        await doSwitchChange(true);
+      },
+      onCancel: () => {
+        whitelistEnabled.value = false;
+      },
+    });
+    return;
+  }
+  await doSwitchChange(checked);
+}
+
+async function doSwitchChange(checked: boolean) {
   switchLoading.value = true;
   try {
     await defHttp.put({ url: '/cs/security/agent-ip-whitelist/enabled', params: { enabled: checked } });
     createMessage.success(checked ? '白名单已开启' : '白名单已关闭');
+    await refreshCurrentIpStatus();
   } catch (e) {
     whitelistEnabled.value = !checked;
     createMessage.error('操作失败');
@@ -142,12 +181,32 @@ async function handleSubmit() {
   }
   closeModal();
   reload();
+  const prevInWhitelist = currentIpInWhitelist.value;
+  await refreshCurrentIpStatus();
+  if (whitelistEnabled.value && !currentIpInWhitelist.value && currentIp.value) {
+    createMessage.warning(`您当前的IP（${currentIp.value}）不在白名单中，可能会导致无法访问系统，建议添加当前IP到白名单`);
+  }
+  if (prevInWhitelist && !currentIpInWhitelist.value && whitelistEnabled.value) {
+    createMessage.warning(`注意：编辑后您当前的IP已不在白名单覆盖范围内`);
+  }
+}
+
+function getDeleteConfirmTitle(record: any) {
+  if (whitelistEnabled.value && currentIp.value && record.ip === currentIp.value) {
+    return `该条目覆盖了您当前的IP（${currentIp.value}），删除后可能导致无法继续访问系统。是否确认删除？`;
+  }
+  return '确定删除该白名单记录吗?';
 }
 
 async function handleDelete(record: any) {
   await defHttp.delete({ url: `/cs/security/agent-ip-whitelist/delete/${record.id}` });
   createMessage.success('删除成功');
   reload();
+  const prevInWhitelist = currentIpInWhitelist.value;
+  await refreshCurrentIpStatus();
+  if (prevInWhitelist && !currentIpInWhitelist.value && whitelistEnabled.value) {
+    createMessage.warning(`注意：删除后您当前的IP（${currentIp.value}）已不在白名单中，可能会导致无法访问系统`);
+  }
 }
 </script>
 
@@ -178,5 +237,18 @@ async function handleDelete(record: any) {
 }
 .text-sm {
   font-size: 13px;
+}
+.current-ip-info {
+  margin-top: 12px;
+  font-size: 14px;
+  color: #666;
+}
+.ip-value {
+  font-weight: 600;
+  color: #333;
+  margin-right: 8px;
+}
+.ip-tag {
+  margin-left: 4px;
 }
 </style>

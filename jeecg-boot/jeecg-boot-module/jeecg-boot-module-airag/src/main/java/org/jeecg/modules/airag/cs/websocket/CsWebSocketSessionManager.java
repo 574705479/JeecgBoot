@@ -8,7 +8,11 @@ import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.CloseStatus;
 
+import org.jeecg.modules.airag.cs.util.CsIpMatchUtil;
+
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -341,6 +345,61 @@ public class CsWebSocketSessionManager {
      */
     public String getConversationId(WebSocketSession session) {
         return (String) session.getAttributes().get(CsWebSocketInterceptor.ATTR_CONVERSATION_ID);
+    }
+
+    /**
+     * 获取客户端IP
+     */
+    public String getClientIp(WebSocketSession session) {
+        return (String) session.getAttributes().get(CsWebSocketInterceptor.ATTR_CLIENT_IP);
+    }
+
+    /**
+     * 向匹配IP的所有在线访客发送消息并关闭连接
+     * 支持精确IP和CIDR段匹配
+     *
+     * @param ipPattern IP或CIDR段（如 192.168.1.1 或 192.168.1.0/24）
+     * @param message   要发送的消息
+     * @return 匹配并处理的会话数
+     */
+    public int sendToUsersByIpAndClose(String ipPattern, Object message) {
+        if (oConvertUtils.isEmpty(ipPattern)) {
+            return 0;
+        }
+        // 阶段1：收集所有匹配IP的session到临时列表，避免遍历中修改Map
+        List<WebSocketSession> matchedSessions = new ArrayList<>();
+        for (Set<WebSocketSession> sessions : userSessions.values()) {
+            for (WebSocketSession session : sessions) {
+                if (session == null || !session.isOpen()) {
+                    continue;
+                }
+                String sessionIp = getClientIp(session);
+                if (sessionIp == null) {
+                    continue;
+                }
+                if (CsIpMatchUtil.matches(sessionIp, ipPattern)) {
+                    matchedSessions.add(session);
+                }
+            }
+        }
+        if (matchedSessions.isEmpty()) {
+            log.info("[CS-WebSocket] IP拉黑实时踢出: ipPattern={}, 无匹配的在线会话", ipPattern);
+            return 0;
+        }
+        // 阶段2：统一发送消息并关闭连接
+        String json = toJson(message);
+        for (WebSocketSession session : matchedSessions) {
+            try {
+                if (session.isOpen()) {
+                    sendRawMessage(session, json);
+                    session.close(new CloseStatus(4003, "ip_blocked"));
+                }
+            } catch (Exception e) {
+                log.warn("[CS-WebSocket] IP踢出关闭会话失败: sessionId={}, error={}", session.getId(), e.getMessage());
+            }
+        }
+        log.info("[CS-WebSocket] IP拉黑实时踢出: ipPattern={}, 匹配会话数={}", ipPattern, matchedSessions.size());
+        return matchedSessions.size();
     }
 
     /**
