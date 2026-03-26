@@ -5,6 +5,7 @@ import org.jeecg.common.license.core.HmacSigner;
 import org.jeecg.common.license.core.LicenseClientService;
 import org.jeecg.common.license.core.LicenseInfo;
 import org.jeecg.common.license.core.LicenseKeyValidator;
+import org.jeecg.config.shiro.IgnoreAuth;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -29,6 +30,7 @@ public class LicenseEndpointController {
         this.hmacSigner = hmacSigner;
     }
 
+    @IgnoreAuth
     @PostMapping("/activate")
     public Result<?> activate(@RequestBody Map<String, String> body) {
         String key = body.get("licenseKey");
@@ -46,6 +48,7 @@ public class LicenseEndpointController {
         }
     }
 
+    @IgnoreAuth
     @GetMapping("/status")
     public Result<?> status() {
         boolean licensed = licenseClientService.isLicensed();

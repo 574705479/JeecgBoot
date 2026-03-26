@@ -1196,32 +1196,20 @@ public class CsMessageServiceImpl implements ICsMessageService {
 
     @Override
     public List<CsMessage> getMessages(String conversationId, int limit) {
-        try {
-            // 从MongoDB获取消息
-            List<ChatMessage> chatMessages = chatMessageService.getRecentMessages(conversationId, limit);
-            if (chatMessages == null) {
-                return new ArrayList<>();
-            }
-
-            return toCsMessages(chatMessages, conversationId);
-        } catch (Exception e) {
-            log.error("[CS-Message] 获取消息失败: conversationId={}", conversationId, e);
+        List<ChatMessage> chatMessages = chatMessageService.getRecentMessages(conversationId, limit);
+        if (chatMessages == null) {
             return new ArrayList<>();
         }
+        return toCsMessages(chatMessages, conversationId);
     }
 
     @Override
     public List<CsMessage> getMessages(String conversationId, String beforeId, int limit) {
-        try {
-            List<ChatMessage> chatMessages = chatMessageService.getMessagesBefore(conversationId, beforeId, limit);
-            if (chatMessages == null) {
-                return new ArrayList<>();
-            }
-            return toCsMessages(chatMessages, conversationId);
-        } catch (Exception e) {
-            log.error("[CS-Message] 分页获取消息失败: conversationId={}, beforeId={}", conversationId, beforeId, e);
+        List<ChatMessage> chatMessages = chatMessageService.getMessagesBefore(conversationId, beforeId, limit);
+        if (chatMessages == null) {
             return new ArrayList<>();
         }
+        return toCsMessages(chatMessages, conversationId);
     }
 
     @Override

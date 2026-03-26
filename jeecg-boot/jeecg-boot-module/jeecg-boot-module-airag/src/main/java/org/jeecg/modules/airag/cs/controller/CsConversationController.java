@@ -728,7 +728,7 @@ public class CsConversationController extends JeecgController<CsConversation, IC
         if (assignedAgent == null) {
             // 仅保存 customFields，不改变会话状态
             conversationService.updateById(conversation);
-            return Result.error("暂无客服在线，请留言");
+            return Result.error("暂无客服在线");
         }
 
         // 分配成功

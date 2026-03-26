@@ -20,12 +20,14 @@ import { JDragConfigEnum } from '/@/enums/jeecgEnum';
 import { useSso } from '/@/hooks/web/useSso';
 import { isOAuth2AppEnv } from "/@/views/sys/login/useLogin";
 import { getUrlParam } from "@/utils";
+import { defHttp } from '/@/utils/http/axios';
 interface dictType {
   [key: string]: any;
 }
 export interface CsAgentInfo {
   isAgent: boolean;
   isSubAgent: boolean;
+  agentId?: string;
   avatar: string;
   nickname: string;
 }
@@ -294,7 +296,17 @@ export const useUserStore = defineStore({
      * 退出登录
      */
     async logout(goLogin = false) {
-      // 登出前通知客服工作台关闭 WebSocket（此时 token 仍有效）
+      // 登出前将客服设为离线（此时 token 仍有效）
+      const agentInfo = this.getCsAgentInfo;
+      if (agentInfo?.agentId && (agentInfo.isAgent || agentInfo.isSubAgent)) {
+        try {
+          await defHttp.post({ url: `/cs/agent/offline/${agentInfo.agentId}`, params: { trigger: 'logout' } }, { errorMessageMode: 'none' });
+        } catch {
+          // 忽略失败，WebSocket 断开后后端会兜底处理
+        }
+      }
+
+      // 通知客服工作台关闭 WebSocket
       window.dispatchEvent(new CustomEvent('app-logout'));
 
       if (this.getToken) {

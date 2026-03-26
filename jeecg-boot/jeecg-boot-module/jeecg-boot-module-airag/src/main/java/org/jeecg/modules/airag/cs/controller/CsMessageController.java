@@ -598,8 +598,13 @@ public class CsMessageController {
         if (!validateVisitorAccess(conversationId, request)) {
             return Result.error("访客凭证无效或已过期");
         }
-        List<CsMessage> messages = messageService.getMessages(conversationId, limit);
-        return Result.OK(messages);
+        try {
+            List<CsMessage> messages = messageService.getMessages(conversationId, limit);
+            return Result.OK(messages);
+        } catch (Exception e) {
+            log.error("[CS-Message] 获取消息失败: conversationId={}", conversationId, e);
+            return Result.error("消息加载失败，请稍后重试");
+        }
     }
 
     /**
@@ -615,8 +620,13 @@ public class CsMessageController {
         if (!validateVisitorAccess(conversationId, request)) {
             return Result.error("访客凭证无效或已过期");
         }
-        List<CsMessage> messages = messageService.getMessages(conversationId, limit);
-        return Result.OK(messages);
+        try {
+            List<CsMessage> messages = messageService.getMessages(conversationId, limit);
+            return Result.OK(messages);
+        } catch (Exception e) {
+            log.error("[CS-Message] 获取消息列表失败: conversationId={}", conversationId, e);
+            return Result.error("消息加载失败，请稍后重试");
+        }
     }
 
     /**
@@ -633,8 +643,13 @@ public class CsMessageController {
         if (!validateVisitorAccess(conversationId, request)) {
             return Result.error("访客凭证无效或已过期");
         }
-        List<CsMessage> messages = messageService.getMessages(conversationId, beforeId, limit);
-        return Result.OK(messages);
+        try {
+            List<CsMessage> messages = messageService.getMessages(conversationId, beforeId, limit);
+            return Result.OK(messages);
+        } catch (Exception e) {
+            log.error("[CS-Message] 分页获取消息失败: conversationId={}, beforeId={}", conversationId, beforeId, e);
+            return Result.error("消息加载失败，请稍后重试");
+        }
     }
 
     // ==================== 消息撤回 ====================

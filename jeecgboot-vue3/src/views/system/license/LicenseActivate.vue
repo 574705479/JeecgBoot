@@ -47,6 +47,12 @@
       <div v-if="activated" class="success-msg">
         <a-alert message="激活成功！系统将自动跳转..." type="success" show-icon />
       </div>
+
+      <div v-if="electronApi" class="clear-cache-section">
+        <a-button type="link" danger size="small" @click="handleClearCache">
+          清除授权缓存并重新激活
+        </a-button>
+      </div>
     </div>
   </div>
 </template>
@@ -55,8 +61,14 @@
 import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { defHttp } from '/@/utils/http/axios';
+import { useGlobSetting } from '/@/hooks/setting';
+import { ElectronEnum } from '/@/enums/jeecgEnum';
+import { resetElectronDomainCache } from '/@/utils/env';
 
 const router = useRouter();
+const glob = useGlobSetting();
+const electronApi = (window as any)[ElectronEnum.ELECTRON_API];
+
 const licenseKey = ref('');
 const loading = ref(false);
 const errorMsg = ref('');
@@ -72,6 +84,44 @@ const statusLabel: Record<string, string> = {
 const existingLicense = ref<{ licenseKey?: string; status?: string; expireDate?: string }>({});
 
 onMounted(async () => {
+  // 激活成功 reload 回来时，直接跳走，不再重复处理
+  if (sessionStorage.getItem('__license_activated__')) {
+    sessionStorage.removeItem('__license_activated__');
+    window.location.hash = '/login';
+    window.location.reload();
+    return;
+  }
+
+  // Electron 且无 apiUrl：尚未激活/无域名，直接显示激活表单
+  if (glob.isElectronPlatform && !glob.apiUrl) {
+    const storedKey = electronApi?.getStoredLicenseKey?.();
+    if (storedKey) {
+      licenseKey.value = storedKey;
+    }
+    return;
+  }
+
+  // Electron + 有域名 + 有存储的 key：可能是 901 重定向过来的，尝试自动激活后端
+  if (glob.isElectronPlatform && glob.apiUrl) {
+    const storedKey = electronApi?.getStoredLicenseKey?.();
+    if (storedKey) {
+      licenseKey.value = storedKey;
+      try {
+        await defHttp.post(
+          { url: '/license/activate', params: { licenseKey: storedKey } },
+          { errorMessageMode: 'none' }
+        );
+        activated.value = true;
+        sessionStorage.setItem('__license_activated__', '1');
+        setTimeout(() => window.location.reload(), 800);
+        return;
+      } catch {
+        // 后端激活失败，显示表单让用户手动操作
+      }
+    }
+  }
+
+  // 非 Electron / 已有域名的通用逻辑：查询后端授权状态
   try {
     const res = await defHttp.get({ url: '/license/status' }, { errorMessageMode: 'none' });
     if (res && !res.licensed && res.status) {
@@ -90,6 +140,20 @@ function validateKeyFormat(key: string): boolean {
   return /^LIC-[A-Z0-9]{4}-[A-Z0-9]{16}-[A-Z0-9]{2}$/.test(key);
 }
 
+async function handleClearCache() {
+  try {
+    await electronApi?.clearLicense?.();
+    resetElectronDomainCache();
+    licenseKey.value = '';
+    existingLicense.value = {};
+    errorMsg.value = '';
+    activated.value = false;
+    window.location.reload();
+  } catch {
+    errorMsg.value = '清除缓存失败';
+  }
+}
+
 async function handleActivate() {
   errorMsg.value = '';
   keyError.value = '';
@@ -106,12 +170,25 @@ async function handleActivate() {
 
   loading.value = true;
   try {
-    await defHttp.post({ url: '/license/activate', params: { licenseKey: key } }, { errorMessageMode: 'none' });
-    activated.value = true;
-    existingLicense.value = {};
-    setTimeout(() => {
-      window.location.href = '/';
-    }, 1500);
+    if (electronApi?.activateLicense) {
+      // Electron 模式：通过 IPC 激活（获取域名 + 测速 + 存储）
+      const result = await electronApi.activateLicense(key);
+      if (result.error) {
+        errorMsg.value = result.error;
+        return;
+      }
+      activated.value = true;
+      resetElectronDomainCache();
+      sessionStorage.setItem('__license_activated__', '1');
+      setTimeout(() => window.location.reload(), 800);
+    } else {
+      // 非 Electron / Web 模式：直接调后端激活
+      await defHttp.post({ url: '/license/activate', params: { licenseKey: key } }, { errorMessageMode: 'none' });
+      activated.value = true;
+      existingLicense.value = {};
+      sessionStorage.setItem('__license_activated__', '1');
+      setTimeout(() => window.location.reload(), 800);
+    }
   } catch (e: any) {
     errorMsg.value = e?.message || '激活失败，请检查密钥是否正确';
   } finally {
@@ -182,5 +259,10 @@ async function handleActivate() {
 .error-msg,
 .success-msg {
   margin-top: 16px;
+}
+
+.clear-cache-section {
+  margin-top: 16px;
+  text-align: center;
 }
 </style>

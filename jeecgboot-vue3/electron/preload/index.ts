@@ -24,4 +24,10 @@ contextBridge.exposeInMainWorld(ElectronEnum.ELECTRON_API, {
   onMaximizedChange: (cb: (isMaximized: boolean) => void) => {
     ipcRenderer.on('window-maximized-change', (_, val) => cb(val));
   },
+  // License / Domain
+  getDomainConfig: () => ipcRenderer.sendSync('license:get-domain-config'),
+  needsActivation: () => ipcRenderer.sendSync('license:needs-activation'),
+  getStoredLicenseKey: () => ipcRenderer.sendSync('license:get-stored-key'),
+  activateLicense: (key: string) => ipcRenderer.invoke('license:activate', key),
+  clearLicense: () => ipcRenderer.invoke('license:clear'),
 });

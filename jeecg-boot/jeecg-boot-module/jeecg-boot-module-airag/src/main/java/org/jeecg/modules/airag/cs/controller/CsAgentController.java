@@ -19,6 +19,7 @@ import org.jeecg.common.util.PasswordUtil;
 import org.jeecg.common.util.oConvertUtils;
 import org.jeecg.modules.airag.cs.entity.CsAgent;
 import org.jeecg.modules.airag.cs.entity.CsAgentLoginLog;
+import org.jeecg.modules.airag.cs.entity.CsAgentStatusLog;
 import org.jeecg.modules.airag.cs.entity.CsGlobalConfig;
 import org.jeecg.modules.airag.cs.mapper.CsAgentLoginLogMapper;
 import org.jeecg.modules.airag.cs.mapper.CsGlobalConfigMapper;
@@ -311,7 +312,9 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     @AutoLog(value = "客服管理-下线")
     @Operation(summary = "客服下线")
     @PostMapping("/offline/{id}")
-    public Result<String> goOffline(@PathVariable String id, HttpServletRequest request) {
+    public Result<String> goOffline(@PathVariable String id,
+                                     @RequestParam(required = false) String trigger,
+                                     HttpServletRequest request) {
         // 记录退出日志
         try {
             CsAgent agent = csAgentService.getById(id);
@@ -330,7 +333,7 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
         } catch (Exception e) {
             log.warn("[CS-Security] 记录退出日志失败: {}", e.getMessage());
         }
-        csAgentService.goOffline(id);
+        csAgentService.goOffline(id, trigger != null ? trigger : CsAgentStatusLog.TRIGGER_MANUAL);
         return Result.OK("下线成功!");
     }
 

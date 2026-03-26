@@ -81,6 +81,12 @@
       <a @click="onThirdLogin('dingtalk')" title="钉钉"><DingtalkCircleFilled /></a>
       <a @click="onThirdLogin('wechat_open')" title="微信"><WechatFilled /></a>
     </div>
+
+    <div v-if="isElectron" class="enter-x" style="text-align: center; margin-top: 12px">
+      <Button type="link" danger size="small" @click="handleClearLicenseCache">
+        清除授权缓存并重新激活
+      </Button>
+    </div>
   </Form>
   <!-- 第三方登录相关弹框 -->
   <ThirdModal ref="thirdModalRef"></ThirdModal>
@@ -99,7 +105,10 @@
   import { LoginStateEnum, useLoginState, useFormRules, useFormValid } from './useLogin';
   import { useDesign } from '/@/hooks/web/useDesign';
   import { getCodeInfo } from '/@/api/sys/user';
-  import {  encryptAESCBC } from '/@/utils/cipher';
+  import { encryptAESCBC } from '/@/utils/cipher';
+  import { ElectronEnum } from '/@/enums/jeecgEnum';
+  import { useGlobSetting } from '/@/hooks/setting';
+  import { resetElectronDomainCache } from '/@/utils/env';
 
   const ACol = Col;
   const ARow = Row;
@@ -115,6 +124,19 @@
 
   const { setLoginState, getLoginState } = useLoginState();
   const { getFormRules } = useFormRules();
+  const globSetting = useGlobSetting();
+  const isElectron = globSetting.isElectronPlatform;
+  const electronApi = (window as any)[ElectronEnum.ELECTRON_API];
+
+  async function handleClearLicenseCache() {
+    try {
+      await electronApi?.clearLicense?.();
+      resetElectronDomainCache();
+      window.location.reload();
+    } catch {
+      // ignore
+    }
+  }
 
   const formRef = ref();
   const thirdModalRef = ref();

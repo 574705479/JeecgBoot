@@ -16,6 +16,7 @@ export function getBrowserWindowOptions(options?: BrowserWindowConstructorOption
       nodeIntegration: false,
       contextIsolation: true,
       backgroundThrottling: false,
+      webSecurity: !isDev,
     },
     // 应用图标
     icon: isDev ? _PATHS.appIcon : void 0,
@@ -94,19 +95,17 @@ export function createIndexWindow() {
     title: $env.VITE_GLOB_APP_TITLE!,
   });
 
-  if (isDev) {
-    win.webContents.on('before-input-event', (event, input) => {
-      const isToggleDevTools =
-        input.key === 'F12' ||
-        (input.control && input.shift && input.key.toLowerCase() === 'i');
-      if (isToggleDevTools) {
-        win.webContents.toggleDevTools();
-        event.preventDefault();
-      }
-    });
-  }
+  // F12 / Ctrl+Shift+I 打开 DevTools
+  win.webContents.on('before-input-event', (event, input) => {
+    const isToggleDevTools =
+      input.key === 'F12' ||
+      (input.control && input.shift && input.key.toLowerCase() === 'i');
+    if (isToggleDevTools) {
+      win.webContents.toggleDevTools();
+      event.preventDefault();
+    }
+  });
 
-  // 开发环境加载Vite服务，生产加载打包文件
   if (isDev) {
     let serverUrl = $env.VITE_DEV_SERVER_URL! as string;
     // 【JHHB-936】由于wps预览不能使用localhost访问，所以把localhost替换为127.0.0.1

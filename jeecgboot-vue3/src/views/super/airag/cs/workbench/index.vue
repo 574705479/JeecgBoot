@@ -3913,6 +3913,9 @@ function connectWebSocket() {
       console.log('[CS-WS] 重连成功，恢复业务数据');
       await loadAgentInfo();
       await loadConversations();
+      if (currentConversation.value?.id) {
+        await loadMessages(currentConversation.value.id);
+      }
     }
     if (ws === thisWs && hasConnectedOnce) {
       wsStatus.value = 'connected';

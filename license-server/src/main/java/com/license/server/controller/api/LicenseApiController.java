@@ -96,6 +96,16 @@ public class LicenseApiController {
         return null;
     }
 
+    @GetMapping("/domains")
+    public Result<java.util.Map<String, Object>> getDomains(
+            @RequestParam String licenseKey, HttpServletRequest httpRequest) {
+        String clientIp = IpUtil.getClientIp(httpRequest, properties.getTrustedProxies());
+        if (!rateLimiter.tryAcquirePerMinute("domains-ip:" + clientIp, 30)) {
+            return Result.error(40008, "请求过于频繁");
+        }
+        return licenseService.getDomainsByKey(licenseKey);
+    }
+
     @GetMapping("/health")
     public Result<Object> health() {
         return Result.ok(java.util.Map.of("status", "UP", "version", "1.0.0"));

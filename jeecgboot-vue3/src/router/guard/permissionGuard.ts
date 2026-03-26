@@ -8,6 +8,7 @@ import { useUserStoreWithOut } from '/@/store/modules/user';
 import { PAGE_NOT_FOUND_ROUTE } from '/@/router/routes/basic';
 
 import { RootRoute } from '/@/router/routes';
+import { useGlobSetting } from '/@/hooks/setting';
 
 import {isOAuth2AppEnv, isOAuth2DingAppEnv} from '/@/views/sys/login/useLogin';
 import { OAUTH2_THIRD_LOGIN_TENANT_ID } from "/@/enums/cacheEnum";
@@ -49,7 +50,13 @@ export function createPermissionGuard(router: Router) {
   // 自定义首页跳转次数
   let homePathJumpCount = 0;
 
+  const glob = useGlobSetting();
+
   router.beforeEach(async (to, from, next) => {
+    if (glob.isElectronPlatform && !glob.apiUrl && to.path !== LICENSE_ACTIVATE_PATH) {
+      next({ path: LICENSE_ACTIVATE_PATH, replace: true });
+      return;
+    }
     if (isPublicPath(to) || (to.name && publicRouteNames.has(String(to.name))) || to.meta.ignoreAuth) {
       next();
       return;
@@ -148,8 +155,9 @@ export function createPermissionGuard(router: Router) {
         console.log("to.fullPath 1",to.fullPath)
         console.log("to.path 2",to.path)
         
-        let getFullPath = to.fullPath;
+        const getFullPath = to.fullPath;
         if(getFullPath=='/' || getFullPath=='/500' || getFullPath=='/400' || getFullPath=='/login?redirect=/' || getFullPath=='/login?redirect=/login?redirect=/'){
+          next(redirectData);
           return;
         }
         
@@ -219,7 +227,6 @@ export function createPermissionGuard(router: Router) {
 
       router.addRoute(PAGE_NOT_FOUND_ROUTE as unknown as RouteRecordRaw);
       permissionStore.setDynamicAddedRoute(true);
-      // 代码逻辑说明: 【issues/7500】vue-router4.5.0版本路由name:PageNotFound同名导致登录进不去
       if (to.name === PAGE_NOT_FOUND_NAME_404) {
         // 动态添加路由后，此处应当重定向到fullPath，否则会加载404页面内容
         next({ path: to.fullPath, replace: true, query: to.query });

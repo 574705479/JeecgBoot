@@ -2,6 +2,9 @@ import { Tray, ipcMain, BrowserWindow, app, Notification } from 'electron';
 import type { NotificationConstructorOptions, IpcMainInvokeEvent } from 'electron';
 import { openInBrowser } from '../utils';
 import { omit } from 'lodash-es';
+import { $env } from '../env';
+import * as LicenseStore from '../license/LicenseStore';
+import { fetchDomains, resolveBestDomain } from '../license/DomainResolver';
 
 ipcMain.on('open-in-browser', (event: IpcMainInvokeEvent, url: string) => openInBrowser(url));
 
@@ -55,4 +58,60 @@ ipcMain.on('notify-with-path', (event: IpcMainInvokeEvent, options: Notification
     win.webContents.send('navigate-to', options.path);
   });
   notification.show();
+});
+
+// ==================== License / Domain IPC ====================
+
+ipcMain.on('license:get-domain-config', (event) => {
+  event.returnValue = global.__DOMAIN_CONFIG__;
+});
+
+ipcMain.on('license:needs-activation', (event) => {
+  event.returnValue = global.__NEEDS_ACTIVATION__;
+});
+
+ipcMain.on('license:get-stored-key', (event) => {
+  const data = LicenseStore.load();
+  event.returnValue = data?.licenseKey || null;
+});
+
+ipcMain.handle('license:activate', async (_event, licenseKey: string) => {
+  const licenseUrl = ($env as Record<string, string>).VITE_GLOB_LICENSE_URL;
+  if (!licenseUrl) {
+    return { error: '未配置授权服务器地址' };
+  }
+
+  try {
+    const resp = await fetchDomains(licenseUrl, licenseKey);
+    if (resp.code !== 200 || !resp.data?.domains) {
+      return { error: resp.message || '获取域名失败' };
+    }
+
+    const config = await resolveBestDomain(resp.data.domains);
+    if (!config) {
+      return { error: '所有业务域名均无法访问' };
+    }
+
+    const storeData: LicenseStore.LicenseData = {
+      licenseKey,
+      resolvedDomain: config.apiUrl,
+      resolvedDomainUrl: config.domainUrl,
+      lastVerifyTime: Date.now(),
+    };
+    LicenseStore.save(storeData);
+
+    global.__DOMAIN_CONFIG__ = config;
+    global.__NEEDS_ACTIVATION__ = false;
+
+    return { success: true, config };
+  } catch (err: any) {
+    return { error: err?.message || '激活失败' };
+  }
+});
+
+ipcMain.handle('license:clear', async () => {
+  LicenseStore.clear();
+  global.__DOMAIN_CONFIG__ = null;
+  global.__NEEDS_ACTIVATION__ = true;
+  return { success: true };
 });

@@ -23,6 +23,10 @@ import { checkIsQiankunMicro } from "/@/qiankun/micro";
 import { autoUseQiankunMicro } from "/@/qiankun/micro/qiankunMicro";
 import { useAppStoreWithOut } from "@/store/modules/app";
 import { loadBrandConfig } from '/@/utils/brand';
+import { useGlobSetting } from '/@/hooks/setting';
+import { ElectronEnum } from '/@/enums/jeecgEnum';
+import { defHttp } from '/@/utils/http/axios';
+import { refreshCache } from '/@/views/system/dict/dict.api';
 
 // 注册online模块lib
 import { registerPackages } from '/@/utils/monorepo/registerPackages';
@@ -82,8 +86,28 @@ async function bootstrap(props?: MainAppProps) {
   // 配置路由
   setupRouter(app);
 
-  // 路由保护
+  // 路由保护（必须紧跟 setupRouter，在任何 await 之前注册守卫，
+  // 否则初始导航会在守卫注册前完成，导致 404）
   setupRouterGuard(router);
+
+  // Electron: 自动向 JeecgBoot 后端激活（幂等，避免用户二次输入授权码）
+  const glob = useGlobSetting();
+  if (glob.isElectronPlatform && glob.apiUrl) {
+    const storedKey = (window as any)[ElectronEnum.ELECTRON_API]?.getStoredLicenseKey?.();
+    if (storedKey) {
+      try {
+        await Promise.race([
+          defHttp.post(
+            { url: '/license/activate', params: { licenseKey: storedKey } },
+            { errorMessageMode: 'none' }
+          ),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
+        ]);
+      } catch {
+        // 已激活、超时或失败均不阻塞启动；901 会由路由守卫引导至激活页
+      }
+    }
+  }
 
   // 注册全局指令
   setupGlobDirectives(app);
@@ -102,6 +126,12 @@ async function bootstrap(props?: MainAppProps) {
 
   // 挂载应用
   app.mount(getMountContainer(props), true);
+
+  // Electron: app 完全就绪后执行刷新缓存（等同于头像菜单"刷新缓存"）
+  // 有 token 时触发数据刷新；token 过期时 401 → logout → 跳转登录页
+  if (glob.isElectronPlatform && glob.apiUrl) {
+    refreshCache().catch(() => {});
+  }
 
   console.log(" vue3 app 加载完成！")
 

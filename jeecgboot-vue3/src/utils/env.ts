@@ -4,6 +4,7 @@ import { warn } from '/@/utils/log';
 import pkg from '../../package.json';
 import { getConfigFileName } from '../../build/getConfigFileName';
 import { getGlobal } from "@/qiankun/micro";
+import { ElectronEnum } from '/@/enums/jeecgEnum';
 
 export function getCommonStoragePrefix() {
   const { VITE_GLOB_APP_SHORT_NAME } = getAppEnvConfig();
@@ -55,16 +56,26 @@ export function getAppEnvConfig() {
   //   );
   // }
 
+  let finalApiUrl = VITE_GLOB_API_URL;
+  let finalDomainUrl = VITE_GLOB_DOMAIN_URL;
+  if (VITE_GLOB_RUN_PLATFORM === 'electron') {
+    const dc = getElectronDomainConfig();
+    if (dc?.apiUrl) {
+      finalApiUrl = dc.apiUrl;
+      finalDomainUrl = dc.domainUrl;
+    }
+  }
+
   return {
     VITE_GLOB_APP_TITLE,
-    VITE_GLOB_API_URL,
+    VITE_GLOB_API_URL: finalApiUrl,
     VITE_USE_MOCK,
     VITE_GLOB_APP_SHORT_NAME,
     VITE_GLOB_API_URL_PREFIX,
     VITE_GLOB_APP_OPEN_SSO,
     VITE_GLOB_APP_OPEN_QIANKUN,
     VITE_GLOB_APP_CAS_BASE_URL,
-    VITE_GLOB_DOMAIN_URL,
+    VITE_GLOB_DOMAIN_URL: finalDomainUrl,
     VITE_GLOB_ONLINE_VIEW_URL,
     VITE_GLOB_HIDE_LAYOUT_TYPES,
     VITE_GLOB_RUN_PLATFORM,
@@ -76,6 +87,21 @@ export function getAppEnvConfig() {
     //在线文档编辑版本。可选属性：wps, onlyoffice
     VITE_GLOB_ONLINE_DOCUMENT_VERSION
   };
+}
+
+let _electronDomainCache: { apiUrl: string; domainUrl: string } | null | undefined;
+function getElectronDomainConfig(): { apiUrl: string; domainUrl: string } | null {
+  if (_electronDomainCache !== undefined) return _electronDomainCache;
+  try {
+    _electronDomainCache = (window as any)[ElectronEnum.ELECTRON_API]?.getDomainConfig?.() || null;
+  } catch {
+    _electronDomainCache = null;
+  }
+  return _electronDomainCache;
+}
+
+export function resetElectronDomainCache() {
+  _electronDomainCache = undefined;
 }
 
 /**

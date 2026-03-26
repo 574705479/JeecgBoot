@@ -204,4 +204,6 @@ export interface GlobEnvConfig {
   VITE_GLOB_ONLINE_DOCUMENT_VERSION?: string;
   // 当前运行在什么平台
   VITE_GLOB_RUN_PLATFORM?: 'web' | 'electron';
+  // 授权系统地址（仅 Electron 模式下使用）
+  VITE_GLOB_LICENSE_URL?: string;
 }

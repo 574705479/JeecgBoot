@@ -252,6 +252,12 @@
             <a-divider orientation="left">功能开关</a-divider>
             <a-row :gutter="16">
               <a-col :span="12">
+                <a-form-item label="留言板">
+                  <a-switch v-model:checked="config.messageBoardEnabled" />
+                  <span class="switch-hint">开启后客服离线时显示留言板；关闭后直接提示"客服不在线"</span>
+                </a-form-item>
+              </a-col>
+              <a-col :span="12">
                 <a-form-item label="访客历史记录">
                   <a-switch v-model:checked="config.visitorHistory" />
                   <span class="switch-hint">开启后访客可查看历史消息</span>
@@ -713,6 +719,7 @@ const config = reactive({
   mobileHeaderBgPosition: 'center' as string,
   humanAgentEnabled: false,
   humanAgentFields: [] as Array<{ label: string; type: string; required: boolean }>,
+  messageBoardEnabled: true,
   faqLinkColor: '#e8453c',
   faqNavColor: '#1890ff',
 });

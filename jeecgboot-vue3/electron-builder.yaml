@@ -24,3 +24,14 @@ nsis:
   createDesktopShortcut: true
   # 安装程序的图标
   installerIcon: 'electron/icons/installer.ico'
+mac:
+  # mac 应用图标（.icns 格式）
+  icon: 'electron/icons/mac/app.icns'
+  artifactName: '客服系统-安装包-${version}.dmg'
+  target:
+    - dmg
+    - zip
+  category: 'public.app-category.business'
+dmg:
+  title: '${productName}'
+  icon: 'electron/icons/mac/app.icns'

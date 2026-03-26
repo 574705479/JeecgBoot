@@ -462,4 +462,36 @@ public class LicenseService {
     public List<License> getHeartbeatLostLicenses() {
         return licenseRepository.findHeartbeatLostLicenses(LocalDateTime.now().minusHours(24));
     }
+
+    @SuppressWarnings("unchecked")
+    public com.license.server.dto.Result<Map<String, Object>> getDomainsByKey(String licenseKey) {
+        License license = licenseRepository.findByLicenseKeyAndDelFlag(licenseKey, 0).orElse(null);
+        if (license == null) {
+            return com.license.server.dto.Result.error(40001, "许可证密钥无效");
+        }
+
+        String status = license.getStatus();
+        if ("REVOKED".equals(status)) {
+            return com.license.server.dto.Result.error(40003, "许可证已吊销");
+        }
+        if ("EXPIRED".equals(status)) {
+            if (license.getExpireDate() != null && license.getExpireDate().isBefore(LocalDateTime.now())) {
+                return com.license.server.dto.Result.error(40002, "许可证已过期");
+            }
+        }
+        if ("SUSPENDED".equals(status)) {
+            return com.license.server.dto.Result.error(40004, "许可证已暂停");
+        }
+
+        Map<String, Object> domainConfig = license.getDomainConfig();
+        String domains = "";
+        if (domainConfig != null && domainConfig.get("domains") != null) {
+            domains = String.valueOf(domainConfig.get("domains"));
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("status", status);
+        result.put("domains", domains);
+        return com.license.server.dto.Result.ok(result);
+    }
 }

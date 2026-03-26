@@ -304,6 +304,7 @@ export const usePermissionStore = defineStore({
                   userStore.setCsAgentInfo({
                     isAgent: !!isAgent,
                     isSubAgent: !!isSubAgent,
+                    agentId: agentRes.id || '',
                     avatar: agentRes.avatar || '',
                     nickname: agentRes.nickname || '',
                   });

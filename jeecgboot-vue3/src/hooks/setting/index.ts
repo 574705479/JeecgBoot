@@ -35,7 +35,9 @@ export const useGlobSetting = (): Readonly<GlobConfig> => {
   // 【QQYUN-10956】配置了自定义前缀，外部连接打不开，需要兼容处理
   // 将相对路径的 domainURL 拼接当前页面域名，确保 WebSocket/上传等场景获得完整 URL
   let domainURL = VITE_GLOB_DOMAIN_URL;
-  if (!/^http(s)?/.test(domainURL) && !/^(\/\/)?(.*\.)?.+\..+/.test(domainURL)) {
+  if (!domainURL && VITE_GLOB_RUN_PLATFORM === 'electron') {
+    domainURL = '';
+  } else if (!/^http(s)?/.test(domainURL) && !/^(\/\/)?(.*\.)?.+\..+/.test(domainURL)) {
     if (!domainURL.startsWith('/')) {
       domainURL = '/' + domainURL;
     }

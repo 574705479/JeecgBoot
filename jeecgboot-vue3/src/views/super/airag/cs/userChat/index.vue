@@ -618,6 +618,7 @@ const chatWindowConfig = reactive({
   mobileHeaderBgPosition: 'center' as string,
   humanAgentEnabled: false,
   humanAgentFields: [] as Array<{ label: string; type: string; required: boolean }>,
+  messageBoardEnabled: true,
   faqLinkColor: '#e8453c',
   faqNavColor: '#1890ff',
   faqHeaderText: '',
@@ -1064,6 +1065,7 @@ let wsManuallyClosed = false;
 let wsReconnectAttempts = 0;
 let wsFallbackPollTimer: number | null = null;
 let lastWsMessageAt = 0;
+let lastMessageLoadAt = 0;
 const wsFallbackPollIntervalMs = 20000;
 const wsStatus = ref<'connected' | 'reconnecting' | 'disconnected'>('disconnected');
 const wsShowBanner = ref(false);
@@ -1208,6 +1210,9 @@ const handleVisibilityChange = () => {
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     connectWebSocket();
   }
+  if (conversationId.value && !conversationId.value.startsWith('temp_') && Date.now() - lastWsMessageAt > 30000) {
+    loadMessages();
+  }
 };
 
 const handleNetworkOnline = () => {
@@ -1327,14 +1332,16 @@ onMounted(async () => {
   // 加载访客AI应用信息（头像/开场白/预设问题）
   await loadVisitorAppInfo();
 
-  // 前置检测：无客服在线时直接显示留言板，不创建会话
+  // 前置检测：无客服在线时根据留言板开关决定行为
   const hasStoredConv = !!localStorage.getItem(`cs_conversation_${userId.value}`);
   if (!hasStoredConv) {
     const agentOnline = await checkAgentOnline();
     if (!agentOnline) {
-      await loadMessageBoardConfig();
-      showLeaveMessageBoard.value = true;
-      return;
+      if (chatWindowConfig.messageBoardEnabled !== false) {
+        await loadMessageBoardConfig();
+        showLeaveMessageBoard.value = true;
+        return;
+      }
     }
   }
 
@@ -1726,8 +1733,12 @@ async function submitHumanAgent() {
       const errMsg = res?.message || '';
       if (errMsg.includes('暂无客服在线')) {
         showHumanAgentModal.value = false;
-        await loadMessageBoardConfig();
-        showLeaveMessageBoard.value = true;
+        if (chatWindowConfig.messageBoardEnabled !== false) {
+          await loadMessageBoardConfig();
+          showLeaveMessageBoard.value = true;
+        } else {
+          message.warning('客服不在线，请稍后再试');
+        }
         return;
       }
       message.error(errMsg || '请求失败，请稍后再试');
@@ -1739,11 +1750,15 @@ async function submitHumanAgent() {
     const errMsg = err?.response?.data?.message || err?.data?.message || err?.message || '';
     if (errMsg.includes('暂无客服在线')) {
       showHumanAgentModal.value = false;
-      await loadMessageBoardConfig();
-      showLeaveMessageBoard.value = true;
+      if (chatWindowConfig.messageBoardEnabled !== false) {
+        await loadMessageBoardConfig();
+        showLeaveMessageBoard.value = true;
+      } else {
+        message.warning('客服不在线，请稍后再试');
+      }
       return;
     }
-    message.error(errMsg || '暂无客服在线，请留言');
+    message.error(errMsg || (chatWindowConfig.messageBoardEnabled !== false ? '暂无客服在线' : '客服不在线，请稍后再试'));
   } finally {
     humanAgentSubmitting.value = false;
   }
@@ -1836,9 +1851,11 @@ async function initConversation() {
     if (!chatWindowConfig.humanAgentEnabled) {
       const agentOnline = await checkAgentOnline();
       if (!agentOnline) {
-        await loadMessageBoardConfig();
-        showLeaveMessageBoard.value = true;
-        return;
+        if (chatWindowConfig.messageBoardEnabled !== false) {
+          await loadMessageBoardConfig();
+          showLeaveMessageBoard.value = true;
+          return;
+        }
       }
     }
 
@@ -1867,10 +1884,11 @@ async function initConversation() {
         
         // 检查是否有客服分配
         if (conv.status === 0 && !conv.ownerAgentId && conv.humanAgentMode !== 1) {
-          // 无在线客服 且 非humanAgent模式 → 显示留言板
-          await loadMessageBoardConfig();
-          showLeaveMessageBoard.value = true;
-          return;
+          if (chatWindowConfig.messageBoardEnabled !== false) {
+            await loadMessageBoardConfig();
+            showLeaveMessageBoard.value = true;
+            return;
+          }
         }
         
         // 有客服分配
@@ -2014,17 +2032,37 @@ async function loadMessages() {
     });
     const list = Array.isArray(res) ? res : (res?.result || res?.records || []);
     if (list) {
+      // 防御：服务端返回空但当前已有服务端消息时，跳过替换（可能是后端临时故障）
+      if (list.length === 0) {
+        const hasServerMessages = messages.value.some(
+          (m: any) => !String(m.id).startsWith('local_') && !m.isStreaming && m.senderType !== 3
+        );
+        if (hasServerMessages) {
+          console.warn('[UserChat] 服务端返回空消息列表，跳过替换以保护已有消息');
+          return;
+        }
+      }
       // 智能合并：保留 local_ 消息和正在流式输出的消息
       const serverIds = new Set(list.map((m: any) => m.id));
       const localAndStreaming = messages.value.filter((m: any) => {
-        if (String(m.id).startsWith('local_')) return !serverIds.has(m.id);
+        if (String(m.id).startsWith('local_')) {
+          if (serverIds.has(m.id)) return false;
+          return !list.some((s: any) =>
+            s.senderId === m.senderId &&
+            s.content === m.content &&
+            Math.abs(new Date(s.createTime).getTime() - new Date(m.createTime).getTime()) < 10000
+          );
+        }
         if (m.isStreaming) return true;
-        if (m.senderType === 3) return true;
+        if (m.senderType === 3) {
+          return !list.some((s: any) => Number(s.senderType) === 3 && s.content === m.content);
+        }
         return false;
       });
       messages.value = [...list, ...localAndStreaming];
       historyBeforeId.value = list[0]?.id || null;
       hasMoreHistory.value = list.length >= historyPageSize;
+      lastMessageLoadAt = Date.now();
     }
   } catch {
     // 忽略错误
@@ -2223,13 +2261,14 @@ function connectWebSocket() {
 
   ws = new WebSocket(wsUrl);
 
-  ws.onopen = () => {
+  ws.onopen = async () => {
     console.log('[UserChat] WebSocket已连接');
     wsConnected.value = true;
+    const isReconnect = hasConnectedOnce;
     wsReconnectAttempts = 0;
     lastWsMessageAt = Date.now();
     startHeartbeat();
-    if (hasConnectedOnce) {
+    if (isReconnect) {
       wsStatus.value = 'connected';
       if (wsConnectedBannerTimer) clearTimeout(wsConnectedBannerTimer);
       wsConnectedBannerTimer = window.setTimeout(() => {
@@ -2238,6 +2277,7 @@ function connectWebSocket() {
         }
         wsConnectedBannerTimer = null;
       }, 1500);
+      await loadMessages();
     }
     hasConnectedOnce = true;
   };
@@ -2343,11 +2383,8 @@ function startFallbackPoll() {
     if (!conversationId.value) return;
     if (conversationClosed.value) return;
     if (loading.value) return;
-    if (ws && ws.readyState === WebSocket.OPEN && lastWsMessageAt) {
-      const now = Date.now();
-      if (now - lastWsMessageAt < wsFallbackPollIntervalMs) {
-        return;
-      }
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      return;
     }
     try {
       await loadMessages();
@@ -2714,6 +2751,7 @@ async function restartConversation() {
 
     // 重新连接WebSocket
     connectWebSocket();
+    startFallbackPoll();
     
     console.log('[UserChat] 已开始新对话');
   } catch (e) {
@@ -3096,6 +3134,7 @@ watch(() => messages.value.length, () => {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: 100dvh;
   width: 100%;
   max-width: 100vw;
   background: #f5f5f5;
@@ -3308,6 +3347,7 @@ watch(() => messages.value.length, () => {
   .board-body {
     flex: 1;
     padding: 24px 20px;
+    padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
     overflow-y: auto;
     
     .submit-success {
@@ -3640,6 +3680,7 @@ watch(() => messages.value.length, () => {
 
   .message-text {
     display: block;
+    width: fit-content;
     max-width: 100%;
     padding: 10px 14px;
     background: var(--agent-bubble-bg, #f5f5f5);
@@ -3960,6 +4001,7 @@ watch(() => messages.value.length, () => {
   display: flex;
   flex-direction: column;
   padding: 8px 12px 10px;
+  padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
   background: #fff;
   border-top: 1px solid #f0f0f0;
   flex-shrink: 0;
@@ -4104,6 +4146,7 @@ watch(() => messages.value.length, () => {
 
 .chat-fatal-error {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -4411,6 +4454,7 @@ watch(() => messages.value.length, () => {
   /* 输入区域 */
   .chat-input {
     padding: 6px 8px 8px;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
     .input-toolbar {
       gap: 12px;
       font-size: 20px;
@@ -4458,5 +4502,7 @@ html, body {
   margin: 0;
   padding: 0;
   max-width: 100vw;
+  height: 100vh;
+  height: 100dvh;
 }
 </style>
