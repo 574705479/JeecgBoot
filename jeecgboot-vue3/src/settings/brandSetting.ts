@@ -1,13 +1,13 @@
 export const BRAND_STORAGE_KEY = 'CS_BRAND_CONFIG';
 
 export const DEFAULT_BRAND = {
-  title: '客服系统',
-  shortTitle: '客服系统',
-  subtitle: '欢迎使用客服系统',
+  title: '在线客服',
+  shortTitle: '在线客服',
+  subtitle: '欢迎使用在线客服',
   logoUrl: '/logo.svg',
   faviconUrl: '/logo.svg',
   loginBgUrl: '',
-  loadingTitle: '客服系统',
+  loadingTitle: '在线客服',
 };
 
 function getStoredBrand(): Record<string, string> {

@@ -1,40 +1,37 @@
-import { Tray, ipcMain, BrowserWindow, app, Notification } from 'electron';
-import type { NotificationConstructorOptions, IpcMainInvokeEvent } from 'electron';
+import { ipcMain, BrowserWindow, app, Notification } from 'electron';
+import type { NotificationConstructorOptions, IpcMainEvent } from 'electron';
 import { openInBrowser } from '../utils';
+import { getWindowUsername } from '../utils/tray';
 import { omit } from 'lodash-es';
 import { $env } from '../env';
 import * as LicenseStore from '../license/LicenseStore';
 import { fetchDomains, resolveBestDomain } from '../license/DomainResolver';
 
-ipcMain.on('open-in-browser', (event: IpcMainInvokeEvent, url: string) => openInBrowser(url));
+ipcMain.on('open-in-browser', (event: IpcMainEvent, url: string) => openInBrowser(url));
 
-// 窗口控制
-ipcMain.on('window-minimize', () => {
-  const win = BrowserWindow.getAllWindows()[0];
+// 窗口控制（通过 event.sender 精确定位发送消息的窗口）
+ipcMain.on('window-minimize', (event: IpcMainEvent) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
   if (win) win.minimize();
 });
-ipcMain.on('window-maximize', () => {
-  const win = BrowserWindow.getAllWindows()[0];
+ipcMain.on('window-maximize', (event: IpcMainEvent) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return;
   win.isMaximized() ? win.unmaximize() : win.maximize();
 });
-ipcMain.on('window-close', () => {
-  const win = BrowserWindow.getAllWindows()[0];
+ipcMain.on('window-close', (event: IpcMainEvent) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
   if (win) win.close();
 });
-// 处理任务栏闪烁
-ipcMain.on('notify-flash', (event: IpcMainInvokeEvent, count: number = 0) => {
-  const win = BrowserWindow.getAllWindows()[0];
+ipcMain.on('notify-flash', (event: IpcMainEvent, count: number = 0) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return;
   if (win.isFocused()) return;
   if (process.platform === 'win32') {
-    // windows
     win.flashFrame(true);
   } else if (process.platform === 'darwin') {
-    // Mac
     if (app.dock) {
       app.dock.bounce('informational');
-      // 设置角标(未读消息)
       if (count > 0) {
         app.dock.setBadge(count.toString());
       } else {
@@ -43,13 +40,15 @@ ipcMain.on('notify-flash', (event: IpcMainInvokeEvent, count: number = 0) => {
     }
   }
 });
-// 通知 (点击通知打开指定页面)
-ipcMain.on('notify-with-path', (event: IpcMainInvokeEvent, options: NotificationConstructorOptions & { path: string }) => {
-  const win = BrowserWindow.getAllWindows()[0];
+ipcMain.on('notify-with-path', (event: IpcMainEvent, options: NotificationConstructorOptions & { path: string }) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return;
   if (win.isFocused()) return;
+  const username = getWindowUsername(win.id);
+  const title = username ? `[${username}] ${options.title}` : options.title;
   const notification = new Notification({
     ...omit(options, 'path'),
+    title,
   });
   notification.on('click', () => {
     if (win.isMinimized()) win.restore();

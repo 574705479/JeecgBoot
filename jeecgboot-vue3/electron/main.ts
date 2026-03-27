@@ -1,6 +1,6 @@
 import { app, BrowserWindow, Menu, dialog } from 'electron';
 import { isDev, $env } from './env';
-import { createMainWindow, createIndexWindow } from './utils/window';
+import { createMainWindow } from './utils/window';
 import { getAppInfo } from './utils';
 import * as LicenseStore from './license/LicenseStore';
 import { fetchDomains, resolveBestDomain } from './license/DomainResolver';
@@ -19,13 +19,10 @@ declare global {
 global.__DOMAIN_CONFIG__ = null;
 global.__NEEDS_ACTIVATION__ = false;
 
+let windowCounter = 1;
+
 function main() {
   mainWindow = createMainWindow();
-  mainWindow.on('focus', () => {
-    if (process.platform === 'win32') {
-      mainWindow!.flashFrame(false);
-    }
-  });
   return mainWindow;
 }
 
@@ -115,7 +112,8 @@ if (!isDev) {
 
   if (gotTheLock) {
     app.on('second-instance', () => {
-      createIndexWindow();
+      windowCounter++;
+      createMainWindow(`persist:window-${windowCounter}`);
     });
   } else {
     app.exit(0);

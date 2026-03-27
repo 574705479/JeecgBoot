@@ -22,6 +22,7 @@ import { useSso } from '/@/hooks/web/useSso';
 import { checkIsQiankunMicro } from "/@/qiankun/micro";
 import { autoUseQiankunMicro } from "/@/qiankun/micro/qiankunMicro";
 import { useAppStoreWithOut } from "@/store/modules/app";
+import { useUserStoreWithOut } from '/@/store/modules/user';
 import { loadBrandConfig } from '/@/utils/brand';
 import { useGlobSetting } from '/@/hooks/setting';
 import { ElectronEnum } from '/@/enums/jeecgEnum';
@@ -127,9 +128,12 @@ async function bootstrap(props?: MainAppProps) {
   // 挂载应用
   app.mount(getMountContainer(props), true);
 
-  // Electron: app 完全就绪后执行刷新缓存（等同于头像菜单"刷新缓存"）
-  // 有 token 时触发数据刷新；token 过期时 401 → logout → 跳转登录页
+  // Electron: app 完全就绪后同步托盘昵称 + 刷新缓存
   if (glob.isElectronPlatform && glob.apiUrl) {
+    const cachedUser = useUserStoreWithOut().getUserInfo;
+    if (cachedUser?.realname) {
+      (window as any)[ElectronEnum.ELECTRON_API]?.setTrayUser?.(cachedUser.realname || '');
+    }
     refreshCache().catch(() => {});
   }
 

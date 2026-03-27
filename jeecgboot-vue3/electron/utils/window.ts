@@ -5,8 +5,9 @@ import {_PATHS} from '../paths';
 import {$env, isDev} from '../env';
 import {createTray} from './tray';
 
-// 获取公共窗口选项
+// 获取公共窗口选项（webPreferences 深合并，避免外部 partition 等配置覆盖 preload）
 export function getBrowserWindowOptions(options?: BrowserWindowConstructorOptions): BrowserWindowConstructorOptions {
+  const { webPreferences: extraWebPrefs, ...restOptions } = options || {};
   return {
     width: 1200,
     height: 800,
@@ -17,29 +18,31 @@ export function getBrowserWindowOptions(options?: BrowserWindowConstructorOption
       contextIsolation: true,
       backgroundThrottling: false,
       webSecurity: !isDev,
+      ...extraWebPrefs,
     },
-    // 应用图标
     icon: isDev ? _PATHS.appIcon : void 0,
-    ...options,
+    ...restOptions,
   }
 }
 
 // 创建窗口
 export function createBrowserWindow(options?: BrowserWindowConstructorOptions) {
   const win = new BrowserWindow(getBrowserWindowOptions(options));
-  // 代码逻辑说明: 【JHHB-13】桌面应用消息通知
-  if (process.platform === 'darwin') { // 仅 macOS 生效
+  if (process.platform === 'darwin') {
     if (app.dock) {
       app.dock.setIcon(path.join(_PATHS.electronRoot, './icons/mac/dock.png').replace(/[\\/]dist[\\/]/, '/'));
     }
   }
 
-  // 设置窗口打开处理器
+  // 子窗口只继承 partition，不继承父窗口的宽高标题
+  const partitionOption = options?.webPreferences?.partition
+    ? { webPreferences: { partition: options.webPreferences.partition } }
+    : undefined;
+
   win.webContents.setWindowOpenHandler(() => {
     return {
       action: 'allow',
-      // 覆写新窗口的选项，用于调整默认尺寸和加载preload脚本等
-      overrideBrowserWindowOptions: getBrowserWindowOptions(),
+      overrideBrowserWindowOptions: getBrowserWindowOptions(partitionOption),
     }
   });
 
@@ -71,28 +74,33 @@ export function createBrowserWindow(options?: BrowserWindowConstructorOptions) {
   return win;
 }
 
-// 创建主窗口、系统托盘
-export function createMainWindow() {
-  const win = createIndexWindow()
+// 创建主窗口、系统托盘（每个窗口独立托盘 + close-to-hide）
+export function createMainWindow(partition?: string) {
+  const extraOpts = partition ? { webPreferences: { partition } } : undefined;
+  const win = createIndexWindow(extraOpts);
 
-  // 设置系统托盘图标
   createTray(win);
 
-  // 主窗口尝试关闭时，默认不直接退出应用，而是隐藏到托盘
   win.on('close', (event) => {
     event.preventDefault();
     win.hide();
   });
 
+  // 聚焦时停止任务栏闪烁（覆盖所有窗口，含 second-instance 创建的）
+  if (process.platform === 'win32') {
+    win.on('focus', () => win.flashFrame(false));
+  }
+
   return win;
 }
 
 // 创建索引窗口
-export function createIndexWindow() {
+export function createIndexWindow(extraOptions?: BrowserWindowConstructorOptions) {
   const win = createBrowserWindow({
     width: 1600,
     height: 1000,
     title: $env.VITE_GLOB_APP_TITLE!,
+    ...extraOptions,
   });
 
   // F12 / Ctrl+Shift+I 打开 DevTools

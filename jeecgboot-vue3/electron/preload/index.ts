@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld(ElectronEnum.ELECTRON_API, {
   onMaximizedChange: (cb: (isMaximized: boolean) => void) => {
     ipcRenderer.on('window-maximized-change', (_, val) => cb(val));
   },
+  // 托盘显示账号名
+  setTrayUser: (username: string) => ipcRenderer.send('tray-set-user', username),
   // License / Domain
   getDomainConfig: () => ipcRenderer.sendSync('license:get-domain-config'),
   needsActivation: () => ipcRenderer.sendSync('license:needs-activation'),

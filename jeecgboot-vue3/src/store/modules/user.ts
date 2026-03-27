@@ -281,6 +281,7 @@ export const useUserStore = defineStore({
           this.setRoleList([]);
         }
         this.setUserInfo(userInfo);
+        (window as any)['_ELECTRON_PRELOAD_UTILS_']?.setTrayUser?.(userInfo.realname || '');
       }
       /**
        * 添加字典信息到缓存
@@ -329,6 +330,7 @@ export const useUserStore = defineStore({
       this.setLoginInfo(null);
       this.setTenant(null);
       this.setCsAgentInfo(null);
+      (window as any)['_ELECTRON_PRELOAD_UTILS_']?.setTrayUser?.('');
       // 代码逻辑说明: 【TV360X-23】退出登录后会提示「Token时效，请重新登录」
       setTimeout(() => {
         this.setAllDictItems(null);
