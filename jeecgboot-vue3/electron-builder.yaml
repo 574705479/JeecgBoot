@@ -25,6 +25,9 @@ nsis:
   # 安装程序的图标
   installerIcon: 'electron/icons/installer.ico'
 mac:
+  # 无法访问 Apple 时间戳服务时（内网/代理/防火墙），codesign 会报 “The timestamp service is not available”。
+  # 设为 none 等价于 codesign 的 --timestamp=none，可完成本地签名；对外发布建议恢复联网时间戳并完成公证。
+  timestamp: 'none'
   # mac 应用图标（.icns 格式）
   icon: 'electron/icons/mac/app.icns'
   artifactName: '客服系统-安装包-${version}.dmg'

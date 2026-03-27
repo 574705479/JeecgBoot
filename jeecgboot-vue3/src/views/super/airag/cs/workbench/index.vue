@@ -133,6 +133,22 @@
 
           <a-divider />
 
+          <!-- 新消息提示音 -->
+          <div class="setting-item">
+            <div class="setting-label">
+              <span>新消息提示音</span>
+            </div>
+            <div class="setting-desc">收到新消息、新会话、转接会话时播放提示音</div>
+            <a-switch
+              v-model:checked="soundEnabled"
+              checked-children="开启"
+              un-checked-children="关闭"
+              @change="onSoundEnabledChange"
+            />
+          </div>
+
+          <a-divider />
+
           <!-- 外观主题 -->
           <div class="setting-item">
             <div class="setting-label">
@@ -1372,6 +1388,11 @@ const selectedAppId = ref<string | undefined>(undefined);  // 回复建议应用
 const visitorAppId = ref<string | undefined>(undefined);   // 访客AI应用
 const aiAppList = ref<any[]>([]);
 const showSettingsDrawer = ref(false);
+const SOUND_STORAGE_KEY = 'cs_workbench_sound_enabled';
+const soundEnabled = ref(localStorage.getItem(SOUND_STORAGE_KEY) !== 'false');
+function onSoundEnabledChange(val: boolean) {
+  localStorage.setItem(SOUND_STORAGE_KEY, String(val));
+}
 const aiEnabled = ref(true);  // AI自动回复开关
 const aiPrologueEnabled = ref(true); // AI开场白开关
 
@@ -1539,6 +1560,7 @@ const videoPreviewUrl = ref('');
 const mediaViewerVisible = ref(false);
 const mediaViewerList = ref<any[]>([]);
 const lastNotifyMap = new Map<string, number>();
+const activeNotifications = new Map<string, Notification>();
 const showEmojiPanel = ref(false);
 const messagesRef = ref<HTMLElement | null>(null);
 const inputRef = ref();
@@ -1931,6 +1953,10 @@ onUnmounted(() => {
   if (clearUnreadTimer) {
     clearTimeout(clearUnreadTimer);
     clearUnreadTimer = null;
+  }
+  if (audioCtx) {
+    audioCtx.close();
+    audioCtx = null;
   }
 });
 
@@ -4048,8 +4074,12 @@ function handleWsMessage(data: any) {
       // 延迟刷新统计数据（防抖）
       loadStatsDebounced();
 
-      // 浏览器弹窗通知（仅用户消息且页面不在前台）
+      // 用户消息：提示音 + 弹窗通知
       if (data.senderType === 0 && conv) {
+        if (shouldPlaySound() &&
+            (currentConversation.value?.id !== data.conversationId || !document.hasFocus())) {
+          playNotificationSound();
+        }
         notifyNewMessage(conv, data);
       }
       break;
@@ -4205,6 +4235,15 @@ function handleWsMessage(data: any) {
         if (filter.value === 'monitor') {
           loadMonitorAgents();
         }
+
+        // 新会话接入：提示音 + 系统通知（仅分配给当前客服且非重复事件）
+        if (!exists && convOwnerAgentId === agentId.value) {
+          if (shouldPlaySound()) playNotificationSound();
+          const targetConv = conversations.value.find(c => c.id === data.conversationId);
+          if (targetConv) {
+            notifyNewMessage(targetConv, { ...data, content: '新访客接入', conversationId: data.conversationId });
+          }
+        }
       }
       break;
     case 'conversation_closed':
@@ -4283,16 +4322,21 @@ function handleWsMessage(data: any) {
         // 如果当前客服是新负责人
         if (extraData.toAgentId === agentId.value) {
           console.log('[Workbench] 我是新负责人');
+          if (shouldPlaySound()) playNotificationSound();
           
-          // 直接刷新列表，确保统计数据和列表数据一致
-          loadConversations();
-          
-          // 显示提示消息
           if (extraData.fromAgentName) {
             console.log('[Workbench] 收到转接会话:', extraData.fromAgentName, extraData.conversation?.userName || '访客');
           } else {
             console.log('[Workbench] 收到新的转接会话');
           }
+
+          const fromName = extraData.fromAgentName || '其他客服';
+          loadConversations().then(() => {
+            const targetConv = conversations.value.find(c => c.id === conversationId);
+            if (targetConv) {
+              notifyNewMessage(targetConv, { ...data, content: `${fromName} 转接了一个会话`, conversationId });
+            }
+          });
         }
         // 如果当前客服是原负责人
         else if (extraData.fromAgentId === agentId.value) {
@@ -4510,11 +4554,10 @@ function handleWsMessage(data: any) {
     }
     case 'agent_timeout_reminder':
       // 客服超时未回复提醒（后端定时任务推送）
+      if (shouldPlaySound()) playNotificationSound();
       if (data.conversationId) {
-        // 确保该会话被标记为等待中（可能前端重连后丢失了追踪）
         if (!visitorLastMsgTime.has(data.conversationId)) {
           const timeoutSec = data.extra?.timeoutSeconds || agentTimeoutConfig.value.seconds;
-          // 倒推开始等待的时间
           markVisitorWaiting(data.conversationId, Date.now() - timeoutSec * 1000);
         }
       }
@@ -4583,8 +4626,46 @@ function handleWsMessage(data: any) {
   }
 }
 
+let audioCtx: AudioContext | null = null;
+let lastSoundTime = 0;
+const SOUND_THROTTLE_MS = 1500;
+
+function playNotificationSound() {
+  if (!soundEnabled.value) return;
+  const now = Date.now();
+  if (now - lastSoundTime < SOUND_THROTTLE_MS) return;
+  lastSoundTime = now;
+  try {
+    if (!audioCtx) audioCtx = new AudioContext();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const t = audioCtx.currentTime;
+    const osc1 = audioCtx.createOscillator();
+    const gain1 = audioCtx.createGain();
+    osc1.connect(gain1);
+    gain1.connect(audioCtx.destination);
+    osc1.frequency.value = 880;
+    gain1.gain.setValueAtTime(0.3, t);
+    gain1.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
+    osc1.start(t);
+    osc1.stop(t + 0.15);
+    const osc2 = audioCtx.createOscillator();
+    const gain2 = audioCtx.createGain();
+    osc2.connect(gain2);
+    gain2.connect(audioCtx.destination);
+    osc2.frequency.value = 1318.5;
+    gain2.gain.setValueAtTime(0.3, t + 0.18);
+    gain2.gain.exponentialRampToValueAtTime(0.01, t + 0.4);
+    osc2.start(t + 0.18);
+    osc2.stop(t + 0.4);
+  } catch { /* 忽略音频播放异常 */ }
+}
+
+function shouldPlaySound() {
+  return soundEnabled.value && route.path === '/cs/workbench';
+}
+
 function notifyNewMessage(conv: any, data: any) {
-  const isInBackground = globSetting.isElectronPlatform ? !document.hasFocus() : document.hidden;
+  const isInBackground = !document.hasFocus();
   if (!isInBackground) return;
 
   const conversationId = data.conversationId;
@@ -4609,14 +4690,20 @@ function notifyNewMessage(conv: any, data: any) {
   if (typeof Notification === 'undefined') return;
   const showNotification = () => {
     try {
+      const prev = activeNotifications.get(conversationId);
+      if (prev) try { prev.close(); } catch {}
       const notification = new Notification(title, { body, tag: conversationId });
+      activeNotifications.set(conversationId, notification);
       notification.onclick = () => {
         window.focus();
-        if (conv && conv.id) {
-          selectConversation(conv);
+        const targetId = data.conversationId || conv?.id;
+        if (targetId) {
+          const found = conversations.value.find(c => c.id === targetId);
+          if (found) selectConversation(found);
         }
         notification.close();
       };
+      notification.onclose = () => activeNotifications.delete(conversationId);
     } catch (e) {
       // 忽略通知错误
     }

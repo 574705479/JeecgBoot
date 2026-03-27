@@ -1,4 +1,5 @@
 import { app, BrowserWindow, Menu, dialog } from 'electron';
+import type { MenuItemConstructorOptions } from 'electron';
 import { isDev, $env } from './env';
 import { createMainWindow } from './utils/window';
 import { getAppInfo } from './utils';
@@ -7,8 +8,48 @@ import { fetchDomains, resolveBestDomain } from './license/DomainResolver';
 import type { DomainConfig } from './license/DomainResolver';
 import './ipc';
 
-// 隐藏所有菜单
-Menu.setApplicationMenu(null);
+/**
+ * 不能 Menu.setApplicationMenu(null)：macOS 上 Cmd+C/V/X 等依赖带 role 的「编辑」菜单才会下发到 webContents；
+ * 无菜单时客户端内输入框常无法粘贴，浏览器正常是因为浏览器自带编辑菜单。
+ */
+function setupApplicationMenu() {
+  const isMac = process.platform === 'darwin';
+  const template: MenuItemConstructorOptions[] = [
+    ...(isMac
+      ? [
+          {
+            label: app.name,
+            submenu: [
+              { role: 'about' },
+              { type: 'separator' },
+              { role: 'services' },
+              { type: 'separator' },
+              { role: 'hide' },
+              { role: 'hideOthers' },
+              { role: 'unhide' },
+              { type: 'separator' },
+              { role: 'quit' },
+            ],
+          } as MenuItemConstructorOptions,
+        ]
+      : []),
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        ...(isMac
+          ? [{ role: 'pasteAndMatchStyle' as const }, { role: 'delete' }, { role: 'selectAll' }]
+          : [{ role: 'delete' }, { type: 'separator' }, { role: 'selectAll' }]),
+      ],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -127,6 +168,8 @@ app.whenReady().then(async () => {
     app.setName($appInfo.productName);
     app.setAppUserModelId($appInfo.appId);
   }
+
+  setupApplicationMenu();
 
   await initDomainConfig();
   main();
