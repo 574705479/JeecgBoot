@@ -3,6 +3,7 @@ import type { MenuItemConstructorOptions } from 'electron';
 import { isDev, $env } from './env';
 import { createMainWindow } from './utils/window';
 import { getAppInfo } from './utils';
+import { setQuitting } from './state';
 import * as LicenseStore from './license/LicenseStore';
 import { fetchDomains, resolveBestDomain } from './license/DomainResolver';
 import type { DomainConfig } from './license/DomainResolver';
@@ -161,6 +162,8 @@ if (!isDev) {
   }
 }
 
+app.on('before-quit', () => setQuitting(true));
+
 // 生命周期管理
 app.whenReady().then(async () => {
   const $appInfo = getAppInfo();
@@ -175,14 +178,17 @@ app.whenReady().then(async () => {
   main();
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
+    const allWindows = BrowserWindow.getAllWindows();
+    if (allWindows.length === 0) {
       main();
+    } else {
+      const win = allWindows[0];
+      win.show();
+      win.focus();
     }
   });
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
+  app.quit();
 });

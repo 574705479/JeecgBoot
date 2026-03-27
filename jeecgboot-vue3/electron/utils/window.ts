@@ -4,6 +4,7 @@ import path from 'path';
 import {_PATHS} from '../paths';
 import {$env, isDev} from '../env';
 import {createTray} from './tray';
+import {isQuitting} from '../state';
 
 // 获取公共窗口选项（webPreferences 深合并，避免外部 partition 等配置覆盖 preload）
 export function getBrowserWindowOptions(options?: BrowserWindowConstructorOptions): BrowserWindowConstructorOptions {
@@ -82,14 +83,19 @@ export function createMainWindow(partition?: string) {
   createTray(win);
 
   win.on('close', (event) => {
-    event.preventDefault();
-    win.hide();
+    if (!isQuitting) {
+      event.preventDefault();
+      win.hide();
+    }
   });
 
-  // 聚焦时停止任务栏闪烁（覆盖所有窗口，含 second-instance 创建的）
-  if (process.platform === 'win32') {
-    win.on('focus', () => win.flashFrame(false));
-  }
+  win.on('focus', () => {
+    if (process.platform === 'win32') {
+      win.flashFrame(false);
+    } else if (process.platform === 'darwin' && app.dock) {
+      app.dock.setBadge('');
+    }
+  });
 
   return win;
 }
