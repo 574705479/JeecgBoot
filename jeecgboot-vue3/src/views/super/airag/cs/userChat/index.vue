@@ -286,7 +286,7 @@
     
 
     <!-- 预设问题（配置FAQ开启时隐藏AI预设问题，优先展示配置FAQ） -->
-    <div v-if="presetQuestions.length > 0 && !(chatWindowConfig.faqEnabled && chatWindowConfig.faqList?.length > 0)" class="preset-questions">
+    <div v-if="presetQuestions.length > 0 && !(chatWindowConfig.faqEnabled && chatWindowConfig.faqList?.length > 0) && !conversationClosed" class="preset-questions">
       <div class="preset-title">
         <BulbOutlined />
         <span>常见问题</span>
@@ -336,6 +336,10 @@
       <!-- 输入行：[表情(仅emoji模式)] + 文本框 + 发送/终止图标 -->
       <div class="input-row">
         <SmileOutlined v-if="chatWindowConfig.sendEmoji && !chatWindowConfig.sendImage && !chatWindowConfig.sendVideo && !chatWindowConfig.sendPdf && !(chatWindowConfig.faqEnabled && chatWindowConfig.faqList?.length > 0)" class="toolbar-icon inline-emoji-icon" @click="showEmojiPanel = !showEmojiPanel" title="表情" />
+        <span class="sound-toggle-btn" @click="toggleSound" :title="soundEnabled ? '关闭提示音' : '开启提示音'">
+          <SoundOutlined v-if="soundEnabled" />
+          <span v-else class="sound-muted-icon"><SoundOutlined /><span class="mute-line"></span></span>
+        </span>
         <a-textarea
           v-model:value="inputMessage"
           :placeholder="aiResponding ? 'AI正在回复，可随时终止...' : '请输入您要咨询的问题...'"
@@ -377,7 +381,7 @@
             <img :src="resolveFileUrl(chatWindowConfig.pcAdImage)" class="ad-sidebar-img" alt="广告" />
           </a>
         </div>
-        <div v-if="chatWindowConfig.faqEnabled && chatWindowConfig.faqList?.length > 0" class="sidebar-faq">
+        <div v-if="chatWindowConfig.faqEnabled && chatWindowConfig.faqList?.length > 0" :class="['sidebar-faq', { 'sidebar-faq-disabled': conversationClosed }]">
           <div class="sidebar-faq-title"><QuestionCircleOutlined /> 常见问题</div>
           <div class="sidebar-faq-list" :class="{ 'sidebar-faq-list-scrollable': faqPcShowAll && chatWindowConfig.faqList.length > FAQ_PC_DEFAULT_COUNT }">
             <div v-for="(faq, idx) in (faqPcShowAll ? chatWindowConfig.faqList : chatWindowConfig.faqList.slice(0, FAQ_PC_DEFAULT_COUNT))" :key="idx" class="sidebar-faq-item" @click="onFaqLinkClick({ index: idx, question: faq.question }, { parentPath: [] })">
@@ -479,6 +483,7 @@ import {
   MessageOutlined, SendOutlined, BulbOutlined, CheckCircleOutlined,
   SmileOutlined, PictureOutlined, VideoCameraOutlined, FilePdfOutlined, QuestionCircleOutlined,
   PauseCircleOutlined, LeftOutlined, CustomerServiceOutlined, LoadingOutlined,
+  SoundOutlined,
 } from '@ant-design/icons-vue';
 import { defHttp } from '/@/utils/http/axios';
 import axios from 'axios';
@@ -1055,6 +1060,53 @@ const displayMessages = computed(() => {
   return list;
 });
 
+// 提示音
+const SOUND_STORAGE_KEY = 'cs_user_chat_sound_enabled';
+const soundEnabled = ref(localStorage.getItem(SOUND_STORAGE_KEY) !== 'false');
+let audioCtx: AudioContext | null = null;
+let lastSoundTime = 0;
+const SOUND_THROTTLE_MS = 1500;
+
+function toggleSound() {
+  soundEnabled.value = !soundEnabled.value;
+  localStorage.setItem(SOUND_STORAGE_KEY, String(soundEnabled.value));
+  ensureAudioCtx();
+}
+
+function ensureAudioCtx() {
+  if (!audioCtx) audioCtx = new AudioContext();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function playNotificationSound() {
+  if (!soundEnabled.value) return;
+  const now = Date.now();
+  if (now - lastSoundTime < SOUND_THROTTLE_MS) return;
+  lastSoundTime = now;
+  try {
+    ensureAudioCtx();
+    const t = audioCtx!.currentTime;
+    const osc1 = audioCtx!.createOscillator();
+    const gain1 = audioCtx!.createGain();
+    osc1.connect(gain1);
+    gain1.connect(audioCtx!.destination);
+    osc1.frequency.value = 880;
+    gain1.gain.setValueAtTime(0.3, t);
+    gain1.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
+    osc1.start(t);
+    osc1.stop(t + 0.15);
+    const osc2 = audioCtx!.createOscillator();
+    const gain2 = audioCtx!.createGain();
+    osc2.connect(gain2);
+    gain2.connect(audioCtx!.destination);
+    osc2.frequency.value = 1318.5;
+    gain2.gain.setValueAtTime(0.3, t + 0.18);
+    gain2.gain.exponentialRampToValueAtTime(0.01, t + 0.4);
+    osc2.start(t + 0.18);
+    osc2.stop(t + 0.4);
+  } catch { /* 忽略音频播放异常 */ }
+}
+
 // WebSocket
 let ws: WebSocket | null = null;
 const wsConnected = ref(false);
@@ -1392,6 +1444,7 @@ onUnmounted(() => {
   if (scrollRafId) { cancelAnimationFrame(scrollRafId); scrollRafId = null; }
   window.removeEventListener('online', handleNetworkOnline);
   document.removeEventListener('visibilitychange', handleVisibilityChange);
+  if (audioCtx) { audioCtx.close(); audioCtx = null; }
 });
 
 // 初始化用户ID
@@ -1684,6 +1737,7 @@ async function validateSessionToken() {
 
 // 选择预设问题
 function selectPresetQuestion(question: string) {
+  if (conversationClosed.value) return;
   inputMessage.value = question;
   // 直接发送
   sendMessage();
@@ -1691,6 +1745,7 @@ function selectPresetQuestion(question: string) {
 
 
 function requestHumanAgent() {
+  if (conversationClosed.value) return;
   if (chatWindowConfig.humanAgentFields?.length) {
     showHumanAgentModal.value = true;
   } else {
@@ -1700,6 +1755,7 @@ function requestHumanAgent() {
 
 // 提交人工客服转接请求
 async function submitHumanAgent() {
+  if (conversationClosed.value) { showHumanAgentModal.value = false; return; }
   const phoneReg = /^1[3-9]\d{9}$/;
   const emailReg = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   for (const field of chatWindowConfig.humanAgentFields) {
@@ -2458,6 +2514,9 @@ function handleWsMessage(data: any) {
       if (!messages.value.find(m => m.id === newMsg.id)) {
         messages.value.push(newMsg);
         scrollToBottom();
+        if (msgSenderType !== 0) {
+          playNotificationSound();
+        }
       }
       // 收到非用户消息（AI/客服）后，解除等待状态
       // senderType: 0=用户, 1=AI, 2=客服, 3=系统
@@ -2522,6 +2581,7 @@ function handleWsMessage(data: any) {
       }
       // ★ 切换为手动模式后，解除AI回复中状态
       stopAiResponding();
+      playNotificationSound();
       messages.value.push({
         id: Date.now().toString(),
         content: data.content || `客服 ${data.extra?.agentName || data.senderName || ''} 已为您服务`,
@@ -2539,6 +2599,7 @@ function handleWsMessage(data: any) {
       } else if (data.senderAvatar) {
         currentAgentAvatar.value = data.senderAvatar;
       }
+      playNotificationSound();
       messages.value.push({
         id: Date.now().toString(),
         content: data.content || `客服 ${data.extra?.agentName || data.senderName || ''} 继续为您服务`,
@@ -2574,6 +2635,7 @@ function handleWsMessage(data: any) {
     case 'conversation_closed':
       // 会话已结束
       conversationClosed.value = true;
+      showHumanAgentModal.value = false;
       stopFallbackPoll();
       messages.value.push({
         id: Date.now().toString(),
@@ -2608,6 +2670,7 @@ function handleWsMessage(data: any) {
 
 // 发送消息
 async function sendMessage() {
+  ensureAudioCtx();
   const content = inputMessage.value.trim();
   const attachments = attachmentList.value.filter(a => !a.uploading && a.url);
   if (!content && !attachments.length) return;
@@ -2771,6 +2834,11 @@ function handleAiStreamToken(data: any) {
 
   // 超时后忽略后续到达的 token
   if (!aiResponding.value || messageId === aiTimedOutMessageId) return;
+
+  // 首个 token 到达时播放提示音
+  if (!streamingMessages.value.has(messageId) && !pendingTokens.has(messageId)) {
+    playNotificationSound();
+  }
 
   // AI 开始输出内容后，立即关闭 typing 指示器
   if (agentTyping.value) {
@@ -2951,6 +3019,7 @@ function getSmartAssistantFaqData(msg: any) {
 }
 
 async function onFaqLinkClick(item: any, faqData: any) {
+  if (conversationClosed.value) return;
   try {
     await httpPost({
       url: '/cs/message/faq/interact',
@@ -2967,6 +3036,7 @@ async function onFaqLinkClick(item: any, faqData: any) {
 }
 
 async function onFaqNavigate(action: string, faqData: any) {
+  if (conversationClosed.value) return;
   try {
     await httpPost({
       url: '/cs/message/faq/interact',
@@ -3239,6 +3309,10 @@ watch(() => messages.value.length, () => {
 }
 .sidebar-faq-more:hover {
   color: #40a9ff;
+}
+.sidebar-faq-disabled {
+  opacity: 0.5;
+  pointer-events: none;
 }
 
 /* 滚动文字跑马灯 */
@@ -4102,6 +4176,36 @@ watch(() => messages.value.length, () => {
     padding-bottom: 6px;
   }
 
+  .sound-toggle-btn {
+    cursor: pointer;
+    color: #999;
+    font-size: 20px;
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    padding-bottom: 9px;
+    transition: color 0.2s;
+    &:hover {
+      color: var(--theme-color, #667eea);
+    }
+  }
+
+  .sound-muted-icon {
+    position: relative;
+    display: inline-flex;
+    opacity: 0.5;
+  }
+
+  .mute-line {
+    position: absolute;
+    width: 2px;
+    height: 120%;
+    background: currentColor;
+    transform: rotate(45deg);
+    top: -10%;
+    left: 50%;
+  }
+
   :deep(.ant-input) {
     flex: 1;
     border-radius: 18px;
@@ -4473,6 +4577,9 @@ watch(() => messages.value.length, () => {
     .inline-emoji-icon {
       font-size: 22px;
       padding-bottom: 6px;
+    }
+    .sound-toggle-btn {
+      font-size: 22px;
     }
   }
 
