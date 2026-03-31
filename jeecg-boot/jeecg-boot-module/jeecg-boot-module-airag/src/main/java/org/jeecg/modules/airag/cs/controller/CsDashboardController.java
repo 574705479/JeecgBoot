@@ -117,7 +117,7 @@ public class CsDashboardController {
         stats.put("todayLeaveMessages", todayLeaveMessages);
 
         // 7. 在线客服数 / 总客服数（含子客服）
-        int onlineAgents = sessionManager.getOnlineAgentCount();
+        int onlineAgents = agentService.getOnlineAgents().size();
         long totalAgents = agentService.count();
         stats.put("onlineAgents", onlineAgents);
         stats.put("totalAgents", totalAgents);

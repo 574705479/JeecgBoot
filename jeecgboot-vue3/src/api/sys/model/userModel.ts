@@ -4,6 +4,7 @@
 export interface LoginParams {
   username: string;
   password: string;
+  csOnlineLogin?: boolean;
 }
 
 export interface ThirdLoginParams {

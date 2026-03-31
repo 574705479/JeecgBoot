@@ -299,8 +299,11 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     public Result<String> goOnline(@PathVariable String id) {
         if (licenseClientService != null && licenseClientService.isLicensed()
             && licenseClientService.isQuotaExceeded("max_cs_agents")) {
-            Long limit = licenseClientService.getQuotaLimit("max_cs_agents");
-            return Result.error("客服坐席已满，在线坐席数已达授权上限(" + limit + ")");
+            CsAgent agent = csAgentService.getById(id);
+            if (agent == null || agent.getStatus() == null || agent.getStatus() == CsAgent.STATUS_OFFLINE) {
+                Long limit = licenseClientService.getQuotaLimit("max_cs_agents");
+                return Result.error("客服坐席已满，在线坐席数已达授权上限(" + limit + ")");
+            }
         }
         csAgentService.goOnline(id);
         return Result.OK("上线成功!");

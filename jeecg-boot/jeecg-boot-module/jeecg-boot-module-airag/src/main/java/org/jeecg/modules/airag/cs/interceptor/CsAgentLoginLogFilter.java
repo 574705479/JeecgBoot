@@ -2,18 +2,24 @@ package org.jeecg.modules.airag.cs.interceptor;
 
 import com.alibaba.fastjson.JSONObject;
 import lombok.extern.slf4j.Slf4j;
+import org.jeecg.common.constant.CommonConstant;
 import org.jeecg.common.util.oConvertUtils;
+import org.jeecg.modules.airag.cs.entity.CsAgent;
 import org.jeecg.modules.airag.cs.entity.CsAgentIpWhitelist;
 import org.jeecg.modules.airag.cs.entity.CsAgentLoginLog;
+import org.jeecg.modules.airag.cs.entity.CsAgentStatusLog;
 import org.jeecg.modules.airag.cs.entity.CsGlobalConfig;
 import org.jeecg.modules.airag.cs.mapper.CsAgentIpWhitelistMapper;
 import org.jeecg.modules.airag.cs.mapper.CsAgentLoginLogMapper;
 import org.jeecg.modules.airag.cs.mapper.CsGlobalConfigMapper;
 import org.jeecg.modules.airag.cs.mapper.CsSubAgentMapper;
+import org.jeecg.modules.airag.cs.service.ICsAgentService;
 import org.jeecg.modules.airag.cs.util.CsIpMatchUtil;
+import org.jeecg.common.license.core.LicenseClientService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.annotation.Order;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.web.util.ContentCachingResponseWrapper;
 
@@ -56,6 +62,15 @@ public class CsAgentLoginLogFilter implements Filter {
     @Autowired
     private RedisTemplate<String, String> redisTemplate;
 
+    @Autowired
+    private ICsAgentService csAgentService;
+
+    @Autowired(required = false)
+    private LicenseClientService licenseClientService;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     @Override
     public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain) throws IOException, ServletException {
         HttpServletRequest httpRequest = (HttpServletRequest) request;
@@ -92,30 +107,22 @@ public class CsAgentLoginLogFilter implements Filter {
                                 if (success) {
                                     // ========== 登录成功 → 检查白名单 ==========
                                     if (isWhitelistBlocked(username, clientIp)) {
-                                        // IP不在白名单 → 篡改响应为登录失败，阻止前端拿到token
                                         recordLog(username, CsAgentLoginLog.EVENT_IP_BLOCKED, clientIp);
                                         log.warn("[CS-Security] 客服登录被IP白名单拦截: username={}, ip={}", username, clientIp);
-
-                                        JSONObject blocked = new JSONObject();
-                                        blocked.put("success", false);
-                                        blocked.put("code", 500);
-                                        blocked.put("message", "您的IP(" + clientIp + ")不在客服白名单中，禁止登录");
-                                        blocked.put("result", null);
-
-                                        // 清空原始响应体，写入拦截响应
-                                        responseWrapper.resetBuffer();
-                                        responseWrapper.setStatus(HttpServletResponse.SC_OK);
-                                        responseWrapper.setContentType("application/json;charset=UTF-8");
-                                        responseWrapper.getWriter().write(blocked.toJSONString());
-                                        responseWrapper.getWriter().flush();
-                                        responseWrapper.copyBodyToResponse();
+                                        invalidateLoginToken(json, username);
+                                        rewriteResponse(responseWrapper, "您的IP(" + clientIp + ")不在客服白名单中，禁止登录");
                                         rewritten = true;
                                     } else {
-                                        // IP通过白名单 → 记录登录成功
                                         recordLog(username, CsAgentLoginLog.EVENT_LOGIN_SUCCESS, clientIp);
+                                        boolean onlineOk = tryAutoAgentOnline(json);
+                                        if (!onlineOk) {
+                                            invalidateLoginToken(json, username);
+                                            Long limit = licenseClientService != null ? licenseClientService.getQuotaLimit("max_cs_agents") : null;
+                                            rewriteResponse(responseWrapper, "客服坐席已满，在线坐席数已达授权上限(" + (limit != null ? limit : "?") + ")");
+                                            rewritten = true;
+                                        }
                                     }
                                 } else {
-                                    // 登录失败
                                     recordLog(username, CsAgentLoginLog.EVENT_LOGIN_FAILED, clientIp);
                                 }
                             }
@@ -205,6 +212,107 @@ public class CsAgentLoginLogFilter implements Filter {
         } catch (Exception e) {
             log.error("[CS-Security] 记录登录日志失败", e);
         }
+    }
+
+    /**
+     * 客服登录成功后自动上线（乐观锁策略：先上线，再检查超限，超限则回滚）。
+     * @return true=上线成功或无需处理（非客服/已在线/license未启用），false=坐席超限需阻止登录
+     */
+    private boolean tryAutoAgentOnline(JSONObject responseJson) {
+        try {
+            JSONObject result = responseJson.getJSONObject("result");
+            if (result == null) return true;
+            JSONObject userInfo = result.getJSONObject("userInfo");
+            if (userInfo == null) return true;
+            String userId = userInfo.getString("id");
+            if (oConvertUtils.isEmpty(userId)) return true;
+
+            Boolean csOnlineLogin = result.getBoolean("csOnlineLogin");
+
+            CsAgent agent = csAgentService.getByUserId(userId);
+            if (agent == null) return true;
+
+            if (agent.getStatus() != null && agent.getStatus() != CsAgent.STATUS_OFFLINE) {
+                log.info("[CS-Security] 客服已在线(status={}), 跳过自动上线: userId={}", agent.getStatus(), userId);
+                return true;
+            }
+
+            if (Boolean.FALSE.equals(csOnlineLogin)) {
+                csAgentService.goOffline(agent.getId());
+                log.info("[CS-Security] 客服登录自动隐身: agentId={}", agent.getId());
+            } else {
+                csAgentService.goOnline(agent.getId());
+                log.info("[CS-Security] 客服登录自动上线: agentId={}", agent.getId());
+            }
+
+            if (isOverQuota()) {
+                log.warn("[CS-Security] 坐席超限（并发竞争），回滚上线: agentId={}, userId={}", agent.getId(), userId);
+                csAgentService.goOffline(agent.getId(), CsAgentStatusLog.TRIGGER_SYSTEM);
+                return false;
+            }
+
+            return true;
+        } catch (Exception e) {
+            log.error("[CS-Security] 自动上线异常: {}", e.getMessage(), e);
+            return true;
+        }
+    }
+
+    /**
+     * 检查当前在线坐席是否严格超过限额（> limit 才算超限，= limit 是合法的）
+     */
+    private boolean isOverQuota() {
+        if (licenseClientService == null || !licenseClientService.isLicensed()) return false;
+        Long limit = licenseClientService.getQuotaLimit("max_cs_agents");
+        if (limit == null || limit <= 0) return false;
+        try {
+            Long currentUsage = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM cs_agent WHERE status != 0", Long.class);
+            return currentUsage != null && currentUsage > limit;
+        } catch (Exception e) {
+            log.error("[CS-Security] 查询坐席数量失败", e);
+            return false;
+        }
+    }
+
+    /**
+     * 清除已生成的登录 token 和 SSO 映射
+     */
+    private void invalidateLoginToken(JSONObject responseJson, String username) {
+        try {
+            JSONObject result = responseJson.getJSONObject("result");
+            if (result == null) return;
+            String token = result.getString("token");
+            if (oConvertUtils.isNotEmpty(token)) {
+                redisTemplate.delete(CommonConstant.PREFIX_USER_TOKEN + token);
+                log.info("[CS-Security] 已清除token: {}", token);
+            }
+            if (oConvertUtils.isNotEmpty(username)) {
+                redisTemplate.delete(CommonConstant.PREFIX_USER_TOKEN_PC + username);
+                redisTemplate.delete(CommonConstant.PREFIX_USER_TOKEN_APP + username);
+                redisTemplate.delete(CommonConstant.PREFIX_USER_TOKEN_PHONE + username);
+            }
+        } catch (Exception e) {
+            log.error("[CS-Security] 清除token失败", e);
+        }
+    }
+
+    /**
+     * 篡改响应为登录失败
+     */
+    private void rewriteResponse(ContentCachingResponseWrapper responseWrapper, String message) throws IOException {
+        JSONObject blocked = new JSONObject();
+        blocked.put("success", false);
+        blocked.put("code", 500);
+        blocked.put("message", message);
+        blocked.put("result", null);
+
+        responseWrapper.resetBuffer();
+        responseWrapper.setStatus(HttpServletResponse.SC_OK);
+        responseWrapper.setContentType("application/json;charset=UTF-8");
+        responseWrapper.getWriter().write(blocked.toJSONString());
+        responseWrapper.getWriter().flush();
+        responseWrapper.copyBodyToResponse();
     }
 
     private String getClientIp(HttpServletRequest request) {

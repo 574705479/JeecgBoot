@@ -346,6 +346,7 @@
           loginOrgCode: formData.loginOrgCode,
           captcha: formData.inputCode,
           checkKey: randCodeData.checkKey,
+          csOnlineLogin: csOnlineLogin.value,
           mode: 'none', //不要默认的错误提示
         })
       );

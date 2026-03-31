@@ -10,6 +10,7 @@ import { SessionTimeoutProcessingEnum } from '/@/enums/appEnum';
 const { createMessage, createErrorModal } = useMessage();
 const error = createMessage.error!;
 const stp = projectSetting.sessionTimeoutProcessing;
+let is401Handling = false;
 
 export function checkStatus(status: number, msg: string, errorMessageMode: ErrorMessageMode = 'message'): void {
   const { t } = useI18n();
@@ -25,17 +26,19 @@ export function checkStatus(status: number, msg: string, errorMessageMode: Error
     case 400:
       errMessage = `${msg}`;
       break;
-    // 401: Not logged in
-    // Jump to the login page if not logged in, and carry the path of the current page
-    // Return to the current page after successful login. This step needs to be operated on the login page.
     case 401:
-      if (!isVisitorPath()) {
+      if (!isVisitorPath() && !is401Handling) {
+        is401Handling = true;
+        if (msg && msg.includes('踢')) {
+          createMessage.warning(msg);
+        }
         userStore.setToken(undefined);
         if (stp === SessionTimeoutProcessingEnum.PAGE_COVERAGE) {
           userStore.setSessionTimeout(true);
         } else {
           userStore.logout(true);
         }
+        setTimeout(() => { is401Handling = false; }, 3000);
       }
       break;
     case 403:

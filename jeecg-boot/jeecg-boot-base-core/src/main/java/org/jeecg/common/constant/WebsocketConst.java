@@ -63,4 +63,14 @@ public class WebsocketConst {
      */
     public static final String NEWS_PUBLISH = "publish";
 
+    /**
+     * 消息类型 kick 账号被踢下线
+     */
+    public static final String CMD_KICK = "kick";
+
+    /**
+     * 消息类型 quota_kick 坐席超限被踢下线
+     */
+    public static final String CMD_QUOTA_KICK = "quota_kick";
+
 }

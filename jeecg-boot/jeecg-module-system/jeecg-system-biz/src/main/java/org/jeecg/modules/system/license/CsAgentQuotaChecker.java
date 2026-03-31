@@ -22,7 +22,7 @@ public class CsAgentQuotaChecker implements QuotaChecker {
     public long getCurrentUsage() {
         try {
             Long count = jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM cs_agent WHERE status = 1", Long.class);
+                    "SELECT COUNT(*) FROM cs_agent WHERE status != 0", Long.class);
             return count != null ? count : 0;
         } catch (Exception e) {
             return 0;

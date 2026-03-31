@@ -21,6 +21,8 @@ public class SysLoginModel {
     private String captcha;
 	@Schema(description = "验证码key")
     private String checkKey;
+	@Schema(description = "客服在线状态(true=在线,false=隐身,null=默认在线)")
+    private Boolean csOnlineLogin;
 
     public String getUsername() {
         return username;
@@ -60,5 +62,13 @@ public class SysLoginModel {
 
     public void setLoginOrgCode(String loginOrgCode) {
         this.loginOrgCode = loginOrgCode;
+    }
+
+    public Boolean getCsOnlineLogin() {
+        return csOnlineLogin;
+    }
+
+    public void setCsOnlineLogin(Boolean csOnlineLogin) {
+        this.csOnlineLogin = csOnlineLogin;
     }
 }

@@ -14,7 +14,7 @@
 </template>
 
 <script lang="ts">
-  import { defineComponent, computed, unref, ref } from 'vue';
+  import { defineComponent, computed, unref, ref, onMounted } from 'vue';
   import { Layout } from 'ant-design-vue';
   import { createAsyncComponent } from '/@/utils/factory/createAsyncComponent';
 
@@ -27,8 +27,13 @@
   import { useMenuSetting } from '/@/hooks/setting/useMenuSetting';
   import { useDesign } from '/@/hooks/web/useDesign';
   import { useLockPage } from '/@/hooks/web/useLockPage';
-
   import { useAppInject } from '/@/hooks/web/useAppInject';
+  import { useUserStore } from '/@/store/modules/user';
+  import { useGlobSetting } from '/@/hooks/setting';
+  import { useMessage } from '/@/hooks/web/useMessage';
+  import { connectWebSocket, onWebSocket } from '/@/hooks/web/useWebSocket';
+  import { getToken } from '/@/utils/auth';
+  import md5 from 'crypto-js/md5';
 
   export default defineComponent({
     name: 'DefaultLayout',
@@ -46,9 +51,38 @@
       const { getIsMobile } = useAppInject();
       const { getShowFullHeaderRef } = useHeaderSetting();
       const { getShowSidebar, getIsMixSidebar, getShowMenu } = useMenuSetting();
+      const userStore = useUserStore();
+      const glob = useGlobSetting();
+      const { createMessage } = useMessage();
 
       // Create a lock screen monitor
       const lockEvents = useLockPage();
+
+      onMounted(() => {
+        initGlobalWebSocket();
+      });
+
+      function initGlobalWebSocket() {
+        const token = getToken();
+        if (!token) return;
+        const wsClientId = md5(token);
+        const tabId = Math.random().toString(36).substring(2, 8);
+        const userId = unref(userStore.getUserInfo)?.id;
+        if (!userId) return;
+        const wsKey = userId + '_' + wsClientId + '_' + tabId;
+        const url = glob.domainUrl?.replace('https://', 'wss://').replace('http://', 'ws://') + '/websocket/' + wsKey;
+        connectWebSocket(url);
+        onWebSocket((data: any) => {
+          if (data.cmd === 'kick') {
+            createMessage.warning(data.msgTxt || '您的账号已在其他地方登录，当前会话已被强制下线');
+            userStore.logout(true);
+          }
+          if (data.cmd === 'quota_kick') {
+            createMessage.warning(data.msgTxt || '客服坐席已满，您已被强制下线');
+            userStore.logout(true);
+          }
+        });
+      }
 
       const layoutClass = computed(() => {
         let cls: string[] = ['ant-layout'];

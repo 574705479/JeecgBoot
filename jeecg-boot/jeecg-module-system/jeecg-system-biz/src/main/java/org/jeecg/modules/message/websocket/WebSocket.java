@@ -45,8 +45,9 @@ public class WebSocket {
     public void onOpen(Session session, @PathParam(value = "userId") String userId) {
         try {
             sessionPool.put(userId, session);
-            log.debug("【系统 WebSocket】有新的连接，总数为:" + sessionPool.size());
+            log.info("【系统 WebSocket】新连接, userId={}, sessionPool.size={}, allKeys={}", userId, sessionPool.size(), sessionPool.keySet());
         } catch (Exception e) {
+            log.error("【系统 WebSocket】onOpen异常", e);
         }
     }
 
@@ -67,22 +68,23 @@ public class WebSocket {
      * @param message
      */
     public void pushMessage(String userId, String message) {
+        log.info("【踢人WebSocket-pushMessage】开始匹配, userId={}, sessionPool.size={}, keys={}", userId, sessionPool.size(), sessionPool.keySet());
+        int matchCount = 0;
         for (Map.Entry<String, Session> item : sessionPool.entrySet()) {
-            //userId key值= {用户id + "_"+ 登录token的md5串}
-            //TODO vue2未改key新规则，暂时不影响逻辑
             if (item.getKey().contains(userId)) {
+                matchCount++;
                 Session session = item.getValue();
                 try {
-                    // 代码逻辑说明: websocket报错 https://gitee.com/jeecg/jeecg-boot/issues/I4C0MU
                     synchronized (session){
-                        log.debug("【系统 WebSocket】推送单人消息:" + message);
+                        log.info("【踢人WebSocket-pushMessage】匹配成功, key={}, 正在发送消息", item.getKey());
                         session.getBasicRemote().sendText(message);
                     }
                 } catch (Exception e) {
-                    log.error(e.getMessage(),e);
+                    log.error("【踢人WebSocket-pushMessage】发送失败, key={}", item.getKey(), e);
                 }
             }
         }
+        log.info("【踢人WebSocket-pushMessage】匹配完成, userId={}, 匹配到{}个session", userId, matchCount);
     }
 
     /**

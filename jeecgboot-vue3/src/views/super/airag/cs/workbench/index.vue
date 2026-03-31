@@ -1137,7 +1137,9 @@ import { computeFileMd5 } from '../utils/fileHash';
 import MarkdownIt from 'markdown-it';
 import DOMPurify from 'dompurify';
 import hljs from 'highlight.js';
+import { useUserStoreWithOut } from '/@/store/modules/user';
 
+const userStore = useUserStoreWithOut();
 const silentRequestOptions = { successMessageMode: 'none' as const };
 const globSetting = useGlobSetting();
 const route = useRoute();
@@ -2053,18 +2055,30 @@ async function loadAgentInfo() {
       }
       // 注意：visitorAppId 是全局配置，在 loadGlobalVisitorApp() 中加载
       
-      // 根据登录页选择的状态决定是否自动上线
-      if (!isOnline.value) {
+      // 根据DB状态决定是否需要调用上线接口
+      if (res.status !== 0) {
+        // 已在线(1)/忙碌(2)/隐身(3) → 仅同步本地状态，不重复调接口（避免重复广播+日志）
+        agentStatus.value = res.status;
+        isOnline.value = res.status === 1 || res.status === 2;
+      } else {
+        // 离线(0) → 兜底上线（Token缓存恢复等未经Filter的场景）
         const csOnlineLogin = localStorage.getItem('CS_ONLINE_LOGIN');
-        if (csOnlineLogin !== 'false') {
-          // 登录页选择了"在线"（默认），自动上线
-          await httpPost({ url: `/cs/agent/online/${agentId.value}` });
-          agentStatus.value = 1;
-          isOnline.value = true;
-        } else {
-          // 隐身进入，确保状态从离线(0)更新为隐身(3)
-          await httpPost({ url: `/cs/agent/offline/${agentId.value}` });
-          agentStatus.value = 3;
+        try {
+          if (csOnlineLogin !== 'false') {
+            await httpPost({ url: `/cs/agent/online/${agentId.value}` }, { errorMessageMode: 'none' });
+            agentStatus.value = 1;
+            isOnline.value = true;
+          } else {
+            await httpPost({ url: `/cs/agent/offline/${agentId.value}` }, { errorMessageMode: 'none' });
+            agentStatus.value = 3;
+            isOnline.value = false;
+          }
+        } catch (e: any) {
+          if (e?.message?.includes('坐席已满')) {
+            message.warning('客服坐席已满，请联系管理员');
+            userStore.logout(true);
+            return;
+          }
         }
       }
     }
@@ -3977,6 +3991,13 @@ function connectWebSocket() {
         stopWsHealthCheck();
         stopFallbackPoll();
         if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+      } else if (event.code === 4005) {
+        stopWsHeartbeat();
+        stopWsHealthCheck();
+        stopFallbackPoll();
+        if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+        message.warning('客服坐席已满，无法上线');
+        userStore.logout(true);
       } else if (!wsManuallyClosed) {
         scheduleWsReconnect();
       }
@@ -4621,6 +4642,12 @@ function handleWsMessage(data: any) {
           ipBlacklisted.value = blAction === 'block';
         }
       }
+      break;
+    }
+    case 'quota_kick': {
+      message.warning(data.content || '客服坐席已满，您已被强制下线');
+      closeWebSocket();
+      userStore.logout(true);
       break;
     }
   }

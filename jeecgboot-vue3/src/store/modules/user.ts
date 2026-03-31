@@ -301,7 +301,7 @@ export const useUserStore = defineStore({
       const agentInfo = this.getCsAgentInfo;
       if (agentInfo?.agentId && (agentInfo.isAgent || agentInfo.isSubAgent)) {
         try {
-          await defHttp.post({ url: `/cs/agent/offline/${agentInfo.agentId}`, params: { trigger: 'logout' } }, { errorMessageMode: 'none' });
+          await defHttp.post({ url: `/cs/agent/offline/${agentInfo.agentId}?trigger=logout` }, { errorMessageMode: 'none' });
         } catch {
           // 忽略失败，WebSocket 断开后后端会兜底处理
         }

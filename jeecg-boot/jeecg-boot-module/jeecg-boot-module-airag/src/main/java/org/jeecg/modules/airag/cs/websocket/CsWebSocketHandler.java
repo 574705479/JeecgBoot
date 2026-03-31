@@ -4,10 +4,13 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import lombok.extern.slf4j.Slf4j;
 import org.jeecg.common.util.oConvertUtils;
+import org.jeecg.common.license.core.LicenseClientService;
+import org.jeecg.modules.airag.cs.entity.CsAgent;
 import org.jeecg.modules.airag.cs.entity.CsConversation;
 import org.jeecg.modules.airag.cs.service.ICsAgentService;
 import org.jeecg.modules.airag.cs.service.ICsConversationService;
 import org.jeecg.modules.airag.cs.service.ICsMessageService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.*;
@@ -51,6 +54,9 @@ public class CsWebSocketHandler implements WebSocketHandler {
     private final ICsConversationService conversationService;
     private final ICsAgentService agentService;
 
+    @Autowired(required = false)
+    private LicenseClientService licenseClientService;
+
     public CsWebSocketHandler(CsWebSocketSessionManager sessionManager,
                               @Lazy ICsMessageService messageService,
                               @Lazy ICsConversationService conversationService,
@@ -63,10 +69,29 @@ public class CsWebSocketHandler implements WebSocketHandler {
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
-        sessionManager.addSession(session);
-        
         String userId = sessionManager.getUserId(session);
         String userType = sessionManager.getUserType(session);
+
+        // 客服连接时，在 addSession 之前检查坐席限额（避免先覆盖旧session再拒绝导致新旧都丢失）
+        if (CsWebSocketInterceptor.USER_TYPE_AGENT.equals(userType)) {
+            CsAgent agent = agentService.getById(userId);
+            if (agent != null && agent.getStatus() != null
+                && agent.getStatus() == CsAgent.STATUS_OFFLINE) {
+                if (licenseClientService != null && licenseClientService.isLicensed()
+                    && licenseClientService.isQuotaExceeded("max_cs_agents")) {
+                    CsWebSocketMessage quotaMsg = CsWebSocketMessage.builder()
+                            .type("quota_exceeded")
+                            .content("客服坐席已满，无法上线")
+                            .build();
+                    session.sendMessage(new TextMessage(JSON.toJSONString(quotaMsg)));
+                    session.close(new CloseStatus(4005, "quota_exceeded"));
+                    log.warn("[CS-WebSocket] 坐席超限拒绝连接: agentId={}", userId);
+                    return;
+                }
+            }
+        }
+
+        sessionManager.addSession(session);
         String conversationId = sessionManager.getConversationId(session);
         
         // 构建extra信息

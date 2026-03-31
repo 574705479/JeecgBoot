@@ -17,6 +17,7 @@ import org.jeecg.common.api.vo.Result;
 import org.jeecg.common.constant.CacheConstant;
 import org.jeecg.common.constant.CommonConstant;
 import org.jeecg.common.constant.SymbolConstant;
+import org.jeecg.common.constant.WebsocketConst;
 import org.jeecg.common.constant.enums.DySmsEnum;
 import org.jeecg.common.system.util.JwtUtil;
 import org.jeecg.common.system.vo.LoginUser;
@@ -30,6 +31,7 @@ import org.jeecg.modules.system.entity.SysDepart;
 import org.jeecg.modules.system.entity.SysRoleIndex;
 import org.jeecg.modules.system.entity.SysUser;
 import org.jeecg.modules.system.model.SysLoginModel;
+import org.jeecg.modules.message.websocket.WebSocket;
 import org.jeecg.modules.system.service.*;
 import org.jeecg.modules.system.service.impl.SysBaseApiImpl;
 import org.jeecg.modules.system.util.RandImageUtil;
@@ -74,6 +76,8 @@ public class LoginController {
 	private org.jeecg.common.license.core.LicenseClientService licenseClientService;
 	@Autowired
 	private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+	@Autowired
+	private WebSocket webSocket;
 	
 	private final String BASE_CHECK_CODES = "qwertyuiplkjhgfdsazxcvbnmQWERTYUPLKJHGFDSAZXCVBNM1234567890";
 	/**
@@ -124,7 +128,7 @@ public class LoginController {
 		// step.5 登录成功获取用户信息
 		String loginOrgCode = sysLoginModel.getLoginOrgCode();
 		sysUser.setLoginOrgCode(loginOrgCode);
-		userInfo(sysUser, result, request, CommonConstant.CLIENT_TYPE_PC);
+		userInfo(sysUser, result, request, CommonConstant.CLIENT_TYPE_PC, sysLoginModel.getCsOnlineLogin());
 
 		// step.6  登录成功删除验证码
 		redisUtil.del(realKey);
@@ -446,7 +450,7 @@ public class LoginController {
 		//用户信息
 		String loginOrgCode = jsonObject.getString("loginOrgCode");
 		sysUser.setLoginOrgCode(loginOrgCode);
-		userInfo(sysUser, result, request, CommonConstant.CLIENT_TYPE_PHONE);
+		userInfo(sysUser, result, request, CommonConstant.CLIENT_TYPE_PHONE, null);
 		//添加日志
 		baseCommonService.addLog("用户名: " + sysUser.getUsername() + ",登录成功！", CommonConstant.LOG_TYPE_1, null);
         redisUtil.removeAll(redisKey);
@@ -461,12 +465,12 @@ public class LoginController {
 	 * @param result
 	 * @return
 	 */
-	private Result<JSONObject> userInfo(SysUser sysUser, Result<JSONObject> result, HttpServletRequest request, String clientType) {
-		// 授权配额检查：客服坐席数限制
+	private Result<JSONObject> userInfo(SysUser sysUser, Result<JSONObject> result, HttpServletRequest request, String clientType, Boolean csOnlineLogin) {
+		// 授权配额检查：客服坐席数限制（在线/忙碌/隐身都算占坐席）
 		if (licenseClientService != null && licenseClientService.isLicensed()) {
 			try {
 				Long agentOnline = jdbcTemplate.queryForObject(
-					"SELECT COUNT(*) FROM cs_agent WHERE user_id = ? AND status = 1",
+					"SELECT COUNT(*) FROM cs_agent WHERE user_id = ? AND status != 0",
 					Long.class, sysUser.getId());
 				if (agentOnline != null && agentOnline == 0) {
 					Long isAgent = jdbcTemplate.queryForObject(
@@ -496,7 +500,7 @@ public class LoginController {
 		obj.put("token", token);
 
 		// 是否允许同一账号多地同时登录，踢掉之前的登录
-		handleSingleSignOn(username, token, clientType);
+		handleSingleSignOn(username, sysUser.getId(), token, clientType);
 
 		//2.设置登录租户
 		Result<JSONObject> loginTenantError = sysUserService.setLoginTenant(sysUser, obj, username,result);
@@ -506,6 +510,7 @@ public class LoginController {
 
 		//3.设置登录用户信息
 		obj.put("userInfo", sysUser);
+		obj.put("csOnlineLogin", csOnlineLogin);
 		
 		//4.设置登录部门
 		List<SysDepart> departs = sysDepartService.queryUserDeparts(sysUser.getId());
@@ -561,10 +566,11 @@ public class LoginController {
 	 * PC端、APP端、手机号登录分别独立，互不影响
 	 * 
 	 * @param username 用户名
+	 * @param userId 用户ID
 	 * @param newToken 新生成的token
 	 * @param clientType 客户端类型（PC、APP、PHONE）
 	 */
-	private void handleSingleSignOn(String username, String newToken, String clientType) {
+	private void handleSingleSignOn(String username, String userId, String newToken, String clientType) {
 		// 检查是否允许并发登录
 		if (jeecgBaseConfig.getFirewall() == null || jeecgBaseConfig.getFirewall().getIsConcurrent()==null || Boolean.TRUE.equals(jeecgBaseConfig.getFirewall().getIsConcurrent())) {
 			// 允许并发登录，只设置当前用户的token缓存，不踢掉之前的登录
@@ -591,9 +597,23 @@ public class LoginController {
 			String oldToken = oldTokenObj.toString();
 			// 清除旧登录token的缓存（设置 1 小时过期时间）
 			redisUtil.del(CommonConstant.PREFIX_USER_TOKEN + oldToken);
-			redisUtil.set(CommonConstant.PREFIX_USER_TOKEN_ERROR_MSG + oldToken, "不允许同一账号多地同时登录，当前登录被踢掉！", 60 * 1 * 60);
+			String kickMsg = "您的账号已在其他地方登录，当前会话已被强制下线";
+			redisUtil.set(CommonConstant.PREFIX_USER_TOKEN_ERROR_MSG + oldToken, kickMsg, 60 * 1 * 60);
 			log.info("【并发登录限制已开启】用户[{}]在{}端的旧登录已被踢下线！", username, clientType);
 			log.info("【并发登录限制已开启】用户被踢下线，新token: {}，旧token：{}", newToken, oldToken);
+
+			// 通过 WebSocket 主动推送踢出通知给旧会话
+			try {
+				JSONObject msgJson = new JSONObject();
+				msgJson.put(WebsocketConst.MSG_CMD, WebsocketConst.CMD_KICK);
+				msgJson.put(WebsocketConst.MSG_TXT, kickMsg);
+				String msgStr = msgJson.toJSONString();
+				log.info("【踢人WebSocket】准备推送kick消息, userId={}, message={}", userId, msgStr);
+				webSocket.sendMessage(userId, msgStr);
+				log.info("【踢人WebSocket】sendMessage调用完成, userId={}", userId);
+			} catch (Exception e) {
+				log.warn("【踢人WebSocket】推送踢出通知失败，将降级为HTTP 401被动检测", e);
+			}
 		}
 		
 		// 保存新的token到单点登录缓存
@@ -733,7 +753,7 @@ public class LoginController {
 		result.setCode(200);
 
 		// 7.是否允许同一账号多地同时登录(APP端登录，踢掉之前的APP端登录)
-		handleSingleSignOn(username, token, CommonConstant.CLIENT_TYPE_APP);
+		handleSingleSignOn(username, sysUser.getId(), token, CommonConstant.CLIENT_TYPE_APP);
 		
 		// 8.登录成功记录日志
 		baseCommonService.addLog("用户名: " + username + ",登录成功[移动端]！", CommonConstant.LOG_TYPE_1, null);

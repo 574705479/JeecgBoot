@@ -22,17 +22,15 @@ public class SocketHandler implements JeecgRedisListener {
 
     @Override
     public void onMessage(BaseMap map) {
-        log.debug("【Redis发布订阅模式】redis Listener: {}，参数：{}",WebSocket.REDIS_TOPIC_NAME, map.toString());
+        log.info("【踢人WebSocket-SocketHandler】收到Redis消息: {}", map.toString());
 
         String userId = map.get("userId");
         String message = map.get("message");
         if (ObjectUtil.isNotEmpty(userId)) {
-            //pc端消息推送具体人
+            log.info("【踢人WebSocket-SocketHandler】推送给userId={}, message={}", userId, message);
             webSocket.pushMessage(userId, message);
-            //app端消息推送具体人
             webSocket.pushMessage(userId+CommonSendStatus.APP_SESSION_SUFFIX, message);
         } else {
-            //推送全部
             webSocket.pushMessage(message);
         }
 

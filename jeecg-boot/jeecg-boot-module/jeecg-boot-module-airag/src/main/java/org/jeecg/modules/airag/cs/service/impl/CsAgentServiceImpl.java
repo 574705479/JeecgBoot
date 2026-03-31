@@ -368,9 +368,9 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
 
     @Override
     public List<CsAgent> getOnlineAgents() {
-        // 查询所有在线客服（不限角色）
+        // 查询所有非离线客服（在线/忙碌/隐身都算占坐席）
         LambdaQueryWrapper<CsAgent> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.eq(CsAgent::getStatus, CsAgent.STATUS_ONLINE);
+        queryWrapper.ne(CsAgent::getStatus, CsAgent.STATUS_OFFLINE);
         return list(queryWrapper);
     }
 
