@@ -73,13 +73,18 @@
           <div class="app-info">
             <span v-if="!chatWindowConfig.hidePageTitle" class="app-name">{{ chatWindowConfig.pageTitle || appInfo.name || '在线客服' }}</span>
             <span class="status-text">
-              <template v-if="!chatWindowConfig.hideOnlineStatus">
-                <span :class="['status-dot', connectionStatus]"></span>
-                {{ connectionStatusText }}
+              <template v-if="chatWindowConfig.humanAgentEnabled && !hasAgent">
+                <a-tag color="cyan" size="small" style="margin-left: 6px;">智能回复</a-tag>
               </template>
-              <template v-if="!chatWindowConfig.hideAiHumanLabel">
-                <a-tag v-if="hasAgent && replyMode === 1" color="green" size="small" style="margin-left: 6px;">人工服务</a-tag>
-                <a-tag v-else-if="replyMode === 0" color="blue" size="small" style="margin-left: 6px;">AI客服</a-tag>
+              <template v-else>
+                <template v-if="!chatWindowConfig.hideOnlineStatus">
+                  <span :class="['status-dot', connectionStatus]"></span>
+                  {{ connectionStatusText }}
+                </template>
+                <template v-if="!chatWindowConfig.hideAiHumanLabel">
+                  <a-tag v-if="hasAgent && replyMode === 1" color="green" size="small" style="margin-left: 6px;">人工服务</a-tag>
+                  <a-tag v-else-if="replyMode === 0" color="blue" size="small" style="margin-left: 6px;">AI客服</a-tag>
+                </template>
               </template>
             </span>
           </div>

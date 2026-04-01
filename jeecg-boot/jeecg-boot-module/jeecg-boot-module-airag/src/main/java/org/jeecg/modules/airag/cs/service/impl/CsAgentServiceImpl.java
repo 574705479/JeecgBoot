@@ -22,6 +22,8 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import jakarta.annotation.PostConstruct;
+
 import java.util.Date;
 import java.util.List;
 
@@ -50,6 +52,19 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
 
     @Autowired
     private ICsAgentStatusLogService agentStatusLogService;
+
+    @PostConstruct
+    public void resetAllAgentsOnStartup() {
+        long count = count(new LambdaQueryWrapper<CsAgent>()
+                .ne(CsAgent::getStatus, CsAgent.STATUS_OFFLINE));
+        if (count > 0) {
+            update(new LambdaUpdateWrapper<CsAgent>()
+                    .ne(CsAgent::getStatus, CsAgent.STATUS_OFFLINE)
+                    .set(CsAgent::getStatus, CsAgent.STATUS_OFFLINE)
+                    .set(CsAgent::getCurrentSessions, 0));
+            log.info("[CS-Agent] 服务启动，批量重置{}个客服为离线状态", count);
+        }
+    }
 
     @Override
     public CsAgent getByUserId(String userId) {

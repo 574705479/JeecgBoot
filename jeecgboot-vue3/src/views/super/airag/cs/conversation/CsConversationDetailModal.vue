@@ -17,8 +17,13 @@
         </a-descriptions-item>
         <a-descriptions-item label="访客">
           <span class="user-info">
-            <a-avatar size="small">{{ (record?.userName || '访').charAt(0) }}</a-avatar>
-            {{ record?.userName || record?.userId || '匿名访客' }}
+            <a-avatar size="small">{{ (record?.visitorNickname || record?.userName || '访').charAt(0) }}</a-avatar>
+            {{ record?.visitorNickname || record?.userName || record?.userId || '匿名访客' }}
+            <template v-if="parsedCustomFields.length">
+              <a-tag v-for="cf in parsedCustomFields" :key="cf.label" color="red" size="small" style="margin-left: 4px;">
+                {{ cf.label }}: {{ cf.value }}
+              </a-tag>
+            </template>
           </span>
         </a-descriptions-item>
         <a-descriptions-item label="负责客服">
@@ -211,6 +216,14 @@
                   </div>
                 </div>
 
+                <div v-if="parsedCustomFields.length" class="info-section">
+                  <div class="section-title">转人工填写信息</div>
+                  <div v-for="cf in parsedCustomFields" :key="cf.label" class="info-item">
+                    <label>{{ cf.label }}</label>
+                    <span class="info-value" style="color: #ff4d4f; font-weight: 500;">{{ cf.value }}</span>
+                  </div>
+                </div>
+
                 <div class="info-section">
                   <div class="section-title">标签</div>
                   <div class="tags-wrapper">
@@ -271,12 +284,14 @@ function isAiMessage(msg: any): boolean {
 }
 
 const chatWindowLogo = ref('');
-async function loadChatWindowLogo() {
+const chatWindowSettings = ref<any>({});
+async function loadChatWindowSettings() {
   try {
     const res = await defHttp.get({ url: '/cs/agent/global/chat-window-settings' });
     let parsed: any = {};
     if (typeof res === 'string') { try { parsed = JSON.parse(res); } catch {} }
     else if (res && typeof res === 'object') { parsed = res; }
+    chatWindowSettings.value = parsed;
     if (parsed.logo) chatWindowLogo.value = parsed.logo;
   } catch {}
 }
@@ -435,6 +450,24 @@ const visitorTags = computed(() => {
   }
 });
 
+const parsedCustomFields = computed(() => {
+  const raw = record.value?.customFields;
+  if (!raw) return [];
+  try {
+    const fields = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (typeof fields === 'object' && fields !== null) {
+      const all = Object.entries(fields).map(([label, value]) => ({ label, value: String(value) }));
+      const fieldDefs = chatWindowSettings.value?.humanAgentFields;
+      if (!Array.isArray(fieldDefs) || !fieldDefs.length) return all;
+      return all.filter((f) => {
+        const def = fieldDefs.find((d: any) => d.label === f.label);
+        return !def || def.showInHistory !== false;
+      });
+    }
+  } catch {}
+  return [];
+});
+
 function formatResponseTime(seconds: number | null | undefined) {
   if (seconds == null) return '-';
   if (seconds === 0) return '立即响应';
@@ -477,7 +510,7 @@ const [registerModal] = useModalInner(async (data) => {
   visitorInfo.value = null;
   
   if (record.value?.id) {
-    await Promise.all([loadMessages(record.value.id), loadChatWindowLogo()]);
+    await Promise.all([loadMessages(record.value.id), loadChatWindowSettings()]);
     loadVisitorInfo();
   }
 });

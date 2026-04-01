@@ -19,7 +19,8 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, h } from 'vue';
+import { Tag } from 'ant-design-vue';
 import { BasicTable, useTable, TableAction } from '/@/components/Table';
 import { useModal } from '/@/components/Modal';
 import { defHttp } from '/@/utils/http/axios';
@@ -32,6 +33,18 @@ const [registerDetailModal, { openModal: openDetailModal }] = useModal();
 
 // 客服列表（用于筛选）
 const agentOptions = ref<{ label: string; value: string }[]>([]);
+
+// 聊天窗口配置（用于判断展示位置开关）
+const chatWindowSettings = ref<any>({});
+async function loadChatWindowSettings() {
+  try {
+    const res = await defHttp.get({ url: '/cs/agent/global/chat-window-settings' });
+    let parsed: any = {};
+    if (typeof res === 'string') { try { parsed = JSON.parse(res); } catch {} }
+    else if (res && typeof res === 'object') { parsed = res; }
+    chatWindowSettings.value = parsed;
+  } catch {}
+}
 
 // 加载客服列表
 async function loadAgentList() {
@@ -49,12 +62,38 @@ async function loadAgentList() {
 
 onMounted(() => {
   loadAgentList();
+  loadChatWindowSettings();
 });
 
 const columns = [
   { title: '会话ID', dataIndex: 'id', width: 220 },
   { title: '客服', dataIndex: 'ownerAgentName', width: 100,
     customRender: ({ text }: any) => text || '-'
+  },
+  { title: '接入信息', dataIndex: 'customFields', width: 220,
+    customRender: ({ text }: any) => {
+      if (!text) return '-';
+      try {
+        const fields = typeof text === 'string' ? JSON.parse(text) : text;
+        if (typeof fields === 'object' && fields !== null) {
+          const fieldDefs = chatWindowSettings.value?.humanAgentFields;
+          const entries = Object.entries(fields).filter(([k]) => {
+            if (!Array.isArray(fieldDefs) || !fieldDefs.length) return true;
+            const def = fieldDefs.find((d: any) => d.label === k);
+            return !def || def.showInHistory !== false;
+          });
+          if (!entries.length) return '-';
+          const tags = entries.map(([k, v]) =>
+            h(Tag, { color: 'red', size: 'small', style: 'margin: 2px' }, () => `${k}: ${v}`)
+          );
+          return h('div', { style: 'display: flex; flex-wrap: wrap; gap: 2px;' }, tags);
+        }
+      } catch {}
+      return '-';
+    }
+  },
+  { title: '访客昵称', dataIndex: 'visitorNickname', width: 120,
+    customRender: ({ text, record }: any) => text || record.userName || '-'
   },
   { title: '客服消息数', dataIndex: 'agentMessageCount', width: 90, align: 'center' as const,
     customRender: ({ text }: any) => text ?? 0
@@ -268,7 +307,7 @@ const [registerTable, { reload }] = useTable({
   useSearchForm: true,
   showTableSetting: true,
   bordered: true,
-  scroll: { x: 2800 },
+  scroll: { x: 3160 },
   showIndexColumn: false,
   rowKey: 'id',
   actionColumn: {

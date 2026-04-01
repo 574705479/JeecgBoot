@@ -280,14 +280,15 @@
                     </a-button>
                     <div v-if="!config.humanAgentFields.length" style="color:#bbb;font-size:12px;padding:8px 0">暂未配置字段</div>
                     <div v-for="(field, fIdx) in config.humanAgentFields" :key="fIdx" class="human-agent-field-row">
-                      <a-input v-model:value="field.label" placeholder="字段名称" style="width:140px" size="small" />
-                      <a-select v-model:value="field.type" style="width:110px" size="small">
-                        <a-select-option value="text">文本</a-select-option>
-                        <a-select-option value="phone">手机号</a-select-option>
-                        <a-select-option value="email">邮箱</a-select-option>
-                      </a-select>
-                      <a-checkbox v-model:checked="field.required">必填</a-checkbox>
-                      <a-button type="text" size="small" danger @click="config.humanAgentFields.splice(fIdx, 1)"><DeleteOutlined /></a-button>
+                      <div style="display: flex; align-items: center; gap: 8px;">
+                        <a-input v-model:value="field.label" placeholder="字段名称" style="width:140px" size="small" />
+                        <a-checkbox v-model:checked="field.required">必填</a-checkbox>
+                        <span style="color: #999; font-size: 11px; margin-left: 4px;">展示：</span>
+                        <a-checkbox v-model:checked="field.showInHeader" size="small"><span style="font-size:12px">会话头部</span></a-checkbox>
+                        <a-checkbox v-model:checked="field.showInConvList" size="small"><span style="font-size:12px">会话气泡</span></a-checkbox>
+                        <a-checkbox v-model:checked="field.showInHistory" size="small"><span style="font-size:12px">访客信息</span></a-checkbox>
+                        <a-button type="text" size="small" danger @click="config.humanAgentFields.splice(fIdx, 1)"><DeleteOutlined /></a-button>
+                      </div>
                     </div>
                   </div>
                 </a-form-item>
@@ -718,7 +719,7 @@ const config = reactive({
   mobileHeaderBgImageMode: 'cover' as string,
   mobileHeaderBgPosition: 'center' as string,
   humanAgentEnabled: false,
-  humanAgentFields: [] as Array<{ label: string; type: string; required: boolean }>,
+  humanAgentFields: [] as Array<{ label: string; type: string; required: boolean; showInHeader?: boolean; showInConvList?: boolean; showInHistory?: boolean }>,
   messageBoardEnabled: true,
   faqLinkColor: '#e8453c',
   faqNavColor: '#1890ff',
@@ -824,7 +825,7 @@ function removeFaq(path: number[], idx: number) {
 
 // ==================== 人工客服字段 ====================
 function addHumanAgentField() {
-  config.humanAgentFields.push({ label: '', type: 'text', required: false });
+  config.humanAgentFields.push({ label: '', type: 'text', required: false, showInHeader: true, showInConvList: true, showInHistory: true });
 }
 
 // ==================== 头部图标 ====================
@@ -1004,7 +1005,7 @@ onMounted(() => {
 .settings-form {
   flex: 1;
   min-width: 0;
-  max-width: 640px;
+  max-width: 680px;
 }
 .settings-preview {
   flex: 0 0 auto;

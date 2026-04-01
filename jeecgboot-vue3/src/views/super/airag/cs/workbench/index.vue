@@ -355,6 +355,12 @@
               <span class="waiting-icon">⏱</span>
               <span class="waiting-text">等待回复 {{ formatWaitingTime(visitorWaitingSeconds[conv.id]) }}</span>
             </div>
+            <div class="conv-custom-tags" v-if="parseConvCustomFields(conv, 'showInConvList').length">
+              <a-tag v-for="cf in parseConvCustomFields(conv, 'showInConvList')" :key="cf.label" color="red" size="small"
+                style="color: #cf1322; background: #fff1f0; border-color: #ffa39e;">
+                {{ cf.label }}: {{ cf.value }}
+              </a-tag>
+            </div>
           </div>
           <div class="conv-badge" v-if="conv.unreadCount > 0">
             {{ conv.unreadCount > 99 ? '99+' : conv.unreadCount }}
@@ -446,6 +452,12 @@
                   <span class="waiting-icon">⏱</span>
                   <span class="waiting-text">等待回复 {{ formatWaitingTime(visitorWaitingSeconds[conv.id]) }}</span>
                 </div>
+                <div class="conv-custom-tags" v-if="parseConvCustomFields(conv, 'showInConvList').length">
+                  <a-tag v-for="cf in parseConvCustomFields(conv, 'showInConvList')" :key="cf.label" color="red" size="small"
+                    style="color: #cf1322; background: #fff1f0; border-color: #ffa39e;">
+                    {{ cf.label }}: {{ cf.value }}
+                  </a-tag>
+                </div>
               </div>
               <div class="conv-badge" v-if="conv.unreadCount > 0">
                 {{ conv.unreadCount > 99 ? '99+' : conv.unreadCount }}
@@ -479,7 +491,8 @@
               </span>
             </div>
             <div v-if="parsedCustomFields.length" class="custom-fields-header">
-              <a-tag v-for="cf in parsedCustomFields" :key="cf.label" color="red" size="small">
+              <a-tag v-for="cf in parsedCustomFields" :key="cf.label" color="red" size="small"
+                style="color: #cf1322; background: #fff1f0; border-color: #ffa39e;">
                 {{ cf.label }}: {{ cf.value }}
               </a-tag>
             </div>
@@ -860,16 +873,13 @@
           </div>
         </div>
 
-        <!-- 自定义字段信息（暂时隐藏） -->
-        <!--
-        <div v-if="parsedCustomFields.length" class="info-section">
+        <div v-if="parsedCustomFieldsForVisitorInfo.length" class="info-section">
           <div class="section-title">转人工填写信息</div>
-          <div v-for="cf in parsedCustomFields" :key="cf.label" class="info-item">
-            <label>{{ cf.label }}</label>
+          <div v-for="cf in parsedCustomFieldsForVisitorInfo" :key="cf.label" class="info-item">
+            <label style="color: #ff4d4f;">{{ cf.label }}</label>
             <span class="info-value" style="color: #ff4d4f; font-weight: 500;">{{ cf.value }}</span>
           </div>
         </div>
-        -->
 
         <!-- 访问信息 -->
         <div class="info-section">
@@ -1372,6 +1382,7 @@ function httpDelete<T = any>(config: any, options: any = {}) {
 
 // 聊天窗口配置 Logo（优先级高于品牌配置 Logo）
 const chatWindowLogo = ref('');
+const chatWindowSettings = ref<any>({});
 
 // 客服信息
 const agentId = ref('');
@@ -1404,6 +1415,7 @@ const agentTimeoutConfig = ref({ enabled: false, seconds: 20 });
 const visitorWaitingSeconds = ref<Record<string, number>>({});
 // 访客最后发消息时间戳（conversationId -> timestamp ms），客服回复后清除
 const visitorLastMsgTime = new Map<string, number>();
+const timeoutNotifiedSet = new Set<string>();
 let waitingTimerHandle: ReturnType<typeof setInterval> | null = null;
 
 // 会话列表
@@ -1588,15 +1600,12 @@ const showDetailPanel = ref(true);
 
 // 解析当前会话的自定义字段
 const parsedCustomFields = computed(() => {
-  const conv = currentConversation.value;
-  if (!conv?.customFields) return [];
-  try {
-    const fields = typeof conv.customFields === 'string' ? JSON.parse(conv.customFields) : conv.customFields;
-    if (typeof fields === 'object' && fields !== null) {
-      return Object.entries(fields).map(([label, value]) => ({ label, value: String(value) }));
-    }
-  } catch {}
-  return [];
+  const all = parseCustomFieldsRaw(currentConversation.value?.customFields);
+  return filterFieldsByLocation(all, 'showInHeader');
+});
+const parsedCustomFieldsForVisitorInfo = computed(() => {
+  const all = parseCustomFieldsRaw(currentConversation.value?.customFields);
+  return filterFieldsByLocation(all, 'showInHistory');
 });
 const userOnline = ref(false);
 const userIdBlacklisted = ref(false);
@@ -1916,7 +1925,7 @@ onMounted(async () => {
     loadAiPrologueEnabled(),      // 加载AI开场白开关状态
     loadGlobalVisitorApp(),       // 加载全局访客AI应用配置
     loadAgentTimeoutConfig(),     // 加载客服超时未回复配置
-    loadChatWindowLogo(),         // 加载聊天窗口Logo
+    loadChatWindowSettings(),     // 加载聊天窗口配置
     loadConversations(),
     loadQuickReplies(),           // 预加载快捷回复（快捷键匹配需要）
   ]);
@@ -2533,8 +2542,8 @@ async function loadGlobalVisitorApp() {
   }
 }
 
-// 加载聊天窗口配置 Logo
-async function loadChatWindowLogo() {
+// 加载聊天窗口配置
+async function loadChatWindowSettings() {
   try {
     const res = await httpGet({ url: '/cs/agent/global/chat-window-settings' });
     let parsed: any = {};
@@ -2543,6 +2552,7 @@ async function loadChatWindowLogo() {
     } else if (res && typeof res === 'object') {
       parsed = res;
     }
+    chatWindowSettings.value = parsed;
     if (parsed.logo) {
       chatWindowLogo.value = parsed.logo;
     }
@@ -2691,13 +2701,21 @@ function startWaitingTimer() {
     const now = Date.now();
     const threshold = agentTimeoutConfig.value.seconds;
     const newWaiting: Record<string, number> = {};
+    let shouldNotify = false;
     visitorLastMsgTime.forEach((ts, convId) => {
       const elapsed = Math.floor((now - ts) / 1000);
       if (elapsed >= threshold) {
         newWaiting[convId] = elapsed;
+        if (!timeoutNotifiedSet.has(convId)) {
+          timeoutNotifiedSet.add(convId);
+          shouldNotify = true;
+        }
       }
     });
     visitorWaitingSeconds.value = newWaiting;
+    if (shouldNotify && shouldPlaySound()) {
+      playNotificationSound();
+    }
   }, 1000);
 }
 
@@ -2725,6 +2743,7 @@ function markVisitorWaiting(conversationId: string, timestamp?: number) {
 /** 清除会话的等待标记（客服已回复） */
 function clearVisitorWaiting(conversationId: string) {
   visitorLastMsgTime.delete(conversationId);
+  timeoutNotifiedSet.delete(conversationId);
   const w = { ...visitorWaitingSeconds.value };
   delete w[conversationId];
   visitorWaitingSeconds.value = w;
@@ -3060,14 +3079,36 @@ function getDisplayName(conv: any): string {
   return conv.visitorNickname || conv.userName || '访客';
 }
 
+function parseCustomFieldsRaw(customFields: any): Array<{label: string, value: string}> {
+  if (!customFields) return [];
+  try {
+    const fields = typeof customFields === 'string' ? JSON.parse(customFields) : customFields;
+    if (typeof fields === 'object' && fields !== null) {
+      return Object.entries(fields).map(([label, value]) => ({ label, value: String(value) }));
+    }
+  } catch {}
+  return [];
+}
+
+function filterFieldsByLocation(allFields: Array<{label: string, value: string}>, location: 'showInHeader' | 'showInConvList' | 'showInHistory'): Array<{label: string, value: string}> {
+  const fieldDefs = chatWindowSettings.value?.humanAgentFields;
+  if (!Array.isArray(fieldDefs) || !fieldDefs.length) return allFields;
+  return allFields.filter((f) => {
+    const def = fieldDefs.find((d: any) => d.label === f.label);
+    return !def || def[location] !== false;
+  });
+}
+
+function parseConvCustomFields(conv: any, location?: 'showInHeader' | 'showInConvList' | 'showInHistory'): Array<{label: string, value: string}> {
+  const all = parseCustomFieldsRaw(conv?.customFields);
+  return location ? filterFieldsByLocation(all, location) : all;
+}
+
 function getVisitorDisplayName(msg?: any): string {
-  const nickname = currentConversation.value?.visitorNickname;
-  if (nickname) {
-    return nickname;
-  }
-  if (msg?.senderName) {
-    return msg.senderName;
-  }
+  const conv = currentConversation.value;
+  if (conv?.visitorNickname) return conv.visitorNickname;
+  if (conv?.userName) return conv.userName;
+  if (msg?.senderName) return msg.senderName;
   return '访客';
 }
 
@@ -4095,13 +4136,18 @@ function handleWsMessage(data: any) {
       // 延迟刷新统计数据（防抖）
       loadStatsDebounced();
 
-      // 用户消息：提示音 + 弹窗通知
+      // 用户消息：提示音 + 弹窗通知（仅分配给当前客服或未分配的会话）
       if (data.senderType === 0 && conv) {
-        if (shouldPlaySound() &&
+        const isMyConv = !conv.ownerAgentId
+          || conv.ownerAgentId === agentId.value
+          || conv.collaborators?.some((c: any) => c.agentId === agentId.value);
+        if (isMyConv && shouldPlaySound() &&
             (currentConversation.value?.id !== data.conversationId || !document.hasFocus())) {
           playNotificationSound();
         }
-        notifyNewMessage(conv, data);
+        if (isMyConv) {
+          notifyNewMessage(conv, data);
+        }
       }
       break;
     case 'delivery_failed': {
@@ -4671,8 +4717,8 @@ function playNotificationSound() {
     osc1.connect(gain1);
     gain1.connect(audioCtx.destination);
     osc1.frequency.value = 880;
-    gain1.gain.setValueAtTime(0.3, t);
-    gain1.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
+    gain1.gain.setValueAtTime(0.8, t);
+    gain1.gain.exponentialRampToValueAtTime(0.05, t + 0.15);
     osc1.start(t);
     osc1.stop(t + 0.15);
     const osc2 = audioCtx.createOscillator();
@@ -4680,8 +4726,8 @@ function playNotificationSound() {
     osc2.connect(gain2);
     gain2.connect(audioCtx.destination);
     osc2.frequency.value = 1318.5;
-    gain2.gain.setValueAtTime(0.3, t + 0.18);
-    gain2.gain.exponentialRampToValueAtTime(0.01, t + 0.4);
+    gain2.gain.setValueAtTime(0.8, t + 0.18);
+    gain2.gain.exponentialRampToValueAtTime(0.05, t + 0.4);
     osc2.start(t + 0.18);
     osc2.stop(t + 0.4);
   } catch { /* 忽略音频播放异常 */ }
@@ -5650,6 +5696,18 @@ function restoreMessageScroll() {
     font-size: 11px;
     color: var(--cs-text-muted);
     flex-shrink: 0;
+  }
+
+  .conv-custom-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    margin-top: 2px;
+    :deep(.ant-tag) {
+      font-size: 11px;
+      line-height: 18px;
+      margin-right: 0;
+    }
   }
 
   .conv-preview {

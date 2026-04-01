@@ -12,11 +12,11 @@
           <a-switch v-model:checked="config.enabled" />
         </a-form-item>
 
-        <a-form-item label="敏感词列表（每行一个）">
+        <a-form-item label="敏感词列表（每行一个或多个，多个可用逗号分隔）">
           <a-textarea
             v-model:value="wordsText"
             :rows="12"
-            placeholder="每行输入一个敏感词&#10;例如：&#10;敏感词1&#10;敏感词2"
+            placeholder="每行输入一个或多个敏感词，多个可用逗号分隔&#10;例如：&#10;敏感词1，敏感词2&#10;敏感词3"
             :disabled="!config.enabled"
           />
           <div class="word-count">共 {{ wordCount }} 个敏感词</div>
@@ -45,12 +45,16 @@ const config = reactive({
 
 const wordsText = ref('');
 
-const wordCount = computed(() => {
-  return wordsText.value
-    .split('\n')
-    .map((w) => w.trim())
-    .filter((w) => w.length > 0).length;
-});
+function parseWords(text: string): string[] {
+  return [...new Set(
+    text
+      .split(/[\n,，]/)
+      .map((w) => w.trim())
+      .filter((w) => w.length > 0)
+  )];
+}
+
+const wordCount = computed(() => parseWords(wordsText.value).length);
 
 async function fetchConfig() {
   try {
@@ -71,12 +75,9 @@ async function fetchConfig() {
 }
 
 async function handleSave() {
-  // 解析文本为数组
-  const words = wordsText.value
-    .split('\n')
-    .map((w) => w.trim())
-    .filter((w) => w.length > 0);
+  const words = parseWords(wordsText.value);
   config.words = words;
+  wordsText.value = words.join('\n');
 
   saving.value = true;
   try {
