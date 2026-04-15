@@ -276,7 +276,8 @@ public class CsAgentLoginLogFilter implements Filter {
     }
 
     /**
-     * 清除已生成的登录 token 和 SSO 映射
+     * 清除已生成的登录 token；PC 端 single_login 映射仅在与本次发放的 token 一致时再删，避免误清 APP/PHONE 端映射。
+     * （本过滤器仅处理 /sys/login，对应 PC 端签发。）
      */
     private void invalidateLoginToken(JSONObject responseJson, String username) {
         try {
@@ -287,10 +288,13 @@ public class CsAgentLoginLogFilter implements Filter {
                 redisTemplate.delete(CommonConstant.PREFIX_USER_TOKEN + token);
                 log.info("[CS-Security] 已清除token: {}", token);
             }
-            if (oConvertUtils.isNotEmpty(username)) {
-                redisTemplate.delete(CommonConstant.PREFIX_USER_TOKEN_PC + username);
-                redisTemplate.delete(CommonConstant.PREFIX_USER_TOKEN_APP + username);
-                redisTemplate.delete(CommonConstant.PREFIX_USER_TOKEN_PHONE + username);
+            if (oConvertUtils.isNotEmpty(username) && oConvertUtils.isNotEmpty(token)) {
+                String pcKey = CommonConstant.PREFIX_USER_TOKEN_PC + username;
+                String mapped = redisTemplate.opsForValue().get(pcKey);
+                if (token.equals(mapped)) {
+                    redisTemplate.delete(pcKey);
+                    log.info("[CS-Security] 已按条件清除 PC 单点登录映射: username={}", username);
+                }
             }
         } catch (Exception e) {
             log.error("[CS-Security] 清除token失败", e);

@@ -145,6 +145,17 @@
               un-checked-children="关闭"
               @change="onSoundEnabledChange"
             />
+            <template v-if="soundEnabled">
+              <div class="setting-desc" style="margin-top: 12px">提示音音量（100% 与访客端默认一致；高音量可能失真）</div>
+              <a-slider
+                v-model:value="soundVolumePercent"
+                :min="0"
+                :max="200"
+                :step="5"
+                :marks="soundVolumeSliderMarks"
+                :tooltip="soundVolumeTooltip"
+              />
+            </template>
           </div>
 
           <a-divider />
@@ -1144,6 +1155,7 @@ import { getToken } from '/@/utils/auth';
 import EmojiPicker from '../components/EmojiPicker.vue';
 import { computeFileMd5 } from '../utils/fileHash';
 import { encryptTransport, decryptTransport, decryptMessage } from '../utils/csEncrypt';
+import { playCsNotificationSound, CS_NOTIFY_MAX_GAIN } from '../utils/csNotificationSound';
 import { withImageCache, preloadImages, onImageError, getCachedChatWindowConfig, setCachedChatWindowConfig } from '../utils/csImageCache';
 // ★ 为回复建议保留Markdown渲染能力
 import MarkdownIt from 'markdown-it';
@@ -1413,7 +1425,20 @@ const visitorAppId = ref<string | undefined>(undefined);   // 访客AI应用
 const aiAppList = ref<any[]>([]);
 const showSettingsDrawer = ref(false);
 const SOUND_STORAGE_KEY = 'cs_workbench_sound_enabled';
+const SOUND_VOLUME_STORAGE_KEY = 'cs_workbench_sound_volume';
+function readSoundVolumePercent(): number {
+  const raw = localStorage.getItem(SOUND_VOLUME_STORAGE_KEY);
+  const n = raw != null ? parseInt(raw, 10) : NaN;
+  if (!Number.isFinite(n)) return 100;
+  return Math.max(0, Math.min(200, n));
+}
 const soundEnabled = ref(localStorage.getItem(SOUND_STORAGE_KEY) !== 'false');
+const soundVolumePercent = ref(readSoundVolumePercent());
+watch(soundVolumePercent, (v) => {
+  localStorage.setItem(SOUND_VOLUME_STORAGE_KEY, String(v));
+});
+const soundVolumeSliderMarks: Record<number, string> = { 0: '0%', 100: '100%', 200: '200%' };
+const soundVolumeTooltip = { formatter: (v?: number) => (v != null ? `${v}%` : '') };
 function onSoundEnabledChange(val: boolean) {
   localStorage.setItem(SOUND_STORAGE_KEY, String(val));
 }
@@ -4744,25 +4769,8 @@ function playNotificationSound() {
   try {
     if (!audioCtx) audioCtx = new AudioContext();
     if (audioCtx.state === 'suspended') audioCtx.resume();
-    const t = audioCtx.currentTime;
-    const osc1 = audioCtx.createOscillator();
-    const gain1 = audioCtx.createGain();
-    osc1.connect(gain1);
-    gain1.connect(audioCtx.destination);
-    osc1.frequency.value = 880;
-    gain1.gain.setValueAtTime(0.8, t);
-    gain1.gain.exponentialRampToValueAtTime(0.05, t + 0.15);
-    osc1.start(t);
-    osc1.stop(t + 0.15);
-    const osc2 = audioCtx.createOscillator();
-    const gain2 = audioCtx.createGain();
-    osc2.connect(gain2);
-    gain2.connect(audioCtx.destination);
-    osc2.frequency.value = 1318.5;
-    gain2.gain.setValueAtTime(0.8, t + 0.18);
-    gain2.gain.exponentialRampToValueAtTime(0.05, t + 0.4);
-    osc2.start(t + 0.18);
-    osc2.stop(t + 0.4);
+    const mult = Math.max(0, Math.min(CS_NOTIFY_MAX_GAIN, soundVolumePercent.value / 100));
+    playCsNotificationSound(audioCtx, mult);
   } catch { /* 忽略音频播放异常 */ }
 }
 

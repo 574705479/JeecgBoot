@@ -218,10 +218,21 @@ public class LoginController {
 			redisUtil.del(CommonConstant.PREFIX_USER_SHIRO_CACHE + sysUser.getId());
 			//清空用户的缓存信息（包括部门信息），例如sys:cache:user::<username>
 			redisUtil.del(String.format("%s::%s", CacheConstant.SYS_USERS_CACHE, sysUser.getUsername()));
-			//清空是否允许同一账号多地同时登录缓存（PC端和APP端）
-			redisUtil.del(CommonConstant.PREFIX_USER_TOKEN_PC + sysUser.getUsername());
-			redisUtil.del(CommonConstant.PREFIX_USER_TOKEN_APP + sysUser.getUsername());
-			redisUtil.del(CommonConstant.PREFIX_USER_TOKEN_PHONE + sysUser.getUsername());
+			// 单点登录映射：仅当当前 token 仍为该端映射中的「当前会话」时再删除，避免误清导致孤儿 JWT 无法被后续登录互踢
+			String clientType = JwtUtil.getClientType(token);
+			String redisKeyPrefix;
+			if (CommonConstant.CLIENT_TYPE_APP.equalsIgnoreCase(clientType)) {
+				redisKeyPrefix = CommonConstant.PREFIX_USER_TOKEN_APP;
+			} else if (CommonConstant.CLIENT_TYPE_PHONE.equalsIgnoreCase(clientType)) {
+				redisKeyPrefix = CommonConstant.PREFIX_USER_TOKEN_PHONE;
+			} else {
+				redisKeyPrefix = CommonConstant.PREFIX_USER_TOKEN_PC;
+			}
+			String userTokenKey = redisKeyPrefix + sysUser.getUsername();
+			Object mappedTokenObj = redisUtil.get(userTokenKey);
+			if (mappedTokenObj != null && token.equals(mappedTokenObj.toString())) {
+				redisUtil.del(userTokenKey);
+			}
 			baseCommonService.addLog("用户名: "+sysUser.getRealname()+",退出成功！", CommonConstant.LOG_TYPE_1, null, sysUser);
 			log.debug("【退出成功操作】异步处理，退出后，清理用户缓存： "+sysUser.getRealname());
 		});

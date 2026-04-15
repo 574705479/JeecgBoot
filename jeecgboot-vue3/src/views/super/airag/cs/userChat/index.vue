@@ -498,6 +498,7 @@ import { createImgPreview } from '/@/components/Preview';
 import EmojiPicker from '../components/EmojiPicker.vue';
 import { computeFileMd5 } from '../utils/fileHash';
 import { encryptTransport, decryptTransport, decryptMessage, decryptStorage } from '../utils/csEncrypt';
+import { playCsNotificationSound } from '../utils/csNotificationSound';
 import { withImageCache, preloadImages, onImageError, getCachedChatWindowConfig, setCachedChatWindowConfig } from '../utils/csImageCache';
 import { getBrandSetting, DEFAULT_BRAND } from '/@/settings/brandSetting';
 
@@ -1129,25 +1130,7 @@ function playNotificationSound() {
   lastSoundTime = now;
   try {
     ensureAudioCtx();
-    const t = audioCtx!.currentTime;
-    const osc1 = audioCtx!.createOscillator();
-    const gain1 = audioCtx!.createGain();
-    osc1.connect(gain1);
-    gain1.connect(audioCtx!.destination);
-    osc1.frequency.value = 880;
-    gain1.gain.setValueAtTime(0.3, t);
-    gain1.gain.exponentialRampToValueAtTime(0.01, t + 0.15);
-    osc1.start(t);
-    osc1.stop(t + 0.15);
-    const osc2 = audioCtx!.createOscillator();
-    const gain2 = audioCtx!.createGain();
-    osc2.connect(gain2);
-    gain2.connect(audioCtx!.destination);
-    osc2.frequency.value = 1318.5;
-    gain2.gain.setValueAtTime(0.3, t + 0.18);
-    gain2.gain.exponentialRampToValueAtTime(0.01, t + 0.4);
-    osc2.start(t + 0.18);
-    osc2.stop(t + 0.4);
+    playCsNotificationSound(audioCtx!, 1);
   } catch { /* 忽略音频播放异常 */ }
 }
 
