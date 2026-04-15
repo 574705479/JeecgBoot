@@ -10,6 +10,7 @@ import org.jeecg.modules.airag.cs.entity.CsConversation;
 import org.jeecg.modules.airag.cs.service.ICsAgentService;
 import org.jeecg.modules.airag.cs.service.ICsConversationService;
 import org.jeecg.modules.airag.cs.service.ICsMessageService;
+import org.jeecg.modules.airag.cs.util.CsCryptoUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
@@ -53,6 +54,7 @@ public class CsWebSocketHandler implements WebSocketHandler {
     private final ICsMessageService messageService;
     private final ICsConversationService conversationService;
     private final ICsAgentService agentService;
+    private final CsCryptoUtil csCryptoUtil;
 
     @Autowired(required = false)
     private LicenseClientService licenseClientService;
@@ -60,11 +62,13 @@ public class CsWebSocketHandler implements WebSocketHandler {
     public CsWebSocketHandler(CsWebSocketSessionManager sessionManager,
                               @Lazy ICsMessageService messageService,
                               @Lazy ICsConversationService conversationService,
-                              @Lazy ICsAgentService agentService) {
+                              @Lazy ICsAgentService agentService,
+                              CsCryptoUtil csCryptoUtil) {
         this.sessionManager = sessionManager;
         this.messageService = messageService;
         this.conversationService = conversationService;
         this.agentService = agentService;
+        this.csCryptoUtil = csCryptoUtil;
     }
 
     @Override
@@ -81,7 +85,7 @@ public class CsWebSocketHandler implements WebSocketHandler {
                     && licenseClientService.isQuotaExceeded("max_cs_agents")) {
                     CsWebSocketMessage quotaMsg = CsWebSocketMessage.builder()
                             .type("quota_exceeded")
-                            .content("客服坐席已满，无法上线")
+                            .content(csCryptoUtil.encryptTransport("客服坐席已满，无法上线"))
                             .build();
                     session.sendMessage(new TextMessage(JSON.toJSONString(quotaMsg)));
                     session.close(new CloseStatus(4005, "quota_exceeded"));
@@ -114,7 +118,7 @@ public class CsWebSocketHandler implements WebSocketHandler {
                 .type("connected")
                 .senderId(userId)
                 .conversationId(conversationId)
-                .content("连接成功")
+                .content(csCryptoUtil.encryptTransport("连接成功"))
                 .extra(extra)
                 .build();
         session.sendMessage(new TextMessage(JSON.toJSONString(welcome)));
@@ -143,7 +147,7 @@ public class CsWebSocketHandler implements WebSocketHandler {
                     .type("user_online")
                     .conversationId(conversationId)
                     .senderId(userId)
-                    .content("用户已上线")
+                    .content(csCryptoUtil.encryptTransport("用户已上线"))
                     .timestamp(new java.util.Date())
                     .build();
             conversationService.sendToRelatedAgents(conversationId, message);
@@ -182,7 +186,7 @@ public class CsWebSocketHandler implements WebSocketHandler {
                     .conversationId(conversation.getId())
                     .senderId(conversation.getUserId())
                     .senderName(conversation.getUserName())
-                    .content("有新的用户上线")
+                    .content(csCryptoUtil.encryptTransport("有新的用户上线"))
                     .timestamp(new java.util.Date())
                     .extra(extra)
                     .build();
@@ -290,7 +294,7 @@ public class CsWebSocketHandler implements WebSocketHandler {
      */
     private void handleSendMessage(JSONObject json, String userId, String userType) {
         String conversationId = json.getString("conversationId");
-        String content = json.getString("content");
+        String content = csCryptoUtil.decryptTransport(json.getString("content"));
         String userName = json.getString("userName");
         Integer msgType = json.getInteger("msgType");
         String extra = json.getString("extra");
@@ -300,7 +304,19 @@ public class CsWebSocketHandler implements WebSocketHandler {
         }
 
         if (CsWebSocketInterceptor.USER_TYPE_USER.equals(userType)) {
-            // 用户发送消息
+            if (oConvertUtils.isNotEmpty(content)) {
+                String hitWord = messageService.checkSensitiveWords(content);
+                if (hitWord != null) {
+                    CsWebSocketMessage errorMsg = CsWebSocketMessage.builder()
+                            .type("sensitive_word_blocked")
+                            .conversationId(conversationId)
+                            .content(csCryptoUtil.encryptTransport("消息包含敏感内容，请修改后重试"))
+                            .timestamp(new java.util.Date())
+                            .build();
+                    sessionManager.sendToUser(userId, errorMsg);
+                    return;
+                }
+            }
             messageService.sendUserMessage(conversationId, userId, userName, content, msgType, extra);
         } else {
             // 客服发送消息
@@ -338,7 +354,7 @@ public class CsWebSocketHandler implements WebSocketHandler {
         try {
             CsWebSocketMessage message = CsWebSocketMessage.builder()
                     .type("system")
-                    .content("访客凭证无效或已过期")
+                    .content(csCryptoUtil.encryptTransport("访客凭证无效或已过期"))
                     .timestamp(new java.util.Date())
                     .build();
             session.sendMessage(new TextMessage(JSON.toJSONString(message)));
@@ -414,7 +430,7 @@ public class CsWebSocketHandler implements WebSocketHandler {
         
         String conversationId = json.getString("conversationId");
         String suggestionId = json.getString("suggestionId");
-        String editedContent = json.getString("editedContent");
+        String editedContent = csCryptoUtil.decryptTransport(json.getString("editedContent"));
         
         if (oConvertUtils.isEmpty(conversationId)) {
             return;
@@ -537,7 +553,7 @@ public class CsWebSocketHandler implements WebSocketHandler {
                         .type("user_offline")
                         .conversationId(conversationId)
                         .senderId(userId)
-                        .content("用户已离线")
+                        .content(csCryptoUtil.encryptTransport("用户已离线"))
                         .timestamp(new java.util.Date())
                         .build();
                 conversationService.sendToRelatedAgents(conversationId, message);

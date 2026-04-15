@@ -32,7 +32,14 @@ export async function loadBrandConfig(): Promise<BrandConfig | null> {
       { url: '/cs/brand/get' },
       { isTransformResponse: false, errorMessageMode: 'none' }
     );
-    const data = res?.result || res;
+    let rawData = res?.result || res;
+    if (typeof rawData === 'string') {
+      try {
+        const { decryptTransport } = await import('/@/views/super/airag/cs/utils/csEncrypt');
+        rawData = JSON.parse(decryptTransport(rawData));
+      } catch { /* fallback to raw */ }
+    }
+    const data = rawData;
     const normalized = normalizeBrand(data);
     if (Object.keys(normalized).length) {
       // 预解析资源URL并存入localStorage，供 index.html 加载页直接使用

@@ -5,8 +5,10 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
 import org.jeecg.common.api.vo.Result;
+import com.alibaba.fastjson.JSON;
 import org.jeecg.modules.airag.cs.entity.CsBrandConfig;
 import org.jeecg.modules.airag.cs.service.ICsBrandConfigService;
+import org.jeecg.modules.airag.cs.util.CsCryptoUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -29,18 +31,21 @@ public class CsBrandConfigController {
     @Autowired
     private ICsBrandConfigService brandConfigService;
 
+    @Autowired
+    private CsCryptoUtil csCryptoUtil;
+
     /**
      * 获取当前品牌配置
      */
     @Operation(summary = "获取当前品牌配置")
     @org.jeecg.config.shiro.IgnoreAuth
     @GetMapping("/get")
-    public Result<CsBrandConfig> getBrandConfig() {
+    public Result<String> getBrandConfig() {
         QueryWrapper<CsBrandConfig> wrapper = new QueryWrapper<>();
         wrapper.eq("del_flag", 0).eq("status", 1).orderByDesc("update_time");
         List<CsBrandConfig> list = brandConfigService.list(wrapper);
         CsBrandConfig config = list.isEmpty() ? null : list.get(0);
-        return Result.OK(config);
+        return Result.OK(csCryptoUtil.encryptTransport(JSON.toJSONString(config)));
     }
 
     /**

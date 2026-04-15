@@ -27,6 +27,7 @@ import { defHttp } from '/@/utils/http/axios';
 import { useMessage } from '/@/hooks/web/useMessage';
 import { ExportOutlined } from '@ant-design/icons-vue';
 import CsConversationDetailModal from './CsConversationDetailModal.vue';
+import { decryptTransport } from '../utils/csEncrypt';
 
 const { createMessage } = useMessage();
 const [registerDetailModal, { openModal: openDetailModal }] = useModal();
@@ -38,7 +39,8 @@ const agentOptions = ref<{ label: string; value: string }[]>([]);
 const chatWindowSettings = ref<any>({});
 async function loadChatWindowSettings() {
   try {
-    const res = await defHttp.get({ url: '/cs/agent/global/chat-window-settings' });
+    const rawRes = await defHttp.get({ url: '/cs/agent/global/chat-window-settings' });
+    const res = typeof rawRes === 'string' ? decryptTransport(rawRes) : rawRes;
     let parsed: any = {};
     if (typeof res === 'string') { try { parsed = JSON.parse(res); } catch {} }
     else if (res && typeof res === 'object') { parsed = res; }

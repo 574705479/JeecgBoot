@@ -15,6 +15,7 @@ import org.jeecg.modules.airag.cs.entity.CsLeaveMessage;
 import org.jeecg.modules.airag.cs.service.ICsAgentService;
 import org.jeecg.modules.airag.cs.service.ICsLeaveMessageService;
 import org.jeecg.modules.airag.cs.service.ICsVisitorTokenService;
+import org.jeecg.modules.airag.cs.util.CsCryptoUtil;
 import org.jeecg.modules.airag.cs.vo.CsVisitorTokenPayload;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -44,6 +45,9 @@ public class CsLeaveMessageController {
     @Autowired
     private ICsVisitorTokenService visitorTokenService;
 
+    @Autowired
+    private CsCryptoUtil csCryptoUtil;
+
     /**
      * 访客提交留言（无需登录）
      */
@@ -54,11 +58,13 @@ public class CsLeaveMessageController {
         if (message.getUserId() == null || message.getUserId().isEmpty()) {
             return Result.error("用户ID不能为空");
         }
+        message.setContent(csCryptoUtil.decryptTransport(message.getContent()));
         if ((message.getContent() == null || message.getContent().isEmpty())
                 && (message.getName() == null || message.getName().isEmpty())) {
             return Result.error("留言内容或姓名不能为空");
         }
         CsLeaveMessage saved = leaveMessageService.submitMessage(message);
+        encryptLeaveMessageForTransport(saved);
         return Result.OK(saved);
     }
 
@@ -82,6 +88,11 @@ public class CsLeaveMessageController {
         queryWrapper.orderByDesc(CsLeaveMessage::getCreateTime);
         Page<CsLeaveMessage> page = new Page<>(pageNo, pageSize);
         IPage<CsLeaveMessage> pageList = leaveMessageService.page(page, queryWrapper);
+        if (pageList.getRecords() != null) {
+            for (CsLeaveMessage msg : pageList.getRecords()) {
+                encryptLeaveMessageForTransport(msg);
+            }
+        }
         return Result.OK(pageList);
     }
 
@@ -95,6 +106,7 @@ public class CsLeaveMessageController {
         if (message == null) {
             return Result.error("留言不存在");
         }
+        encryptLeaveMessageForTransport(message);
         return Result.OK(message);
     }
 
@@ -104,7 +116,7 @@ public class CsLeaveMessageController {
     @Operation(summary = "回复留言")
     @PutMapping("/{id}/reply")
     public Result<String> reply(@PathVariable String id, @RequestBody Map<String, String> params) {
-        String reply = params.get("reply");
+        String reply = csCryptoUtil.decryptTransport(params.get("reply"));
         if (reply == null || reply.isEmpty()) {
             return Result.error("回复内容不能为空");
         }
@@ -165,6 +177,7 @@ public class CsLeaveMessageController {
             msg.setEmail(null);
             msg.setQq(null);
             msg.setWechat(null);
+            encryptLeaveMessageForTransport(msg);
         }
         return Result.OK(replies);
     }
@@ -186,6 +199,12 @@ public class CsLeaveMessageController {
         }
         leaveMessageService.markAsRead(userId);
         return Result.OK("标记成功");
+    }
+
+    private void encryptLeaveMessageForTransport(CsLeaveMessage msg) {
+        if (msg == null) return;
+        msg.setContent(csCryptoUtil.encryptTransport(msg.getContent()));
+        msg.setReply(csCryptoUtil.encryptTransport(msg.getReply()));
     }
 
     private String resolveVisitorUserId(HttpServletRequest request) {

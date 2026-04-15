@@ -98,6 +98,9 @@ importers:
       highlight.js:
         specifier: ^11.11.1
         version: 11.11.1
+      jsencrypt:
+        specifier: ^3.5.4
+        version: 3.5.4
       lodash-es:
         specifier: ^4.17.21
         version: 4.17.22
@@ -345,6 +348,9 @@ importers:
       lint-staged:
         specifier: 15.2.2
         version: 15.2.2
+      mockjs:
+        specifier: ^1.1.0
+        version: 1.1.0
       npm-run-all:
         specifier: ^4.1.5
         version: 4.1.5
@@ -5325,6 +5331,9 @@ packages:
   js-yaml@4.1.1:
     resolution: {integrity: sha512-qQKT4zQxXl8lLwBtHMWwaTcGfFOZviOJet3Oy/xmGk2gZH677CJM9EvtfdSkgWcATZhj/55JZ0rmy3myCT5lsA==}
     hasBin: true
+
+  jsencrypt@3.5.4:
+    resolution: {integrity: sha512-kNjfYEMNASxrDGsmcSQh/rUTmcoRfSUkxnAz+MMywM8jtGu+fFEZ3nJjHM58zscVnwR0fYmG9sGkTDjqUdpiwA==}
 
   jsesc@3.1.0:
     resolution: {integrity: sha512-/sM3dO2FOzXjKQhJuo0Q173wf2KOo8t4I8vHy6lF9poUp7bKT0/NHE8fPX23PwfhnykfqnC2xRxOnVw5XuGIaA==}
@@ -13854,6 +13863,8 @@ snapshots:
   js-yaml@4.1.1:
     dependencies:
       argparse: 2.0.1
+
+  jsencrypt@3.5.4: {}
 
   jsesc@3.1.0: {}
 

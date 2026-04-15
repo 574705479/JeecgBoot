@@ -7,6 +7,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.jeecg.modules.airag.cs.entity.CsLeaveMessage;
 import org.jeecg.modules.airag.cs.mapper.CsLeaveMessageMapper;
 import org.jeecg.modules.airag.cs.service.ICsLeaveMessageService;
+import org.jeecg.modules.airag.cs.util.CsCryptoUtil;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,9 +26,13 @@ import java.util.List;
 public class CsLeaveMessageServiceImpl extends ServiceImpl<CsLeaveMessageMapper, CsLeaveMessage>
         implements ICsLeaveMessageService {
 
+    @Autowired
+    private CsCryptoUtil csCryptoUtil;
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public CsLeaveMessage submitMessage(CsLeaveMessage message) {
+        message.setContent(csCryptoUtil.encryptStorage(message.getContent()));
         message.setStatus(CsLeaveMessage.STATUS_PENDING);
         message.setUserRead(false);
         message.setCreateTime(new Date());
@@ -44,7 +50,7 @@ public class CsLeaveMessageServiceImpl extends ServiceImpl<CsLeaveMessageMapper,
             log.warn("[CS-LeaveMessage] 留言不存在: id={}", id);
             return false;
         }
-        message.setReply(reply);
+        message.setReply(csCryptoUtil.encryptStorage(reply));
         message.setReplyAgentId(agentId);
         message.setReplyTime(new Date());
         message.setStatus(CsLeaveMessage.STATUS_REPLIED);

@@ -15,6 +15,7 @@ import org.jeecg.modules.airag.chat.entity.ChatMessage;
 import org.jeecg.modules.airag.chat.service.IChatMessageService;
 import org.jeecg.modules.airag.common.handler.AIChatParams;
 import org.jeecg.modules.airag.cs.async.CsAsyncTaskExecutor;
+import org.jeecg.modules.airag.cs.util.CsCryptoUtil;
 import org.jeecg.modules.airag.cs.entity.CsAgent;
 import org.jeecg.modules.airag.cs.entity.CsCollaborator;
 import org.jeecg.modules.airag.cs.entity.CsConversation;
@@ -92,6 +93,9 @@ public class CsMessageServiceImpl implements ICsMessageService {
 
     @Autowired
     private CsAsyncTaskExecutor asyncTaskExecutor;
+
+    @Autowired
+    private CsCryptoUtil csCryptoUtil;
 
     // AI建议缓存 (conversationId -> suggestion)，限制最大容量防止内存泄漏
     private static final int MAX_AI_SUGGESTION_CACHE_SIZE = 500;
@@ -480,7 +484,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
 
     @Override
     public CsMessage sendSystemMessage(String conversationId, String content, boolean persist) {
-        log.info("[CS-Message] 系统消息: conversationId={}, content={}, persist={}", conversationId, content, persist);
+        log.info("[CS-Message] 系统消息: conversationId={}, contentLen={}, persist={}", conversationId, content != null ? content.length() : 0, persist);
         
         CsMessage systemMessage = CsMessage.createSystemMessage(conversationId, content);
         
@@ -1032,11 +1036,11 @@ public class CsMessageServiceImpl implements ICsMessageService {
                         if (token != null && !token.isEmpty()) {
                             fullSuggestion.append(token);
                             
-                            // 通过WebSocket发送流式AI建议
+                            // 通过WebSocket发送流式AI建议（仅传输加密）
                             CsWebSocketMessage streamMsg = CsWebSocketMessage.builder()
                                     .type("ai_suggestion_stream")
                                     .conversationId(conversationId)
-                                    .content(token)
+                                    .content(csCryptoUtil.encryptTransport(token))
                                     .extra(Map.of("isComplete", false))
                                     .build();
                             
@@ -1056,11 +1060,11 @@ public class CsMessageServiceImpl implements ICsMessageService {
                                 aiSuggestionCache.put(conversationId, suggestion);
                             }
                             
-                            // 发送完成消息
+                            // 发送完成消息（仅传输加密，建议不存储）
                             CsWebSocketMessage completeMsg = CsWebSocketMessage.builder()
                                     .type("ai_suggestion_complete")
                                     .conversationId(conversationId)
-                                    .content(suggestion)
+                                    .content(csCryptoUtil.encryptTransport(suggestion))
                                     .build();
                             
                             sessionManager.sendToAgent(targetAgentId, completeMsg);
@@ -1217,6 +1221,41 @@ public class CsMessageServiceImpl implements ICsMessageService {
         return getMessages(conversationId, limit);
     }
 
+    // ==================== 敏感词校验 ====================
+
+    private static final String SENSITIVE_WORDS_REDIS_KEY = "cs:global:sensitive_words";
+
+    @Override
+    public String checkSensitiveWords(String content) {
+        if (oConvertUtils.isEmpty(content)) {
+            return null;
+        }
+        try {
+            String json = redisTemplate.opsForValue().get(SENSITIVE_WORDS_REDIS_KEY);
+            if (oConvertUtils.isEmpty(json)) {
+                return null;
+            }
+            JSONObject config = JSON.parseObject(json);
+            if (config == null || !Boolean.TRUE.equals(config.getBoolean("enabled"))) {
+                return null;
+            }
+            JSONArray words = config.getJSONArray("words");
+            if (words == null || words.isEmpty()) {
+                return null;
+            }
+            String lowerContent = content.toLowerCase();
+            for (int i = 0; i < words.size(); i++) {
+                String word = words.getString(i);
+                if (oConvertUtils.isNotEmpty(word) && lowerContent.contains(word.toLowerCase())) {
+                    return word;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[CS-Message] 敏感词校验异常", e);
+        }
+        return null;
+    }
+
     // ==================== 已读状态 ====================
 
     @Override
@@ -1242,7 +1281,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
             ChatMessage chatMessage = new ChatMessage();
             chatMessage.setId(message.getId());
             chatMessage.setConversationId(message.getConversationId());
-            chatMessage.setContent(message.getContent());
+            chatMessage.setContent(csCryptoUtil.encryptStorage(message.getContent()));
             chatMessage.setSenderId(message.getSenderId());
             chatMessage.setSenderName(message.getSenderName());
             chatMessage.setCreateTime(message.getCreateTime() != null ? message.getCreateTime() : new Date());
@@ -1423,7 +1462,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
                 .type("message")
                 .conversationId(conversationId)
                 .messageId(message.getId())
-                .content(message.getContent())
+                .content(csCryptoUtil.encryptTransport(csCryptoUtil.encryptStorage(message.getContent())))
                 .msgType(message.getMsgType())
                 .senderId(message.getSenderId())
                 .senderName(message.getSenderName())
@@ -1453,7 +1492,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
                 .type("message")
                 .conversationId(conversation.getId())
                 .messageId(message.getId())
-                .content(message.getContent())
+                .content(csCryptoUtil.encryptTransport(csCryptoUtil.encryptStorage(message.getContent())))
                 .msgType(message.getMsgType())
                 .senderId(message.getSenderId())
                 .senderName(message.getSenderName())
@@ -1482,7 +1521,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
                 .type("message")
                 .conversationId(conversationId)
                 .messageId(message.getId())
-                .content(message.getContent())
+                .content(csCryptoUtil.encryptTransport(csCryptoUtil.encryptStorage(message.getContent())))
                 .msgType(message.getMsgType())
                 .senderId(message.getSenderId())
                 .senderName(message.getSenderName())
@@ -1566,12 +1605,12 @@ public class CsMessageServiceImpl implements ICsMessageService {
                         if (token != null && !token.isEmpty()) {
                             fullResponse.append(token);
                             
-                            // 通过WebSocket发送增量token
+                            // 通过WebSocket发送增量token（流式token仅传输加密）
                             CsWebSocketMessage streamMsg = CsWebSocketMessage.builder()
                                     .type("ai_stream")
                                     .conversationId(conversationId)
                                     .messageId(messageId)
-                                    .content(token)
+                                    .content(csCryptoUtil.encryptTransport(token))
                                     .senderName(displayName)
                                     .extra(Map.of("isComplete", false))
                                     .build();
@@ -1628,12 +1667,12 @@ public class CsMessageServiceImpl implements ICsMessageService {
             // 更新会话
             conversationService.updateLastMessage(conversationId, aiReply, 1);
             
-            // 发送完成消息
+            // 发送完成消息（双层加密）
             CsWebSocketMessage completeMsg = CsWebSocketMessage.builder()
                     .type("ai_stream_complete")
                     .conversationId(conversationId)
                     .messageId(messageId)
-                    .content(aiReply)
+                    .content(csCryptoUtil.encryptTransport(csCryptoUtil.encryptStorage(aiReply)))
                     .senderName(displayName)
                     .build();
             
@@ -1789,11 +1828,12 @@ public class CsMessageServiceImpl implements ICsMessageService {
                     .collect(Collectors.toList());
                 
                 for (ChatMessage msg : history) {
+                    String plainContent = csCryptoUtil.decryptStorage(msg.getContent());
                     if (ChatMessage.SENDER_USER == msg.getSenderType()) {
-                        messages.add(UserMessage.from(msg.getContent()));
+                        messages.add(UserMessage.from(plainContent));
                     } else if (ChatMessage.SENDER_AI == msg.getSenderType() 
                             || ChatMessage.SENDER_AGENT == msg.getSenderType()) {
-                        messages.add(AiMessage.from(msg.getContent()));
+                        messages.add(AiMessage.from(plainContent));
                     }
                 }
             }
@@ -1903,7 +1943,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
                     CsWebSocketMessage wsMessage = CsWebSocketMessage.builder()
                             .type("ai_suggestion")
                             .conversationId(conversationId)
-                            .content(suggestion)
+                            .content(csCryptoUtil.encryptTransport(suggestion))
                             .build();
                     
                     // 收集所有需要推送的客服ID
@@ -1938,7 +1978,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
      */
     private String callAiService(String conversationId, String userMessage) {
         try {
-            log.info("[CS-Message] 调用AI服务: conversationId={}, userMessage={}", conversationId, userMessage);
+            log.info("[CS-Message] 调用AI服务: conversationId={}, userMessageLen={}", conversationId, userMessage != null ? userMessage.length() : 0);
             
             // 获取会话信息
             CsConversation conversation = conversationService.getConversation(conversationId);
@@ -1985,12 +2025,13 @@ public class CsMessageServiceImpl implements ICsMessageService {
                     .collect(Collectors.toList());
                 
                 for (ChatMessage msg : history) {
+                    String plainContent = csCryptoUtil.decryptStorage(msg.getContent());
                     // 根据senderType判断消息角色
                     if (ChatMessage.SENDER_USER == msg.getSenderType()) {
-                        messages.add(UserMessage.from(msg.getContent()));
+                        messages.add(UserMessage.from(plainContent));
                     } else if (ChatMessage.SENDER_AI == msg.getSenderType() 
                             || ChatMessage.SENDER_AGENT == msg.getSenderType()) {
-                        messages.add(AiMessage.from(msg.getContent()));
+                        messages.add(AiMessage.from(plainContent));
                     }
                 }
             }

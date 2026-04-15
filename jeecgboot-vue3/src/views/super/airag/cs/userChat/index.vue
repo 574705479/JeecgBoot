@@ -497,6 +497,7 @@ import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
 import { createImgPreview } from '/@/components/Preview';
 import EmojiPicker from '../components/EmojiPicker.vue';
 import { computeFileMd5 } from '../utils/fileHash';
+import { encryptTransport, decryptTransport, decryptMessage, decryptStorage } from '../utils/csEncrypt';
 
 const globSetting = useGlobSetting();
 const silentRequestOptions = { successMessageMode: 'none' as const };
@@ -567,6 +568,14 @@ function httpPut<T = any>(config: any, options: any = {}) {
     return Promise.reject(new Error('token invalid'));
   }
   return defHttp.put<T>({ ...config, headers: buildAuthHeaders(config) }, { ...silentRequestOptions, ...options });
+}
+function decryptApiResponse(rawData: any): any {
+  if (typeof rawData !== 'string') return rawData;
+  const decrypted = decryptTransport(rawData);
+  if (typeof decrypted === 'string') {
+    try { return JSON.parse(decrypted); } catch { return decrypted; }
+  }
+  return decrypted;
 }
 
 // 应用信息
@@ -717,7 +726,8 @@ async function loadChatWindowConfig() {
       { url: '/cs/agent/global/chat-window-settings' },
       { ...silentRequestOptions, isTransformResponse: false },
     );
-    const data = res?.result || res;
+    const rawData = res?.result || res;
+    const data = typeof rawData === 'string' ? decryptTransport(rawData) : rawData;
     let parsed: any = {};
     if (typeof data === 'string') {
       try { parsed = JSON.parse(data); } catch {}
@@ -770,7 +780,7 @@ async function loadBrandLogo() {
       { url: '/cs/brand/get' },
       { ...silentRequestOptions, isTransformResponse: false },
     );
-    const data = res?.result || res;
+    const data = decryptApiResponse(res?.result || res);
     if (data?.logoUrl) {
       brandLogoUrl.value = data.logoUrl;
     }
@@ -789,7 +799,8 @@ async function loadSensitiveWords() {
       { url: '/cs/agent/global/sensitive-words' },
       { ...silentRequestOptions, isTransformResponse: false },
     );
-    const data = res?.result || res;
+    const rawData = res?.result || res;
+    const data = typeof rawData === 'string' ? decryptTransport(rawData) : rawData;
     let parsed: any = {};
     if (typeof data === 'string') {
       try { parsed = JSON.parse(data); } catch {}
@@ -1231,7 +1242,7 @@ async function submitSatisfaction() {
         headers: buildAuthHeaders({}),
         data: {
           satisfaction: satisfactionRating.value,
-          comment: satisfactionComment.value,
+          comment: encryptTransport(satisfactionComment.value),
         },
       },
       { ...silentRequestOptions, isTransformResponse: false },
@@ -1863,7 +1874,8 @@ function generateDeviceId(): string {
 async function checkAgentOnline(): Promise<boolean> {
   try {
     const res = await httpGet({ url: '/cs/agent/global/online-status' });
-    return res?.online === true;
+    const data = decryptApiResponse(res);
+    return data?.online === true;
   } catch {
     return true;
   }
@@ -1973,16 +1985,16 @@ async function loadVisitorAppInfo() {
   try {
     // 先检查AI开关状态
     const aiRes = await httpGet({ url: '/cs/agent/global/ai-enabled' });
-    const aiData = aiRes?.result || aiRes;
+    const aiData = decryptApiResponse(aiRes);
     const aiEnabled = aiData?.enabled !== false;
 
     if (!aiEnabled) {
-      // AI关闭时不加载AI应用信息
       return;
     }
 
     const res = await httpGet({ url: '/cs/agent/global/visitor-app' });
-    const appId = res?.appId || res?.result?.appId;
+    const visitorAppData = decryptApiResponse(res);
+    const appId = visitorAppData?.appId;
     if (!appId) return;
 
     const appRes = await httpGet({ url: '/airag/app/queryById', params: { id: appId } });
@@ -2005,7 +2017,7 @@ async function loadVisitorAppInfo() {
 async function loadMessageBoardConfig() {
   try {
     const res = await httpGet({ url: '/cs/agent/global/message-board' });
-    const data = res?.result || res;
+    const data = decryptApiResponse(res);
     if (data) {
       messageBoardConfig.value = data;
     }
@@ -2037,7 +2049,7 @@ async function submitLeaveMessage() {
       url: '/cs/leaveMessage/submit',
       data: {
         userId: userId.value,
-        content: form.content,
+        content: encryptTransport(form.content),
         name: form.name,
         phone: form.phone,
         email: form.email,
@@ -2062,7 +2074,11 @@ async function loadUnreadReplies() {
     const res = await httpGet({ url: '/cs/leaveMessage/byUser', params: { userId: userId.value } });
     const data = res?.result || res;
     if (Array.isArray(data) && data.length > 0) {
-      unreadReplies.value = data;
+      unreadReplies.value = data.map((m: any) => ({
+        ...m,
+        content: decryptMessage(m.content),
+        reply: decryptMessage(m.reply),
+      }));
     }
   } catch (e) {
     console.warn('[UserChat] 加载留言回复失败', e);
@@ -2091,7 +2107,8 @@ async function loadMessages() {
         limit: historyPageSize,
       },
     });
-    const list = Array.isArray(res) ? res : (res?.result || res?.records || []);
+    const rawList = Array.isArray(res) ? res : (res?.result || res?.records || []);
+    const list = rawList.map((m: any) => ({ ...m, content: decryptMessage(m.content) }));
     if (list) {
       // 防御：服务端返回空但当前已有服务端消息时，跳过替换（可能是后端临时故障）
       if (list.length === 0) {
@@ -2103,20 +2120,19 @@ async function loadMessages() {
           return;
         }
       }
-      // 智能合并：保留 local_ 消息和正在流式输出的消息
+      // 智能合并：保留 local_ 消息和正在流式输出的消息（基于id去重）
       const serverIds = new Set(list.map((m: any) => m.id));
       const localAndStreaming = messages.value.filter((m: any) => {
         if (String(m.id).startsWith('local_')) {
           if (serverIds.has(m.id)) return false;
           return !list.some((s: any) =>
             s.senderId === m.senderId &&
-            s.content === m.content &&
-            Math.abs(new Date(s.createTime).getTime() - new Date(m.createTime).getTime()) < 10000
+            s.id === m.id
           );
         }
         if (m.isStreaming) return true;
         if (m.senderType === 3) {
-          return !list.some((s: any) => Number(s.senderType) === 3 && s.content === m.content);
+          return !list.some((s: any) => Number(s.senderType) === 3 && s.id === m.id);
         }
         return false;
       });
@@ -2151,7 +2167,8 @@ async function loadMoreMessages() {
       url: `/cs/message/${conversationId.value}/page`,
       params: { beforeId, limit: historyPageSize },
     });
-    const olderMessages = Array.isArray(res) ? res : (res?.result || res?.records || []);
+    const rawOlder = Array.isArray(res) ? res : (res?.result || res?.records || []);
+    const olderMessages = rawOlder.map((m: any) => ({ ...m, content: decryptMessage(m.content) }));
     if (!olderMessages.length) {
       hasMoreHistory.value = false;
       return;
@@ -2189,7 +2206,8 @@ async function loadHistoryConvIds() {
       url: '/cs/conversation/visitor-history',
       params: { userId: userId.value, excludeId: conversationId.value },
     });
-    const ids = Array.isArray(res) ? res : (res?.result || []);
+    const decrypted = decryptApiResponse(res);
+    const ids = Array.isArray(decrypted) ? decrypted : (decrypted?.result || []);
     historyConvIds.value = ids;
     historyConvIndex.value = 0;
     hasMoreHistoryConv.value = ids.length > 0;
@@ -2217,7 +2235,8 @@ async function loadHistoryConvMessages() {
       url: '/cs/message/list',
       params: { conversationId: histConvId, limit: 200 },
     });
-    const histMsgs = Array.isArray(res) ? res : (res?.result || res?.records || []);
+    const rawHist = Array.isArray(res) ? res : (res?.result || res?.records || []);
+    const histMsgs = rawHist.map((m: any) => ({ ...m, content: decryptMessage(m.content) }));
     if (histMsgs.length > 0) {
       // 添加分割线标记
       const separator = {
@@ -2505,7 +2524,7 @@ function handleWsMessage(data: any) {
       const newMsg = {
         id: data.messageId || Date.now().toString(),
         conversationId: data.conversationId,
-        content: data.content,
+        content: decryptMessage(data.content),
         msgType: data.msgType,
         extra: data.extra,
         senderType: msgSenderType,
@@ -2535,7 +2554,7 @@ function handleWsMessage(data: any) {
       // 系统消息
       messages.value.push({
         id: Date.now().toString(),
-        content: data.content,
+        content: decryptTransport(data.content),
         senderType: 3,
         createTime: new Date().toISOString(),
       });
@@ -2589,7 +2608,7 @@ function handleWsMessage(data: any) {
       playNotificationSound();
       messages.value.push({
         id: Date.now().toString(),
-        content: data.content || `客服 ${data.extra?.agentName || data.senderName || ''} 已为您服务`,
+        content: decryptTransport(data.content) || `客服 ${data.extra?.agentName || data.senderName || ''} 已为您服务`,
         senderType: 3,
         createTime: new Date().toISOString(),
       });
@@ -2607,7 +2626,7 @@ function handleWsMessage(data: any) {
       playNotificationSound();
       messages.value.push({
         id: Date.now().toString(),
-        content: data.content || `客服 ${data.extra?.agentName || data.senderName || ''} 继续为您服务`,
+        content: decryptTransport(data.content) || `客服 ${data.extra?.agentName || data.senderName || ''} 继续为您服务`,
         senderType: 3,
         createTime: new Date().toISOString(),
       });
@@ -2644,7 +2663,7 @@ function handleWsMessage(data: any) {
       stopFallbackPoll();
       messages.value.push({
         id: Date.now().toString(),
-        content: data.content || '会话已结束，感谢您的咨询',
+        content: decryptTransport(data.content) || '会话已结束，感谢您的咨询',
         senderType: 3,
         createTime: new Date().toISOString(),
       });
@@ -2659,6 +2678,11 @@ function handleWsMessage(data: any) {
       break;
 
     case 'pong':
+      break;
+
+    case 'sensitive_word_blocked':
+      message.warning(decryptTransport(data.content) || '消息包含敏感内容，请修改后重试');
+      sending.value = false;
       break;
 
     case 'visitor_blocked':
@@ -2750,7 +2774,7 @@ async function sendMessage() {
       ws.send(JSON.stringify({
         type: 'message',
         conversationId: conversationId.value,
-        content: content,
+        content: encryptTransport(content),
         userName: userName.value,
         msgType,
         extra,
@@ -2760,7 +2784,7 @@ async function sendMessage() {
         url: '/cs/message/send',
         data: {
           conversationId: conversationId.value,
-          content: content,
+          content: encryptTransport(content),
           senderId: userId.value,
           senderName: userName.value,
           senderType: 'user',
@@ -2833,7 +2857,7 @@ async function restartConversation() {
 // 处理AI流式token（RAF 批处理，每帧最多刷新一次 DOM）
 function handleAiStreamToken(data: any) {
   const messageId = data.messageId;
-  const token = data.content;
+  const token = decryptTransport(data.content);
 
   if (!messageId || !token) return;
 
@@ -2897,7 +2921,7 @@ function flushPendingTokens() {
 // 处理AI流式消息完成
 function handleAiStreamComplete(data: any) {
   const messageId = data.messageId;
-  const fullContent = data.content;
+  const fullContent = decryptMessage(data.content);
   
   // 清理缓冲区，防止残留 RAF 刷入脏数据
   pendingTokens.delete(messageId);

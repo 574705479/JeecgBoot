@@ -248,6 +248,16 @@ public interface ICsMessageService {
      */
     boolean recallMessage(String messageId, String agentId);
 
+    // ==================== 敏感词校验 ====================
+
+    /**
+     * 检查消息内容是否包含敏感词
+     *
+     * @param content 消息内容（明文）
+     * @return 命中的敏感词，若未命中或未启用返回null
+     */
+    String checkSensitiveWords(String content);
+
     // ==================== 已读状态 ====================
 
     /**

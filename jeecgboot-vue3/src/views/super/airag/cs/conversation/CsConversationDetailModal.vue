@@ -272,6 +272,7 @@ import { getBrandSetting } from '/@/settings/brandSetting';
 import { resolveBrandUrl } from '/@/utils/brand';
 import { createImgPreview } from '/@/components/Preview';
 import { useGlobSetting } from '/@/hooks/setting';
+import { decryptTransport, decryptMessage } from '../utils/csEncrypt';
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
 
@@ -287,7 +288,8 @@ const chatWindowLogo = ref('');
 const chatWindowSettings = ref<any>({});
 async function loadChatWindowSettings() {
   try {
-    const res = await defHttp.get({ url: '/cs/agent/global/chat-window-settings' });
+    const rawRes = await defHttp.get({ url: '/cs/agent/global/chat-window-settings' });
+    const res = typeof rawRes === 'string' ? decryptTransport(rawRes) : rawRes;
     let parsed: any = {};
     if (typeof res === 'string') { try { parsed = JSON.parse(res); } catch {} }
     else if (res && typeof res === 'object') { parsed = res; }
@@ -503,7 +505,13 @@ const displayMessages = computed(() => {
 });
 
 const [registerModal] = useModalInner(async (data) => {
-  record.value = data?.record;
+  record.value = data?.record ? { ...data.record } : null;
+  if (record.value?.satisfactionComment) {
+    record.value.satisfactionComment = decryptMessage(record.value.satisfactionComment);
+  }
+  if (record.value?.lastMessage) {
+    record.value.lastMessage = decryptMessage(record.value.lastMessage);
+  }
   messages.value = [];
   historyBeforeId.value = null;
   hasMoreHistory.value = true;
@@ -542,8 +550,8 @@ async function loadMessages(conversationId: string) {
       url: `/cs/message/${conversationId}`, 
       params: { limit: historyPageSize } 
     });
-    const list = Array.isArray(res) ? res : (res?.result || res?.records || []);
-    messages.value = list || [];
+    const rawList = Array.isArray(res) ? res : (res?.result || res?.records || []);
+    messages.value = (rawList || []).map((m: any) => ({ ...m, content: decryptMessage(m.content) }));
     historyBeforeId.value = messages.value[0]?.id || null;
     hasMoreHistory.value = messages.value.length >= historyPageSize;
     
@@ -580,7 +588,8 @@ async function loadMoreMessages() {
       url: `/cs/message/${record.value.id}/page`,
       params: { beforeId, limit: historyPageSize },
     });
-    const olderMessages = Array.isArray(res) ? res : (res?.result || res?.records || []);
+    const rawOlder = Array.isArray(res) ? res : (res?.result || res?.records || []);
+    const olderMessages = rawOlder.map((m: any) => ({ ...m, content: decryptMessage(m.content) }));
     if (!olderMessages.length) {
       hasMoreHistory.value = false;
       return;

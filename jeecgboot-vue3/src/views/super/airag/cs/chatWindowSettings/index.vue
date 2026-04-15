@@ -650,6 +650,7 @@ import { Tinymce } from '/@/components/Tinymce/index';
 import { CropperUpload } from '/@/components/Cropper';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
 import { useGlobSetting } from '/@/hooks/setting';
+import { decryptTransport } from '../utils/csEncrypt';
 
 defineOptions({ name: 'ChatWindowSettingsPage' });
 const globSetting = useGlobSetting();
@@ -855,7 +856,8 @@ function resolveUrl(url: string) {
 async function fetchConfig() {
   try {
     const res = await defHttp.get({ url: '/cs/agent/global/chat-window-settings' }, { isTransformResponse: false });
-    const data = res?.result || res;
+    const rawData = res?.result || res;
+    const data = typeof rawData === 'string' ? decryptTransport(rawData) : rawData;
     let parsed: any = null;
     if (data && typeof data === 'string') {
       try { parsed = JSON.parse(data); } catch {}

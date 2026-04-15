@@ -62,6 +62,7 @@
 import { ref, onMounted, onBeforeUnmount } from 'vue';
 import { defHttp } from '/@/utils/http/axios';
 import { useMessage } from '/@/hooks/web/useMessage';
+import { decryptTransport } from '../utils/csEncrypt';
 
 const { createMessage: message } = useMessage();
 
@@ -104,7 +105,12 @@ async function loadConfig() {
   loading.value = true;
   try {
     const res = await defHttp.get({ url: '/cs/agent/global/message-board' });
-    const data = res?.result || res;
+    let rawData = res?.result || res;
+    if (typeof rawData === 'string') {
+      const decrypted = decryptTransport(rawData);
+      try { rawData = JSON.parse(decrypted); } catch { rawData = null; }
+    }
+    const data = rawData;
     if (data) {
       config.value.subtitle = data.subtitle || '客服不在线，请留言';
       if (data.fields) {

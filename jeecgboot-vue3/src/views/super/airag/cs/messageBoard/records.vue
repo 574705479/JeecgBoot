@@ -290,6 +290,7 @@ import { UndoOutlined, SendOutlined } from '@ant-design/icons-vue';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
 import { createImgPreview } from '/@/components/Preview';
 import { useGlobSetting } from '/@/hooks/setting';
+import { encryptTransport, decryptTransport, decryptMessage } from '../utils/csEncrypt';
 import { Empty } from 'ant-design-vue';
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
@@ -454,7 +455,11 @@ async function loadData() {
     const res = await defHttp.get({ url: '/cs/leaveMessage/list', params });
     const data = res?.result || res;
     if (data) {
-      dataList.value = data.records || [];
+      dataList.value = (data.records || []).map((m: any) => ({
+        ...m,
+        content: decryptMessage(m.content),
+        reply: m.reply ? decryptMessage(m.reply) : m.reply,
+      }));
       pagination.total = data.total || 0;
     }
   } catch (e) {
@@ -556,7 +561,11 @@ async function loadConversationHistory(userId: string) {
       url: '/cs/conversation/visitor-history',
       params: { userId },
     });
-    const ids = Array.isArray(res) ? res : (res?.result || []);
+    let decrypted: any = res;
+    if (typeof res === 'string') {
+      try { decrypted = JSON.parse(decryptTransport(res)); } catch { decrypted = []; }
+    }
+    const ids = Array.isArray(decrypted) ? decrypted : (decrypted?.result || []);
     conversationIds.value = ids;
     if (ids.length > 0) {
       hasMoreHistory.value = true;
@@ -592,7 +601,8 @@ async function loadConversationMessages(conversationId: string, isInitial: boole
     }
 
     const res = await defHttp.get({ url, params });
-    const list = Array.isArray(res) ? res : (res?.result || res?.records || []);
+    const rawList = Array.isArray(res) ? res : (res?.result || res?.records || []);
+    const list = rawList.map((m: any) => ({ ...m, content: decryptMessage(m.content) }));
 
     if (list.length === 0) {
       currentConvHasMore.value = false;
@@ -705,7 +715,7 @@ async function submitReply() {
   try {
     await defHttp.put({
       url: `/cs/leaveMessage/${currentRecord.value.id}/reply`,
-      data: { reply: replyContent.value },
+      data: { reply: encryptTransport(replyContent.value) },
     });
     message.success('回复成功');
     currentRecord.value = {

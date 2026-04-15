@@ -134,6 +134,7 @@ import { computed, onMounted, onBeforeUnmount, reactive, ref, nextTick } from 'v
 import { defHttp } from '/@/utils/http/axios';
 import { useMessage } from '/@/hooks/web/useMessage';
 import { loadBrandConfig, applyBrandToDom, resolveBrandUrl } from '/@/utils/brand';
+import { decryptTransport } from '../utils/csEncrypt';
 import { BRAND_STORAGE_KEY, DEFAULT_BRAND } from '/@/settings/brandSetting';
 import { uploadImg } from '/@/api/sys/upload';
 import CropperUpload from '/@/components/Cropper/src/CropperUpload.vue';
@@ -198,7 +199,12 @@ async function fetchConfig() {
   loading.value = true;
   try {
     const res = await defHttp.get({ url: '/cs/brand/get' }, { isTransformResponse: false });
-    const data = res?.result || res || {};
+    let rawData = res?.result || res || {};
+    if (typeof rawData === 'string') {
+      const decrypted = decryptTransport(rawData);
+      try { rawData = JSON.parse(decrypted); } catch { rawData = {}; }
+    }
+    const data = rawData || {};
     formState.appTitle = data.appTitle || '';
     formState.appShortTitle = data.appShortTitle || '';
     formState.appSubtitle = data.appSubtitle || '';

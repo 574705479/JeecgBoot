@@ -1143,6 +1143,7 @@ import { createImgPreview } from '/@/components/Preview';
 import { getToken } from '/@/utils/auth';
 import EmojiPicker from '../components/EmojiPicker.vue';
 import { computeFileMd5 } from '../utils/fileHash';
+import { encryptTransport, decryptTransport, decryptMessage } from '../utils/csEncrypt';
 // ★ 为回复建议保留Markdown渲染能力
 import MarkdownIt from 'markdown-it';
 import DOMPurify from 'dompurify';
@@ -1378,6 +1379,14 @@ function httpPut<T = any>(config: any, options: any = {}) {
 }
 function httpDelete<T = any>(config: any, options: any = {}) {
   return defHttp.delete<T>(config, { ...silentRequestOptions, ...options });
+}
+function decryptApiResponse(rawData: any): any {
+  if (typeof rawData !== 'string') return rawData;
+  const decrypted = decryptTransport(rawData);
+  if (typeof decrypted === 'string') {
+    try { return JSON.parse(decrypted); } catch { return decrypted; }
+  }
+  return decrypted;
 }
 
 // 聊天窗口配置 Logo（优先级高于品牌配置 Logo）
@@ -2534,8 +2543,9 @@ async function onVisitorAppChange(appId: string | undefined) {
 async function loadGlobalVisitorApp() {
   try {
     const res = await httpGet({ url: '/cs/agent/global/visitor-app' });
-    if (res?.appId) {
-      visitorAppId.value = res.appId;
+    const data = decryptApiResponse(res);
+    if (data?.appId) {
+      visitorAppId.value = data.appId;
     }
   } catch (e) {
     console.error('加载访客AI应用配置失败', e);
@@ -2545,7 +2555,8 @@ async function loadGlobalVisitorApp() {
 // 加载聊天窗口配置
 async function loadChatWindowSettings() {
   try {
-    const res = await httpGet({ url: '/cs/agent/global/chat-window-settings' });
+    const rawRes = await httpGet({ url: '/cs/agent/global/chat-window-settings' });
+    const res = typeof rawRes === 'string' ? decryptTransport(rawRes) : rawRes;
     let parsed: any = {};
     if (typeof res === 'string') {
       try { parsed = JSON.parse(res); } catch {}
@@ -2563,7 +2574,8 @@ async function loadChatWindowSettings() {
 async function loadAiEnabled() {
   try {
     const res = await httpGet({ url: '/cs/agent/global/ai-enabled' });
-    aiEnabled.value = res?.enabled !== false;
+    const data = decryptApiResponse(res);
+    aiEnabled.value = data?.enabled !== false;
   } catch (e) {
     console.error('加载AI开关状态失败', e);
   }
@@ -2813,6 +2825,12 @@ async function loadConversations() {
     }
     const newConversations = res?.records || [];
     
+    // 解密会话中的加密字段
+    newConversations.forEach((conv: any) => {
+      if (conv.lastMessage) conv.lastMessage = decryptMessage(conv.lastMessage);
+      if (conv.satisfactionComment) conv.satisfactionComment = decryptMessage(conv.satisfactionComment);
+    });
+
     // 补充访客信息：API返回值 > 缓存 > 旧会话数据
     newConversations.forEach((conv: any) => {
       const cacheKey = getVisitorCacheKey(conv.appId, conv.userId);
@@ -3021,11 +3039,14 @@ async function loadConversationDetail(conv: any, seq?: number) {
     if (seq !== undefined && seq !== switchSeq) return;
     if (convDetail) {
       const detail = convDetail.result || convDetail;
+      if (detail.lastMessage) detail.lastMessage = decryptMessage(detail.lastMessage);
+      if (detail.satisfactionComment) detail.satisfactionComment = decryptMessage(detail.satisfactionComment);
       const fieldsToMerge = [
         'userIp', 'userDevice', 'userOs', 'userOsVersion', 
         'userBrowser', 'userBrowserVersion', 'userDeviceId',
         'userCountry', 'userProvince', 'userCity',
         'ownerAgentName', 'ownerAgentAvatar', 'source',
+        'lastMessage', 'satisfactionComment',
       ];
       for (const field of fieldsToMerge) {
         if (detail[field] !== undefined && detail[field] !== null) {
@@ -3121,7 +3142,8 @@ async function loadMessages(conversationId: string, seq?: number) {
     });
     if (seq !== undefined && seq !== switchSeq) return;
     if (conversationId !== currentConversation.value?.id) return;
-    const list = Array.isArray(res) ? res : (res?.records || res?.result || []);
+    const rawList = Array.isArray(res) ? res : (res?.records || res?.result || []);
+    const list = rawList.map((m: any) => ({ ...m, content: decryptMessage(m.content) }));
     messages.value = list;
     historyBeforeId.value = list[0]?.id || null;
     hasMoreHistory.value = list.length >= historyPageSize;
@@ -3154,7 +3176,8 @@ async function loadMoreMessages() {
       params: { beforeId, limit: historyPageSize }
     });
     if (convId !== currentConversation.value?.id) return;
-    const olderMessages = Array.isArray(res) ? res : (res?.records || res?.result || []);
+    const rawOlder = Array.isArray(res) ? res : (res?.records || res?.result || []);
+    const olderMessages = rawOlder.map((m: any) => ({ ...m, content: decryptMessage(m.content) }));
     if (!olderMessages.length) {
       hasMoreHistory.value = false;
       return;
@@ -3463,7 +3486,7 @@ async function sendMessage() {
         conversationId: currentConversation.value.id,
         agentId: agentId.value,
         agentName: agentName.value,
-        content: content,
+        content: encryptTransport(content),
         msgType,
         extra
       }
@@ -3876,7 +3899,7 @@ async function requestAiSuggestion(userMessage: string) {
   try {
     const res = await httpPost({
       url: `/cs/message/ai-generate/${currentConversation.value.id}`,
-      data: { userMessage, agentId: agentId.value }
+      data: { userMessage: encryptTransport(userMessage), agentId: agentId.value }
     });
     
     if (res?.streaming) {
@@ -3885,7 +3908,7 @@ async function requestAiSuggestion(userMessage: string) {
       console.log('[CS] 回复建议正在流式生成...');
     } else if (res?.suggestion) {
       // 非流式模式（兼容旧逻辑）
-      aiSuggestion.value = res.suggestion;
+      aiSuggestion.value = decryptTransport(res.suggestion);
       console.log('[Workbench] 回复建议已生成');
       aiSuggestionLoading.value = false;
     } else {
@@ -4050,6 +4073,8 @@ function handleWsMessage(data: any) {
   lastWsMessageAt = Date.now();
   switch (data.type) {
     case 'message':
+      // 解密消息内容（双层：传输层+存储层）
+      data.content = decryptMessage(data.content);
       // 更新会话列表中的最后消息（不管是否是当前会话）
       const conv = conversations.value.find(c => c.id === data.conversationId);
       if (conv) {
@@ -4162,7 +4187,7 @@ function handleWsMessage(data: any) {
         const noticeMsg = {
           id: `delivery_failed_${Date.now()}`,
           conversationId: failedConversationId,
-          content: data.content || '用户不在线，消息未送达',
+          content: decryptTransport(data.content) || '用户不在线，消息未送达',
           senderType: 3,
           createTime: data.timestamp || new Date().toISOString(),
         };
@@ -4268,7 +4293,7 @@ function handleWsMessage(data: any) {
               ownerAgentId: convOwnerAgentId,
               createTime: data.extra?.createTime || new Date().toISOString(),
               lastMessageTime: data.extra?.createTime || new Date().toISOString(),
-              lastMessage: data.content || '',
+              lastMessage: decryptTransport(data.content) || '',
               unreadCount: 0,
               messageCount: 0,
               // 设备信息
@@ -4515,13 +4540,13 @@ function handleWsMessage(data: any) {
       break;
     case 'ai_suggestion':
       if (currentConversation.value?.id === data.conversationId && !aiSuggestionDismissed.value) {
-        aiSuggestion.value = data.content;
+        aiSuggestion.value = decryptTransport(data.content);
       }
       break;
     case 'ai_suggestion_stream':
       // 回复建议流式消息 — dismissed 时丢弃（RAF 批处理）
       if (currentConversation.value?.id === data.conversationId && !aiSuggestionDismissed.value) {
-        pendingSuggestionTokens.push(data.content);
+        pendingSuggestionTokens.push(decryptTransport(data.content));
         if (!suggestionRafId) {
           suggestionRafId = requestAnimationFrame(() => {
             suggestionRafId = null;
@@ -4536,7 +4561,7 @@ function handleWsMessage(data: any) {
       pendingSuggestionTokens = [];
       if (suggestionRafId) { cancelAnimationFrame(suggestionRafId); suggestionRafId = null; }
       if (currentConversation.value?.id === data.conversationId && !aiSuggestionDismissed.value) {
-        aiSuggestion.value = data.content;
+        aiSuggestion.value = decryptTransport(data.content);
         aiSuggestionLoading.value = false;
         console.log('[Workbench] 回复建议已生成');
       } else if (aiSuggestionDismissed.value) {
@@ -4561,22 +4586,25 @@ function handleWsMessage(data: any) {
         handleAiStreamToken(data);
       }
       break;
-    case 'ai_stream_complete':
-      // AI流式消息完成
+    case 'ai_stream_complete': {
+      // AI流式消息完成（先解密，后续统一使用明文）
+      const decryptedAiComplete = decryptMessage(data.content);
+      data.content = decryptedAiComplete;
       if (currentConversation.value?.id === data.conversationId) {
         handleAiStreamComplete(data);
-        currentConversation.value.lastMessage = data.content || currentConversation.value.lastMessage;
+        currentConversation.value.lastMessage = decryptedAiComplete || currentConversation.value.lastMessage;
         currentConversation.value.lastMessageTime = data.timestamp || new Date().toISOString();
         sortConversations();
       } else {
         // 非当前会话的 AI 完成消息，更新会话列表预览（切换时会自动重新加载消息）
         const streamConv = conversations.value.find(c => c.id === data.conversationId);
         if (streamConv) {
-          streamConv.lastMessage = data.content || streamConv.lastMessage;
+          streamConv.lastMessage = decryptedAiComplete || streamConv.lastMessage;
           streamConv.lastMessageTime = data.timestamp || new Date().toISOString();
         }
         sortConversations();
       }
+    }
       break;
     case 'user_offline':
       if (currentConversation.value?.id === data.conversationId) {
@@ -4691,7 +4719,7 @@ function handleWsMessage(data: any) {
       break;
     }
     case 'quota_kick': {
-      message.warning(data.content || '客服坐席已满，您已被强制下线');
+      message.warning(decryptTransport(data.content) || '客服坐席已满，您已被强制下线');
       closeWebSocket();
       userStore.logout(true);
       break;
@@ -5079,7 +5107,7 @@ function renderMarkdown(content: string) {
 // 处理AI流式token（RAF 批处理，每帧最多刷新一次 DOM）
 function handleAiStreamToken(data: any) {
   const messageId = data.messageId;
-  const token = data.content;
+  const token = decryptTransport(data.content);
 
   if (!messageId || !token) return;
 
@@ -5125,7 +5153,7 @@ function flushPendingTokens() {
   scrollToBottom();
 }
 
-// 处理AI流式消息完成
+// 处理AI流式消息完成（data.content 已在调用方解密为明文）
 function handleAiStreamComplete(data: any) {
   const messageId = data.messageId;
   const fullContent = data.content;

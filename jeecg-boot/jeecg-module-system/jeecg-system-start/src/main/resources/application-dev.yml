@@ -201,6 +201,12 @@ jeecg:
     apiKey: ??
     apiHost: https://api.deepseek.com/v1
     timeout: 60
+  cs:
+    crypto:
+      storage-key: "PKHX8dfuePB2PpT4"
+      storage-iv: "7JBzAcDRQc9HCahm"
+      transport-key: "Cdg9VObOpE3yEQzz"
+      transport-iv: "frYwJYzoqXvv5ePy"
   # AIRag向量库
   ai-rag:
     embed-store:

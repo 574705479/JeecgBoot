@@ -10,6 +10,7 @@ import org.jeecg.modules.airag.cs.entity.CsMessage;
 import org.jeecg.modules.airag.cs.service.ICsConversationService;
 import org.jeecg.modules.airag.cs.service.ICsMessageService;
 import org.jeecg.modules.airag.cs.service.ICsVisitorTokenService;
+import org.jeecg.modules.airag.cs.util.CsCryptoUtil;
 import org.jeecg.modules.airag.cs.vo.CsVisitorTokenPayload;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -67,6 +68,9 @@ public class CsMessageController {
 
     @Autowired
     private ICsAgentService agentService;
+
+    @Autowired
+    private CsCryptoUtil csCryptoUtil;
 
     @Value(value = "${jeecg.path.upload}")
     private String uploadpath;
@@ -245,7 +249,7 @@ public class CsMessageController {
     @PostMapping("/send")
     public Result<CsMessage> send(@RequestBody Map<String, Object> params, HttpServletRequest request) {
         String conversationId = (String) params.get("conversationId");
-        String content = (String) params.get("content");
+        String content = csCryptoUtil.decryptTransport((String) params.get("content"));
         String senderId = (String) params.get("senderId");
         String senderName = (String) params.get("senderName");
         Integer msgType = params.get("msgType") instanceof Number ? ((Number) params.get("msgType")).intValue() : null;
@@ -318,7 +322,7 @@ public class CsMessageController {
             message = messageService.sendAgentMessage(conversationId, senderId, senderName, content, msgType, extra);
         }
         
-        return Result.OK(message);
+        return Result.OK(encryptMessageForResponse(message));
     }
 
     /**
@@ -330,8 +334,8 @@ public class CsMessageController {
     @PostMapping("/faq/answer")
     public Result<CsMessage> faqAnswer(@RequestBody Map<String, Object> params, HttpServletRequest request) {
         String conversationId = (String) params.get("conversationId");
-        String question = (String) params.get("question");
-        String answer = (String) params.get("answer");
+        String question = csCryptoUtil.decryptTransport((String) params.get("question"));
+        String answer = csCryptoUtil.decryptTransport((String) params.get("answer"));
 
         if (oConvertUtils.isEmpty(conversationId) || oConvertUtils.isEmpty(question)) {
             return Result.error("参数不完整");
@@ -428,7 +432,7 @@ public class CsMessageController {
             // 2. 以智能助手身份发送预设答案
             CsMessage message = messageService.sendAgentMessage(
                     conversationId, "faq_system", "智能助手", answer, 0, null);
-            return Result.OK(message);
+            return Result.OK(encryptMessageForResponse(message));
         } catch (Exception e) {
             log.error("[CS-Message] FAQ回复发送失败", e);
             return Result.error("FAQ回复发送失败: " + e.getMessage());
@@ -508,7 +512,7 @@ public class CsMessageController {
         String conversationId = params.get("conversationId") != null ? String.valueOf(params.get("conversationId")) : null;
         String userId = params.get("userId") != null ? String.valueOf(params.get("userId")) : null;
         String userName = params.get("userName") != null ? String.valueOf(params.get("userName")) : null;
-        String content = params.get("content") != null ? String.valueOf(params.get("content")) : null;
+        String content = csCryptoUtil.decryptTransport(params.get("content") != null ? String.valueOf(params.get("content")) : null);
         Integer msgType = params.get("msgType") instanceof Number ? ((Number) params.get("msgType")).intValue() : null;
         String extra = params.get("extra") != null ? String.valueOf(params.get("extra")) : null;
         
@@ -552,7 +556,7 @@ public class CsMessageController {
         }
 
         CsMessage message = messageService.sendUserMessage(conversationId, userId, userName, content, msgType, extra);
-        return Result.OK(message);
+        return Result.OK(encryptMessageForResponse(message));
     }
 
     /**
@@ -577,12 +581,12 @@ public class CsMessageController {
         String agentName = agent.getNickname();
         
         String conversationId = params.get("conversationId") != null ? String.valueOf(params.get("conversationId")) : null;
-        String content = params.get("content") != null ? String.valueOf(params.get("content")) : null;
+        String content = csCryptoUtil.decryptTransport(params.get("content") != null ? String.valueOf(params.get("content")) : null);
         Integer msgType = params.get("msgType") instanceof Integer ? (Integer) params.get("msgType") : null;
         String extra = params.get("extra") != null ? String.valueOf(params.get("extra")) : null;
         
         CsMessage message = messageService.sendAgentMessage(conversationId, agentId, agentName, content, msgType, extra);
-        return Result.OK(message);
+        return Result.OK(encryptMessageForResponse(message));
     }
 
     /**
@@ -600,6 +604,7 @@ public class CsMessageController {
         }
         try {
             List<CsMessage> messages = messageService.getMessages(conversationId, limit);
+            encryptMessagesForTransport(messages);
             return Result.OK(messages);
         } catch (Exception e) {
             log.error("[CS-Message] 获取消息失败: conversationId={}", conversationId, e);
@@ -622,6 +627,7 @@ public class CsMessageController {
         }
         try {
             List<CsMessage> messages = messageService.getMessages(conversationId, limit);
+            encryptMessagesForTransport(messages);
             return Result.OK(messages);
         } catch (Exception e) {
             log.error("[CS-Message] 获取消息列表失败: conversationId={}", conversationId, e);
@@ -645,6 +651,7 @@ public class CsMessageController {
         }
         try {
             List<CsMessage> messages = messageService.getMessages(conversationId, beforeId, limit);
+            encryptMessagesForTransport(messages);
             return Result.OK(messages);
         } catch (Exception e) {
             log.error("[CS-Message] 分页获取消息失败: conversationId={}, beforeId={}", conversationId, beforeId, e);
@@ -693,7 +700,7 @@ public class CsMessageController {
         String suggestion = messageService.getCurrentAiSuggestion(conversationId);
         
         Map<String, Object> result = new HashMap<>();
-        result.put("suggestion", suggestion);
+        result.put("suggestion", suggestion != null ? csCryptoUtil.encryptTransport(suggestion) : null);
         result.put("hasSuggestion", suggestion != null);
         
         return Result.OK(result);
@@ -711,7 +718,7 @@ public class CsMessageController {
         String suggestionId = params.get("suggestionId");
         String agentId = params.get("agentId");
         String agentName = params.get("agentName");
-        String editedContent = params.get("editedContent");
+        String editedContent = csCryptoUtil.decryptTransport(params.get("editedContent"));
         
         CsMessage message = messageService.confirmAiSuggestion(
                 conversationId, suggestionId, agentId, agentName, editedContent);
@@ -720,7 +727,7 @@ public class CsMessageController {
             return Result.error("AI建议已过期或不存在");
         }
         
-        return Result.OK(message);
+        return Result.OK(encryptMessageForResponse(message));
     }
 
     /**
@@ -733,18 +740,17 @@ public class CsMessageController {
             @PathVariable String conversationId,
             @RequestBody Map<String, String> params) {
         
-        String userMessage = params.get("userMessage");
+        String userMessage = csCryptoUtil.decryptTransport(params.get("userMessage"));
         String agentId = params.get("agentId");
         String result = messageService.generateAiSuggestion(conversationId, userMessage, agentId);
         
         Map<String, Object> response = new HashMap<>();
-        // 返回__STREAMING__表示正在流式生成，建议通过WebSocket推送
         if ("__STREAMING__".equals(result)) {
             response.put("streaming", true);
             response.put("success", true);
             response.put("message", "AI建议正在生成，请通过WebSocket接收");
         } else if (result != null) {
-            response.put("suggestion", result);
+            response.put("suggestion", csCryptoUtil.encryptTransport(result));
             response.put("success", true);
         } else {
             response.put("success", false);
@@ -818,39 +824,40 @@ public class CsMessageController {
         return conversation != null && userId.equals(conversation.getUserId());
     }
 
-    /**
-     * 检查消息内容是否包含敏感词
-     * @param content 消息内容
-     * @return 命中的敏感词，若未命中返回null
-     */
     private String checkSensitiveWords(String content) {
-        if (oConvertUtils.isEmpty(content)) {
-            return null;
+        return messageService.checkSensitiveWords(content);
+    }
+
+    /**
+     * 创建消息副本并做双层加密（用于HTTP响应，不修改原始对象）
+     */
+    private CsMessage encryptMessageForResponse(CsMessage original) {
+        if (original == null) return null;
+        CsMessage copy = new CsMessage();
+        copy.setId(original.getId());
+        copy.setConversationId(original.getConversationId());
+        copy.setContent(csCryptoUtil.encryptTransport(csCryptoUtil.encryptStorage(original.getContent())));
+        copy.setSenderId(original.getSenderId());
+        copy.setSenderName(original.getSenderName());
+        copy.setSenderType(original.getSenderType());
+        copy.setSenderAvatar(original.getSenderAvatar());
+        copy.setCreateTime(original.getCreateTime());
+        copy.setMsgType(original.getMsgType());
+        copy.setExtra(original.getExtra());
+        copy.setIsAiGenerated(original.getIsAiGenerated());
+        copy.setAiConfirmed(original.getAiConfirmed());
+        copy.setAiSuggestionId(original.getAiSuggestionId());
+        return copy;
+    }
+
+    /**
+     * 对已存储加密的消息列表做传输层加密
+     */
+    private void encryptMessagesForTransport(List<CsMessage> messages) {
+        if (messages == null) return;
+        for (CsMessage msg : messages) {
+            msg.setContent(csCryptoUtil.encryptTransport(msg.getContent()));
         }
-        try {
-            String json = redisTemplate.opsForValue().get("cs:global:sensitive_words");
-            if (oConvertUtils.isEmpty(json)) {
-                return null;
-            }
-            JSONObject config = JSON.parseObject(json);
-            if (config == null || !Boolean.TRUE.equals(config.getBoolean("enabled"))) {
-                return null;
-            }
-            JSONArray words = config.getJSONArray("words");
-            if (words == null || words.isEmpty()) {
-                return null;
-            }
-            String lowerContent = content.toLowerCase();
-            for (int i = 0; i < words.size(); i++) {
-                String word = words.getString(i);
-                if (oConvertUtils.isNotEmpty(word) && lowerContent.contains(word.toLowerCase())) {
-                    return word;
-                }
-            }
-        } catch (Exception e) {
-            log.warn("[CS-Message] 敏感词校验异常", e);
-        }
-        return null;
     }
 
     private CsVisitorTokenPayload resolveVisitorPayload(HttpServletRequest request) {

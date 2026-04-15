@@ -25,6 +25,7 @@ import org.jeecg.modules.airag.cs.mapper.CsAgentLoginLogMapper;
 import org.jeecg.modules.airag.cs.mapper.CsGlobalConfigMapper;
 import org.jeecg.modules.airag.cs.mapper.CsSubAgentMapper;
 import org.jeecg.modules.airag.cs.service.ICsAgentService;
+import org.jeecg.modules.airag.cs.util.CsCryptoUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.transaction.annotation.Transactional;
@@ -106,6 +107,9 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
 
     @Autowired(required = false)
     private org.jeecg.common.license.core.LicenseClientService licenseClientService;
+
+    @Autowired
+    private CsCryptoUtil csCryptoUtil;
 
     /**
      * 分页列表查询
@@ -422,7 +426,7 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     @Operation(summary = "获取访客AI应用（全局）")
     @org.jeecg.config.shiro.IgnoreAuth
     @GetMapping("/global/visitor-app")
-    public Result<java.util.Map<String, String>> getGlobalVisitorApp() {
+    public Result<String> getGlobalVisitorApp() {
         String appId = redisTemplate.opsForValue().get(VISITOR_APP_REDIS_KEY);
         if (appId == null || appId.isEmpty()) {
             appId = getGlobalConfigValue(VISITOR_APP_CONFIG_KEY);
@@ -432,7 +436,7 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
         }
         java.util.Map<String, String> result = new java.util.HashMap<>();
         result.put("appId", appId);
-        return Result.OK(result);
+        return Result.OK(csCryptoUtil.encryptTransport(JSON.toJSONString(result)));
     }
 
     /**
@@ -514,7 +518,8 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
                 redisTemplate.opsForValue().set(CHAT_WINDOW_REDIS_KEY, json);
             }
         }
-        return Result.OK(json != null ? json : "{}");
+        String plainJson = json != null ? json : "{}";
+        return Result.OK(csCryptoUtil.encryptTransport(plainJson));
     }
 
     /**
@@ -543,7 +548,8 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
                 redisTemplate.opsForValue().set(SENSITIVE_WORDS_REDIS_KEY, json);
             }
         }
-        return Result.OK(json != null ? json : "{\"enabled\":false,\"words\":[]}");
+        String plainJson = json != null ? json : "{\"enabled\":false,\"words\":[]}";
+        return Result.OK(csCryptoUtil.encryptTransport(plainJson));
     }
 
     /**
@@ -566,12 +572,12 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     @Operation(summary = "获取客服在线状态（全局）")
     @org.jeecg.config.shiro.IgnoreAuth
     @GetMapping("/global/online-status")
-    public Result<java.util.Map<String, Object>> getOnlineStatus() {
+    public Result<String> getOnlineStatus() {
         java.util.List<CsAgent> onlineAgents = csAgentService.getOnlineAgents();
         java.util.Map<String, Object> result = new java.util.HashMap<>();
         result.put("online", onlineAgents != null && !onlineAgents.isEmpty());
         result.put("count", onlineAgents != null ? onlineAgents.size() : 0);
-        return Result.OK(result);
+        return Result.OK(csCryptoUtil.encryptTransport(JSON.toJSONString(result)));
     }
 
     // ==================== AI开关 ====================
@@ -582,7 +588,7 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     @Operation(summary = "获取AI开关状态（全局）")
     @org.jeecg.config.shiro.IgnoreAuth
     @GetMapping("/global/ai-enabled")
-    public Result<java.util.Map<String, Object>> getAiEnabled() {
+    public Result<String> getAiEnabled() {
         String value = redisTemplate.opsForValue().get(AI_ENABLED_REDIS_KEY);
         if (value == null) {
             value = getGlobalConfigValue(AI_ENABLED_CONFIG_KEY);
@@ -593,7 +599,7 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
         boolean enabled = value == null || "true".equalsIgnoreCase(value);
         java.util.Map<String, Object> result = new java.util.HashMap<>();
         result.put("enabled", enabled);
-        return Result.OK(result);
+        return Result.OK(csCryptoUtil.encryptTransport(JSON.toJSONString(result)));
     }
 
     /**
@@ -716,7 +722,7 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     @Operation(summary = "获取留言板设置（全局）")
     @org.jeecg.config.shiro.IgnoreAuth
     @GetMapping("/global/message-board")
-    public Result<JSONObject> getMessageBoardConfig() {
+    public Result<String> getMessageBoardConfig() {
         String json = redisTemplate.opsForValue().get(MESSAGE_BOARD_REDIS_KEY);
         if (json == null || json.isEmpty()) {
             json = getGlobalConfigValue(MESSAGE_BOARD_CONFIG_KEY);
@@ -735,7 +741,7 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
         } else {
             result = getDefaultMessageBoardConfig();
         }
-        return Result.OK(result);
+        return Result.OK(csCryptoUtil.encryptTransport(result.toJSONString()));
     }
 
     /**

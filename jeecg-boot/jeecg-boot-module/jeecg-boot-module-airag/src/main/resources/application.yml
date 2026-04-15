@@ -62,6 +62,12 @@ spring:
     port: 6379
     password: 'res983'
 jeecg:
+  cs:
+    crypto:
+      storage-key: "PKHX8dfuePB2PpT4"
+      storage-iv: "7JBzAcDRQc9HCahm"
+      transport-key: "Cdg9VObOpE3yEQzz"
+      transport-iv: "frYwJYzoqXvv5ePy"
   ai-rag:
     embed-store:
       host: "localhost"

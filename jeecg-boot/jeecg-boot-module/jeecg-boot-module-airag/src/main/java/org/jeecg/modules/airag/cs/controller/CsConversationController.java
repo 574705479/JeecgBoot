@@ -17,6 +17,7 @@ import org.jeecg.modules.airag.cs.service.ICsAgentService;
 import org.jeecg.modules.airag.cs.service.ICsConversationService;
 import org.jeecg.modules.airag.cs.service.ICsMessageService;
 import org.jeecg.modules.airag.cs.service.ICsVisitorTokenService;
+import org.jeecg.modules.airag.cs.util.CsCryptoUtil;
 import org.jeecg.modules.airag.cs.vo.CsAgentWorkloadVO;
 import org.jeecg.modules.airag.cs.vo.CsVisitorTokenPayload;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -54,6 +55,9 @@ public class CsConversationController extends JeecgController<CsConversation, IC
 
     @Autowired
     private CsCollaboratorMapper collaboratorMapper;
+
+    @Autowired
+    private CsCryptoUtil csCryptoUtil;
 
     // ==================== 会话生命周期 ====================
 
@@ -143,12 +147,14 @@ public class CsConversationController extends JeecgController<CsConversation, IC
             // 如果 userName 是默认的"访客"，用新格式重新生成
             conversationService.refreshDefaultUserName(active, userIp, deviceId);
             conversationService.closeOtherActiveConversations(userId, appId, active.getId());
+            encryptConversationFields(active);
             return Result.OK(active);
         }
 
         CsConversation conversation = conversationService.createConversation(
                 appId, userId, userName, source, userIp, userAgent, deviceId, userLang, agentId,
                 landingPage, referrerPage);
+        encryptConversationFields(conversation);
         return Result.OK(conversation);
     }
 
@@ -200,6 +206,7 @@ public class CsConversationController extends JeecgController<CsConversation, IC
         
         CsConversation conversation = conversationService.getOrCreateConversation(
                 conversationId, appId, userId, userName);
+        encryptConversationFields(conversation);
         return Result.OK(conversation);
     }
 
@@ -243,6 +250,7 @@ public class CsConversationController extends JeecgController<CsConversation, IC
                 return Result.error("访客凭证无效或已过期");
             }
         }
+        encryptConversationFields(conversation);
         return Result.OK(conversation);
     }
 
@@ -286,6 +294,7 @@ public class CsConversationController extends JeecgController<CsConversation, IC
         
         if (success) {
             CsConversation conversation = conversationService.getConversation(id);
+            encryptConversationFields(conversation);
             result.put("conversation", conversation);
         }
         
@@ -446,6 +455,7 @@ public class CsConversationController extends JeecgController<CsConversation, IC
             }
             if (currentAgent != null) {
                 IPage<CsConversation> result = conversationService.getAllActiveConversations(page);
+                encryptConversationPage(result);
                 return Result.OK(result);
             }
         }
@@ -456,10 +466,12 @@ public class CsConversationController extends JeecgController<CsConversation, IC
                     page, agentId, status, filter, includeDeleted, filterAgentId,
                     id, userId, endType, satisfaction, source, landingPage, referrerPage,
                     createTimeBegin, createTimeEnd, endTimeBegin, endTimeEnd);
+            encryptConversationPage(result);
             return Result.OK(result);
         }
         
         IPage<CsConversation> result = conversationService.getConversationList(page, agentId, status, filter);
+        encryptConversationPage(result);
         return Result.OK(result);
     }
 
@@ -491,6 +503,7 @@ public class CsConversationController extends JeecgController<CsConversation, IC
     @GetMapping("/mine")
     public Result<Map<String, Object>> getMine(@RequestParam String agentId) {
         List<CsConversation> list = conversationService.getMyConversations(agentId);
+        encryptConversationList(list);
         Map<String, Object> result = new HashMap<>();
         result.put("list", list);
         result.put("count", list.size());
@@ -505,6 +518,7 @@ public class CsConversationController extends JeecgController<CsConversation, IC
     public Result<List<CsConversation>> getUnassigned(
             @RequestParam(defaultValue = "50") Integer limit) {
         List<CsConversation> list = conversationService.getUnassignedConversations(limit);
+        encryptConversationList(list);
         return Result.OK(list);
     }
 
@@ -594,7 +608,7 @@ public class CsConversationController extends JeecgController<CsConversation, IC
             return Result.error("该会话已评价，不能重复评价");
         }
 
-        String comment = (String) params.get("comment");
+        String comment = csCryptoUtil.decryptTransport((String) params.get("comment"));
         conversationService.rateConversation(id, satisfaction, comment);
         return Result.OK("评价成功");
     }
@@ -632,7 +646,7 @@ public class CsConversationController extends JeecgController<CsConversation, IC
     @Operation(summary = "获取访客历史会话列表")
     @org.jeecg.config.shiro.IgnoreAuth
     @GetMapping("/visitor-history")
-    public Result<List<String>> visitorHistory(
+    public Result<String> visitorHistory(
             @RequestParam String userId,
             @RequestParam(required = false) String excludeId,
             HttpServletRequest request) {
@@ -669,7 +683,7 @@ public class CsConversationController extends JeecgController<CsConversation, IC
         qw.select(CsConversation::getId);
         List<CsConversation> list = conversationService.list(qw);
         List<String> ids = list.stream().map(CsConversation::getId).collect(java.util.stream.Collectors.toList());
-        return Result.OK(ids);
+        return Result.OK(csCryptoUtil.encryptTransport(com.alibaba.fastjson.JSON.toJSONString(ids)));
     }
 
     // ==================== 人工客服转接 ====================
@@ -775,5 +789,23 @@ public class CsConversationController extends JeecgController<CsConversation, IC
         result.put("agentName", assignedAgent.getNickname());
         result.put("agentId", assignedAgent.getId());
         return Result.OK(result);
+    }
+
+    private void encryptConversationFields(CsConversation c) {
+        if (c == null) return;
+        c.setLastMessage(csCryptoUtil.encryptTransport(c.getLastMessage()));
+        c.setSatisfactionComment(csCryptoUtil.encryptTransport(c.getSatisfactionComment()));
+    }
+
+    private void encryptConversationList(List<CsConversation> list) {
+        if (list == null) return;
+        for (CsConversation c : list) {
+            encryptConversationFields(c);
+        }
+    }
+
+    private void encryptConversationPage(IPage<CsConversation> page) {
+        if (page == null || page.getRecords() == null) return;
+        encryptConversationList(page.getRecords());
     }
 }

@@ -6,6 +6,8 @@ rebel.xml
 ## backend
 **/target
 **/logs
+**/cp-root.txt
+**/cp.txt
 
 ## front
 **/*.lock

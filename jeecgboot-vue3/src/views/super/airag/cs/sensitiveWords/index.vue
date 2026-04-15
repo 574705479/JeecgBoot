@@ -32,6 +32,7 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { defHttp } from '/@/utils/http/axios';
 import { useMessage } from '/@/hooks/web/useMessage';
+import { decryptTransport } from '../utils/csEncrypt';
 
 defineOptions({ name: 'SensitiveWordsPage' });
 
@@ -59,7 +60,8 @@ const wordCount = computed(() => parseWords(wordsText.value).length);
 async function fetchConfig() {
   try {
     const res = await defHttp.get({ url: '/cs/agent/global/sensitive-words' }, { isTransformResponse: false });
-    const data = res?.result || res;
+    const rawData = res?.result || res;
+    const data = typeof rawData === 'string' ? decryptTransport(rawData) : rawData;
     let parsed: any = {};
     if (typeof data === 'string') {
       try { parsed = JSON.parse(data); } catch {}

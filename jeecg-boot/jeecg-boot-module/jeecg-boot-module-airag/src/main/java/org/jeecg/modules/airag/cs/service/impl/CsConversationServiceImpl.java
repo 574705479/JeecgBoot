@@ -21,6 +21,7 @@ import org.jeecg.modules.airag.cs.service.CsIpGeoService;
 import org.jeecg.modules.airag.cs.service.ICsAgentService;
 import org.jeecg.modules.airag.cs.service.ICsConversationService;
 import org.jeecg.modules.airag.cs.service.ICsMessageService;
+import org.jeecg.modules.airag.cs.util.CsCryptoUtil;
 import org.jeecg.modules.airag.cs.util.CsUserAgentUtil;
 import org.jeecg.modules.airag.cs.websocket.CsWebSocketMessage;
 import org.jeecg.modules.airag.cs.websocket.CsWebSocketSessionManager;
@@ -84,6 +85,9 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
 
     @Autowired
     private CsVisitorMapper csVisitorMapper;
+
+    @Autowired
+    private CsCryptoUtil csCryptoUtil;
 
     // ==================== 会话生命周期 ====================
 
@@ -502,7 +506,7 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
                     .conversationId(conversation.getId())
                     .senderId(conversation.getUserId())
                     .senderName(conversation.getUserName())
-                    .content("新会话")
+                    .content(csCryptoUtil.encryptTransport("新会话"))
                     .extra(extra)
                     .build();
             sessionManager.sendToAllAgents(notification);
@@ -962,7 +966,7 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             if (toAgent != null) {
                 conversationData.put("ownerAgentAvatar", toAgent.getAvatar());
             }
-            conversationData.put("lastMessage", conversation.getLastMessage());
+            conversationData.put("lastMessage", csCryptoUtil.encryptTransport(conversation.getLastMessage()));
             conversationData.put("lastMessageTime", conversation.getLastMessageTime());
             conversationData.put("unreadCount", conversation.getUnreadCount());
             conversationData.put("messageCount", conversation.getMessageCount());
@@ -1086,10 +1090,10 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateLastMessage(String conversationId, String message) {
+        String truncated = message != null && message.length() > 100 ? message.substring(0, 100) + "..." : message;
         LambdaUpdateWrapper<CsConversation> updateWrapper = new LambdaUpdateWrapper<>();
         updateWrapper.eq(CsConversation::getId, conversationId)
-                .set(CsConversation::getLastMessage, 
-                        message != null && message.length() > 100 ? message.substring(0, 100) + "..." : message)
+                .set(CsConversation::getLastMessage, csCryptoUtil.encryptStorage(truncated))
                 .set(CsConversation::getLastMessageTime, new Date())
                 .setSql("message_count = IFNULL(message_count, 0) + 1");
         update(updateWrapper);
@@ -1098,10 +1102,10 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateLastMessage(String conversationId, String message, int senderType) {
+        String truncated = message != null && message.length() > 100 ? message.substring(0, 100) + "..." : message;
         LambdaUpdateWrapper<CsConversation> updateWrapper = new LambdaUpdateWrapper<>();
         updateWrapper.eq(CsConversation::getId, conversationId)
-                .set(CsConversation::getLastMessage,
-                        message != null && message.length() > 100 ? message.substring(0, 100) + "..." : message)
+                .set(CsConversation::getLastMessage, csCryptoUtil.encryptStorage(truncated))
                 .set(CsConversation::getLastMessageTime, new Date())
                 .setSql("message_count = IFNULL(message_count, 0) + 1");
         if (senderType == 0) {
@@ -1195,7 +1199,7 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         LambdaUpdateWrapper<CsConversation> updateWrapper = new LambdaUpdateWrapper<>();
         updateWrapper.eq(CsConversation::getId, conversationId)
                 .set(CsConversation::getSatisfaction, satisfaction)
-                .set(CsConversation::getSatisfactionComment, comment)
+                .set(CsConversation::getSatisfactionComment, csCryptoUtil.encryptStorage(comment))
                 .set(CsConversation::getUpdateTime, new Date());
         update(updateWrapper);
         
@@ -1217,7 +1221,7 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         CsWebSocketMessage.CsWebSocketMessageBuilder builder = CsWebSocketMessage.builder()
                 .type(type)
                 .conversationId(conversationId)
-                .content(content);
+                .content(csCryptoUtil.encryptTransport(content));
         
         if (extra != null) {
             builder.extra(extra);
@@ -1231,7 +1235,7 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         CsWebSocketMessage message = CsWebSocketMessage.builder()
                 .type(type)
                 .conversationId(conversationId)
-                .content(content)
+                .content(csCryptoUtil.encryptTransport(content))
                 .build();
         CsConversation conversation = getById(conversationId);
         sendToRelatedAgentsInternal(conversation, message, false);
@@ -1242,7 +1246,7 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         CsWebSocketMessage.CsWebSocketMessageBuilder builder = CsWebSocketMessage.builder()
                 .type(type)
                 .conversationId(conversationId)
-                .content(content);
+                .content(csCryptoUtil.encryptTransport(content));
         if (extra != null) {
             builder.extra(extra);
         }
