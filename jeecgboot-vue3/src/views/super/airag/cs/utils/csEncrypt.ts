@@ -1,9 +1,10 @@
 import CryptoJS from 'crypto-js';
 
-const STORAGE_KEY = 'PKHX8dfuePB2PpT4';
-const STORAGE_IV = '7JBzAcDRQc9HCahm';
-const TRANSPORT_KEY = 'Cdg9VObOpE3yEQzz';
-const TRANSPORT_IV = 'frYwJYzoqXvv5ePy';
+/** 开发默认密钥（与 application-dev.yml 中 jeecg.cs.crypto 一致）；生产构建由 .env.production / .env.docker 注入 */
+const STORAGE_KEY = import.meta.env.VITE_CS_STORAGE_KEY || 'PKHX8dfuePB2PpT4';
+const STORAGE_IV = import.meta.env.VITE_CS_STORAGE_IV || '7JBzAcDRQc9HCahm';
+const TRANSPORT_KEY = import.meta.env.VITE_CS_TRANSPORT_KEY || 'Cdg9VObOpE3yEQzz';
+const TRANSPORT_IV = import.meta.env.VITE_CS_TRANSPORT_IV || 'frYwJYzoqXvv5ePy';
 
 const ENC_PREFIX = 'ENC:';
 

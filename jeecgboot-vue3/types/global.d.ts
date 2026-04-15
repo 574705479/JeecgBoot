@@ -78,6 +78,11 @@ declare global {
     VITE_GLOB_QIANKUN_MICRO_APP_ENTRY?: string;
     // 当前运行在什么平台
     VITE_GLOB_RUN_PLATFORM?: 'web' | 'electron';
+    /** 客服 AES，与后端 jeecg.cs.crypto 一致；不设则走开发默认 */
+    VITE_CS_STORAGE_KEY?: string;
+    VITE_CS_STORAGE_IV?: string;
+    VITE_CS_TRANSPORT_KEY?: string;
+    VITE_CS_TRANSPORT_IV?: string;
   }
 
   declare function parseInt(s: string | number, radix?: number): number;

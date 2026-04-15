@@ -189,6 +189,13 @@ jeecg:
     apiKey: ??
     apiHost: https://api.deepseek.com/v1
     timeout: 60
+  # 客服模块 AES：默认与 dev 一致；部署生产时可通过环境变量覆盖为与 application-prod.yml 相同的一组键
+  cs:
+    crypto:
+      storage-key: ${JEECG_CS_CRYPTO_STORAGE_KEY:PKHX8dfuePB2PpT4}
+      storage-iv: ${JEECG_CS_CRYPTO_STORAGE_IV:7JBzAcDRQc9HCahm}
+      transport-key: ${JEECG_CS_CRYPTO_TRANSPORT_KEY:Cdg9VObOpE3yEQzz}
+      transport-iv: ${JEECG_CS_CRYPTO_TRANSPORT_IV:frYwJYzoqXvv5ePy}
   # AIRag向量库
   ai-rag:
     embed-store:

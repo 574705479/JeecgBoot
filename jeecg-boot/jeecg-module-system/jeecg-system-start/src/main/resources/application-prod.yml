@@ -195,6 +195,13 @@ jeecg:
     apiKey: ??
     apiHost: https://api.deepseek.com
     timeout: 60
+  # 客服模块 AES（生产专用，与 dev 不同；须与前端构建 env 中 VITE_CS_* 一致）
+  cs:
+    crypto:
+      storage-key: "K9mP2xQ7nR4vW8sL"
+      storage-iv: "T3yB6cF1hJ0kN5zX"
+      transport-key: "Z4aS8dG2fH7jM1qW"
+      transport-iv: "E5rT9vY3uI6oP0xC"
   # AIRag向量库
   ai-rag:
     embed-store:
@@ -214,6 +221,7 @@ jeecg:
     # 低代码模式（dev:开发模式，prod:发布模式——关闭所有在线开发配置能力）
     lowCodeMode: prod
     # 是否允许同一账号多地同时登录 （为 true 时允许一起登录, 为 false 时新登录挤掉旧登录）
+    # 生产建议 true：发布后旧 Tab/未刷新页面仍持旧 token，false 时易被互踢导致全员 401、页面无法操作；若必须单点会话请改 false 并通知用户清理浏览器缓存
     is-concurrent: false
   # 签名密钥串(前后端要一致，正式发布请自行修改)
   signatureSecret: dd05f1c54d63749eda95f9fa6d49v442a
