@@ -27,6 +27,7 @@ import { useModal } from '/@/components/Modal';
 import { defHttp } from '/@/utils/http/axios';
 import { useMessage } from '/@/hooks/web/useMessage';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
+import { withImageCache } from '../utils/csImageCache';
 import CsAgentModal from './CsAgentModal.vue';
 
 const { createConfirm, createMessage } = useMessage();
@@ -82,7 +83,7 @@ const rowSelection = ref({
 });
 
 function getAvatarUrl(avatar?: string) {
-  return avatar ? getFileAccessHttpUrl(avatar) : '';
+  return avatar ? withImageCache(getFileAccessHttpUrl(avatar)) : '';
 }
 
 function getStatusBadge(status: number) {

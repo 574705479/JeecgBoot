@@ -24,6 +24,7 @@ import { autoUseQiankunMicro } from "/@/qiankun/micro/qiankunMicro";
 import { useAppStoreWithOut } from "@/store/modules/app";
 import { useUserStoreWithOut } from '/@/store/modules/user';
 import { loadBrandConfig } from '/@/utils/brand';
+import { initImageCache, cleanupImageCache } from '/@/views/super/airag/cs/utils/csImageCache';
 import { useGlobSetting } from '/@/hooks/setting';
 import { ElectronEnum } from '/@/enums/jeecgEnum';
 import { defHttp } from '/@/utils/http/axios';
@@ -60,8 +61,9 @@ async function bootstrap(props?: MainAppProps) {
   // 配置存储
   setupStore(app);
 
-  // 读取品牌配置（用于登录页/标题/Logo）
-  await loadBrandConfig();
+  // 读取品牌配置 + 初始化图片缓存（并行，互不阻塞）
+  await Promise.all([loadBrandConfig(), initImageCache()]);
+  window.addEventListener('beforeunload', cleanupImageCache);
 
   // 配置参数
   setupProps(props);

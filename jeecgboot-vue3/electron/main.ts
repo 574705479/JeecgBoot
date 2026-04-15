@@ -155,7 +155,7 @@ if (!isDev) {
   if (gotTheLock) {
     app.on('second-instance', () => {
       windowCounter++;
-      createMainWindow(`persist:window-${windowCounter}`);
+      createMainWindow('persist:shared');
     });
   } else {
     app.exit(0);

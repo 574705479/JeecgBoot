@@ -96,15 +96,18 @@ export function configPwaPlugin(isBuild: boolean): PluginOption | PluginOption[]
             },
           },
         },
-        // 图片资源
+        // 图片资源（含后端静态资源路径 + 图片扩展名，忽略查询参数）
         {
-          urlPattern: /\.(?:png|jpg|jpeg|svg|gif|webp)$/,
+          urlPattern: /(?:\/sys\/common\/static\/.*|\.(?:png|jpg|jpeg|svg|gif|webp|ico)(?:\?.*)?$)/i,
           handler: 'CacheFirst',
           options: {
             cacheName: 'image-cache',
             expiration: {
-              maxEntries: 100,
-              maxAgeSeconds: 60 * 60 * 24 * 30,
+              maxEntries: 200,
+              maxAgeSeconds: 60 * 60 * 24 * 30, // 30天
+            },
+            cacheableResponse: {
+              statuses: [0, 200],
             },
           },
         },

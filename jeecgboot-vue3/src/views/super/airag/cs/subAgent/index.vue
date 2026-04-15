@@ -87,6 +87,7 @@ import { useMessage } from '/@/hooks/web/useMessage';
 import { CropperAvatar } from '/@/components/Cropper';
 import { uploadImg } from '/@/api/sys/upload';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
+import { withImageCache } from '../utils/csImageCache';
 import { isMenuAllowed } from '/@/utils/license/featureMenuMap';
 
 const { createConfirm, createMessage } = useMessage();
@@ -178,7 +179,7 @@ const formState = reactive({
 const modalTitle = computed(() => isUpdate.value ? '编辑子客服' : '新增子客服');
 
 function getAvatarUrl(avatar?: string) {
-  return avatar ? getFileAccessHttpUrl(avatar) : '';
+  return avatar ? withImageCache(getFileAccessHttpUrl(avatar)) : '';
 }
 
 function getAvatarFullUrl(path: string) {

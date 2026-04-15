@@ -9,7 +9,7 @@
       <div v-if="showLeaveMessageBoard" class="leave-message-board">
         <div class="board-header" :style="headerStyle">
           <div class="header-info">
-            <img class="app-avatar" :src="chatWindowConfig.logo ? resolveFileUrl(chatWindowConfig.logo) : (appInfo.avatar ? resolveFileUrl(appInfo.avatar) : defaultAvatar)" />
+            <img class="app-avatar" :src="chatWindowConfig.logo ? resolveFileUrl(chatWindowConfig.logo) : (appInfo.avatar ? resolveFileUrl(appInfo.avatar) : defaultAvatar)" @error="onImageError" />
             <div class="app-info">
               <span class="app-name">{{ chatWindowConfig.pageTitle || appInfo.name || '在线客服' }}</span>
               <span class="board-subtitle">{{ messageBoardConfig.subtitle || '客服不在线，请留言' }}</span>
@@ -20,7 +20,7 @@
                :href="item.link || '#'" target="_blank" rel="noopener" class="header-icon-item">
               <img v-if="item.icon" :src="resolveFileUrl(item.icon)"
                    :class="['header-icon-img', { 'header-icon-transparent': item.transparent }]"
-                   :style="{ width: (item.size || 32) + 'px', height: (item.size || 32) + 'px' }" />
+                   :style="{ width: (item.size || 32) + 'px', height: (item.size || 32) + 'px' }" @error="onImageError" />
               <span class="header-icon-name"
                     :style="{ fontSize: Math.max(10, Math.round((item.size || 32) * 0.35)) + 'px', maxWidth: Math.max(40, (item.size || 32) * 1.8) + 'px' }">{{ item.name }}</span>
             </a>
@@ -69,7 +69,7 @@
       <div class="chat-header" v-if="chatWindowConfig.headerVisible !== false" :style="headerStyle">
         <LeftOutlined v-if="!chatWindowConfig.hideBackButton" class="mobile-back-btn" :style="{ color: chatWindowConfig.backButtonColor || '#fff' }" @click="goBack" />
         <div class="header-info">
-          <img v-if="!chatWindowConfig.hideLogo" class="app-avatar" :src="chatWindowConfig.logo ? resolveFileUrl(chatWindowConfig.logo) : (appInfo.avatar ? resolveFileUrl(appInfo.avatar) : defaultAvatar)" />
+          <img v-if="!chatWindowConfig.hideLogo" class="app-avatar" :src="chatWindowConfig.logo ? resolveFileUrl(chatWindowConfig.logo) : (appInfo.avatar ? resolveFileUrl(appInfo.avatar) : defaultAvatar)" @error="onImageError" />
           <div class="app-info">
             <span v-if="!chatWindowConfig.hidePageTitle" class="app-name">{{ chatWindowConfig.pageTitle || appInfo.name || '在线客服' }}</span>
             <span class="status-text">
@@ -94,7 +94,7 @@
              :href="item.link || '#'" target="_blank" rel="noopener" class="header-icon-item">
             <img v-if="item.icon" :src="resolveFileUrl(item.icon)"
                  :class="['header-icon-img', { 'header-icon-transparent': item.transparent }]"
-                 :style="{ width: (item.size || 32) + 'px', height: (item.size || 32) + 'px' }" />
+                 :style="{ width: (item.size || 32) + 'px', height: (item.size || 32) + 'px' }" @error="onImageError" />
             <span class="header-icon-name"
                   :style="{ fontSize: Math.max(10, Math.round((item.size || 32) * 0.35)) + 'px', maxWidth: Math.max(40, (item.size || 32) * 1.8) + 'px' }">{{ item.name }}</span>
           </a>
@@ -163,7 +163,7 @@
           </div>
           <!-- 智能助手消息 (senderType === 4) -->
           <div v-else-if="msg.senderType === 4" class="agent-message smart-assistant-message">
-            <img class="avatar" :src="chatWindowConfig.logo ? resolveFileUrl(chatWindowConfig.logo) : defaultAvatar" />
+            <img class="avatar" :src="chatWindowConfig.logo ? resolveFileUrl(chatWindowConfig.logo) : defaultAvatar" @error="onImageError" />
             <div class="message-content">
               <div class="sender-info">
                 <span class="sender-name">智能助手</span>
@@ -231,11 +231,11 @@
               </div>
               <div class="message-time">{{ formatTime(msg.createTime) }}</div>
             </div>
-            <img class="avatar" :src="getUserAvatar(msg)" />
+            <img class="avatar" :src="getUserAvatar(msg)" @error="onImageError" />
           </div>
           <!-- 客服/AI消息 (senderType === 1 AI, 2 客服) -->
           <div v-else class="agent-message">
-            <img class="avatar" :src="getAgentAvatar(msg)" />
+            <img class="avatar" :src="getAgentAvatar(msg)" @error="onImageError" />
             <div class="message-content">
               <div class="sender-info">
                 <span class="sender-name">{{ msg.senderName || (isAiMessage(msg) ? 'AI客服' : '客服') }}</span>
@@ -280,7 +280,7 @@
         
         <!-- 客服正在输入提示 -->
         <div v-if="agentTyping" class="typing-indicator">
-          <img class="avatar" :src="getAgentAvatar()" />
+          <img class="avatar" :src="getAgentAvatar()" @error="onImageError" />
           <div class="typing-dots">
             <span></span><span></span><span></span>
           </div>
@@ -383,7 +383,7 @@
       <div v-if="chatWindowConfig.pcAdImage || (chatWindowConfig.faqEnabled && chatWindowConfig.faqList?.length > 0)" class="chat-sidebar" :style="{ width: (chatWindowConfig.rightSidebarWidth || 200) + 'px' }">
         <div v-if="chatWindowConfig.pcAdImage" class="sidebar-ad">
           <a :href="chatWindowConfig.pcAdLink || '#'" target="_blank" rel="noopener">
-            <img :src="resolveFileUrl(chatWindowConfig.pcAdImage)" class="ad-sidebar-img" alt="广告" />
+            <img :src="resolveFileUrl(chatWindowConfig.pcAdImage)" class="ad-sidebar-img" alt="广告" @error="onImageError" />
           </a>
         </div>
         <div v-if="chatWindowConfig.faqEnabled && chatWindowConfig.faqList?.length > 0" :class="['sidebar-faq', { 'sidebar-faq-disabled': conversationClosed }]">
@@ -498,6 +498,8 @@ import { createImgPreview } from '/@/components/Preview';
 import EmojiPicker from '../components/EmojiPicker.vue';
 import { computeFileMd5 } from '../utils/fileHash';
 import { encryptTransport, decryptTransport, decryptMessage, decryptStorage } from '../utils/csEncrypt';
+import { withImageCache, preloadImages, onImageError, getCachedChatWindowConfig, setCachedChatWindowConfig } from '../utils/csImageCache';
+import { getBrandSetting, DEFAULT_BRAND } from '/@/settings/brandSetting';
 
 const globSetting = useGlobSetting();
 const silentRequestOptions = { successMessageMode: 'none' as const };
@@ -586,12 +588,16 @@ const appInfo = ref({
   prologue: '', // 开场白
   presetQuestion: '', // 预设问题（逗号或换行分隔）
 });
-const brandLogoUrl = ref('');
+// 从已有品牌缓存同步初始化 brandLogoUrl，避免首帧显示默认 logo 后跳变
+const _cachedBrand = getBrandSetting();
+const brandLogoUrl = ref(
+  _cachedBrand.logoUrl && _cachedBrand.logoUrl !== DEFAULT_BRAND.logoUrl ? _cachedBrand.logoUrl : '',
+);
 const defaultAvatar = computed(() => {
   if (brandLogoUrl.value) return resolveFileUrl(brandLogoUrl.value);
   return '/logo.svg';
 });
-const defaultUserAvatar = 'https://gw.alipayobjects.com/zos/antfincdn/XAosXuNZyF/BiazfanxmamNRoxxVxka.png';
+const defaultUserAvatar = '/default-user-avatar.png';
 
 // ==================== 聊天窗口配置 ====================
 const chatWindowConfig = reactive({
@@ -642,6 +648,16 @@ const chatWindowConfig = reactive({
   faqNavColor: '#1890ff',
   faqHeaderText: '',
 });
+
+// 从 localStorage 同步恢复上次配置，消除首帧默认值 → 真实值跳变
+const _cachedCwc = getCachedChatWindowConfig();
+if (_cachedCwc) {
+  Object.keys(_cachedCwc).forEach((k) => {
+    if (k in chatWindowConfig) {
+      (chatWindowConfig as any)[k] = _cachedCwc[k];
+    }
+  });
+}
 
 // FAQ展开状态
 const faqPcShowAll = ref(false);
@@ -716,8 +732,8 @@ const dynamicCssVars = computed(() => ({
 
 function resolveFileUrl(url: string) {
   if (!url) return '';
-  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return url;
-  return getFileAccessHttpUrl(url);
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return withImageCache(url);
+  return withImageCache(getFileAccessHttpUrl(url));
 }
 
 async function loadChatWindowConfig() {
@@ -769,6 +785,17 @@ async function loadChatWindowConfig() {
     if (chatWindowConfig.pageTitle) {
       document.title = chatWindowConfig.pageTitle;
     }
+    // 预热配置中的图片到缓存
+    preloadImages([
+      chatWindowConfig.logo ? resolveFileUrl(chatWindowConfig.logo) : undefined,
+      chatWindowConfig.visitorAvatar ? resolveFileUrl(chatWindowConfig.visitorAvatar) : undefined,
+      chatWindowConfig.pcAdImage ? resolveFileUrl(chatWindowConfig.pcAdImage) : undefined,
+      chatWindowConfig.backgroundImage ? resolveFileUrl(chatWindowConfig.backgroundImage) : undefined,
+      chatWindowConfig.headerBgImage ? resolveFileUrl(chatWindowConfig.headerBgImage) : undefined,
+      ...(chatWindowConfig.headerIcons || []).map((i: any) => i.icon ? resolveFileUrl(i.icon) : undefined),
+    ]);
+    // 缓存后处理过的配置，下次打开页面可同步恢复
+    setCachedChatWindowConfig({ ...chatWindowConfig });
   } catch (e) {
     console.warn('加载聊天窗口配置失败', e);
   }
@@ -783,6 +810,7 @@ async function loadBrandLogo() {
     const data = decryptApiResponse(res?.result || res);
     if (data?.logoUrl) {
       brandLogoUrl.value = data.logoUrl;
+      preloadImages([resolveFileUrl(data.logoUrl)]);
     }
   } catch {}
 }
@@ -985,7 +1013,7 @@ function removeAttachment(idx: number) {
 
 function resolveAvatarUrl(avatar?: string) {
   if (!avatar) return '';
-  return getFileAccessHttpUrl(avatar);
+  return withImageCache(getFileAccessHttpUrl(avatar));
 }
 
 function getAgentAvatar(msg?: any) {

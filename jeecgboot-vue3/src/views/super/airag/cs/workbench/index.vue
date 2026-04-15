@@ -5,7 +5,7 @@
       <!-- 客服状态栏 -->
       <div class="agent-bar">
         <div class="agent-info">
-          <a-avatar :size="32" class="self-agent-avatar" :src="agentAvatar ? getFileAccessHttpUrl(agentAvatar) : ''">
+          <a-avatar :size="32" class="self-agent-avatar" :src="agentAvatar ? withImageCache(getFileAccessHttpUrl(agentAvatar)) : ''">
             {{ (agentName || '客').charAt(0) }}
           </a-avatar>
           <span class="agent-name">{{ agentName }}</span>
@@ -737,10 +737,10 @@
                 </div>
                 <a-popover v-if="item.msgType === 1" placement="topLeft" trigger="hover" :overlayStyle="{ maxWidth: '400px' }">
                   <template #content>
-                    <img :src="getFileAccessHttpUrl(item.content)" style="max-width: 360px; max-height: 300px; border-radius: 6px; display: block" />
+                    <img :src="withImageCache(getFileAccessHttpUrl(item.content))" style="max-width: 360px; max-height: 300px; border-radius: 6px; display: block" @error="onImageError" />
                   </template>
                   <div class="quick-reply-content">
-                    <img :src="getFileAccessHttpUrl(item.content)" class="quick-reply-img" />
+                    <img :src="withImageCache(getFileAccessHttpUrl(item.content))" class="quick-reply-img" @error="onImageError" />
                   </div>
                 </a-popover>
                 <a-popover v-else-if="item.msgType === 5" placement="topLeft" trigger="hover" :overlayStyle="{ maxWidth: '450px' }">
@@ -1144,6 +1144,7 @@ import { getToken } from '/@/utils/auth';
 import EmojiPicker from '../components/EmojiPicker.vue';
 import { computeFileMd5 } from '../utils/fileHash';
 import { encryptTransport, decryptTransport, decryptMessage } from '../utils/csEncrypt';
+import { withImageCache, preloadImages, onImageError, getCachedChatWindowConfig, setCachedChatWindowConfig } from '../utils/csImageCache';
 // ★ 为回复建议保留Markdown渲染能力
 import MarkdownIt from 'markdown-it';
 import DOMPurify from 'dompurify';
@@ -1390,7 +1391,8 @@ function decryptApiResponse(rawData: any): any {
 }
 
 // 聊天窗口配置 Logo（优先级高于品牌配置 Logo）
-const chatWindowLogo = ref('');
+// 从 localStorage 同步恢复，避免首帧显示默认 logo 后跳变
+const chatWindowLogo = ref(getCachedChatWindowConfig()?.logo || '');
 const chatWindowSettings = ref<any>({});
 
 // 客服信息
@@ -2063,6 +2065,7 @@ async function loadAgentInfo() {
       agentId.value = res.id;
       agentName.value = res.nickname || '客服';
       agentAvatar.value = res.avatar || '';
+      if (res.avatar) preloadImages([getFileAccessHttpUrl(res.avatar)]);
       agentStatus.value = res.status || 0;
       isOnline.value = res.status === 1;
       agentRole.value = res.role || 0; // 获取角色：0-普通客服, 1-管理者
@@ -2267,25 +2270,25 @@ function isAiMessage(msg: any): boolean {
 function getMessageAvatarUrl(msg: any) {
   const avatar = msg?.senderAvatar;
   if (avatar) {
-    return getFileAccessHttpUrl(avatar);
+    return withImageCache(getFileAccessHttpUrl(avatar));
   }
   if (isAiMessage(msg)) {
     if (chatWindowLogo.value) {
-      return getFileAccessHttpUrl(chatWindowLogo.value);
+      return withImageCache(getFileAccessHttpUrl(chatWindowLogo.value));
     }
     const brandLogo = getBrandSetting().logoUrl;
     if (brandLogo) {
-      return resolveBrandUrl(brandLogo);
+      return withImageCache(resolveBrandUrl(brandLogo));
     }
   }
   if (Number(msg?.senderType) !== 0) {
     const conv = conversations.value.find((c) => c.id === msg?.conversationId);
     const ownerAvatar = msg?.ownerAgentAvatar || conv?.ownerAgentAvatar || currentConversation.value?.ownerAgentAvatar;
     if (ownerAvatar) {
-      return getFileAccessHttpUrl(ownerAvatar);
+      return withImageCache(getFileAccessHttpUrl(ownerAvatar));
     }
     if (agentAvatar.value) {
-      return getFileAccessHttpUrl(agentAvatar.value);
+      return withImageCache(getFileAccessHttpUrl(agentAvatar.value));
     }
   }
   return '';
@@ -2293,7 +2296,7 @@ function getMessageAvatarUrl(msg: any) {
 
 function getAgentItemAvatarUrl(agent: any) {
   const avatar = agent?.avatar;
-  return avatar ? getFileAccessHttpUrl(avatar) : '';
+  return avatar ? withImageCache(getFileAccessHttpUrl(avatar)) : '';
 }
 
 function parseExtra(extra: any) {
@@ -2566,7 +2569,9 @@ async function loadChatWindowSettings() {
     chatWindowSettings.value = parsed;
     if (parsed.logo) {
       chatWindowLogo.value = parsed.logo;
+      preloadImages([getFileAccessHttpUrl(parsed.logo)]);
     }
+    setCachedChatWindowConfig(parsed);
   } catch {}
 }
 

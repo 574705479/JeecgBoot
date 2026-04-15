@@ -270,6 +270,7 @@ import { Typography } from 'ant-design-vue';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
 import { getBrandSetting } from '/@/settings/brandSetting';
 import { resolveBrandUrl } from '/@/utils/brand';
+import { withImageCache, getCachedChatWindowConfig } from '../utils/csImageCache';
 import { createImgPreview } from '/@/components/Preview';
 import { useGlobSetting } from '/@/hooks/setting';
 import { decryptTransport, decryptMessage } from '../utils/csEncrypt';
@@ -284,7 +285,7 @@ function isAiMessage(msg: any): boolean {
   return st === 1 || msg?.isAiGenerated || (st === 2 && !msg?.senderId);
 }
 
-const chatWindowLogo = ref('');
+const chatWindowLogo = ref(getCachedChatWindowConfig()?.logo || '');
 const chatWindowSettings = ref<any>({});
 async function loadChatWindowSettings() {
   try {
@@ -299,9 +300,9 @@ async function loadChatWindowSettings() {
 }
 
 function getAiAvatarUrl(): string {
-  if (chatWindowLogo.value) return getFileAccessHttpUrl(chatWindowLogo.value);
+  if (chatWindowLogo.value) return withImageCache(getFileAccessHttpUrl(chatWindowLogo.value));
   const brandLogo = getBrandSetting().logoUrl;
-  if (brandLogo) return resolveBrandUrl(brandLogo);
+  if (brandLogo) return withImageCache(resolveBrandUrl(brandLogo));
   return '';
 }
 

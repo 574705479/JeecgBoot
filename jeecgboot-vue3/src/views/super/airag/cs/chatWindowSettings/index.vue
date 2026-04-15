@@ -649,6 +649,7 @@ import { DeleteOutlined, EditOutlined, LeftOutlined, PlusOutlined, QuestionCircl
 import { Tinymce } from '/@/components/Tinymce/index';
 import { CropperUpload } from '/@/components/Cropper';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
+import { withImageCache } from '../utils/csImageCache';
 import { useGlobSetting } from '/@/hooks/setting';
 import { decryptTransport } from '../utils/csEncrypt';
 
@@ -849,8 +850,8 @@ const hasSidebar = computed(() => {
 
 function resolveUrl(url: string) {
   if (!url) return '';
-  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return url;
-  return getFileAccessHttpUrl(url);
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return withImageCache(url);
+  return withImageCache(getFileAccessHttpUrl(url));
 }
 
 async function fetchConfig() {

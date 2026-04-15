@@ -2,6 +2,7 @@ import { defHttp } from '/@/utils/http/axios';
 import { BRAND_STORAGE_KEY } from '/@/settings/brandSetting';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
 import { useGlobSetting } from '/@/hooks/setting';
+import { preloadImages } from '/@/views/super/airag/cs/utils/csImageCache';
 
 type BrandConfig = {
   appTitle?: string;
@@ -51,6 +52,7 @@ export async function loadBrandConfig(): Promise<BrandConfig | null> {
       }
       window.__APP_BRAND__ = Object.assign({}, window.__APP_BRAND__ || {}, normalized);
       window.localStorage.setItem(BRAND_STORAGE_KEY, JSON.stringify(normalized));
+      preloadImages([normalized._resolvedLogoUrl, normalized._resolvedFaviconUrl]);
       applyBrandToDom(normalized);
     }
     return data || null;
@@ -78,6 +80,16 @@ export function resolveBrandUrl(url?: string) {
   return getFileAccessHttpUrl(url);
 }
 
+function simpleHash(str: string): string {
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) + hash + str.charCodeAt(i)) & 0x7fffffff;
+  }
+  return hash.toString(36);
+}
+
+let _lastFaviconPath = '';
+
 export function applyBrandToDom(brand: Record<string, string>) {
   if (!brand) return;
   const title = brand.title;
@@ -87,16 +99,21 @@ export function applyBrandToDom(brand: Record<string, string>) {
   const faviconUrl = brand.faviconUrl || brand.logoUrl;
   if (faviconUrl) {
     const finalUrl = resolveBrandUrl(faviconUrl);
-    const withCache = `${finalUrl}${finalUrl.includes('?') ? '&' : '?'}t=${Date.now()}`;
+    // 仅在路径变化时加版本号刷新 favicon，避免每次页面加载都破坏缓存
+    let href = finalUrl;
+    if (faviconUrl !== _lastFaviconPath) {
+      _lastFaviconPath = faviconUrl;
+      href = `${finalUrl}${finalUrl.includes('?') ? '&' : '?'}v=${simpleHash(faviconUrl)}`;
+    }
     const iconLinks = document.querySelectorAll("link[rel='icon'], link[rel='shortcut icon']");
     if (iconLinks.length) {
       iconLinks.forEach((node) => {
-        (node as HTMLLinkElement).href = withCache;
+        (node as HTMLLinkElement).href = href;
       });
     } else {
       const link = document.createElement('link');
       link.rel = 'icon';
-      link.href = withCache;
+      link.href = href;
       document.head.appendChild(link);
     }
   }
