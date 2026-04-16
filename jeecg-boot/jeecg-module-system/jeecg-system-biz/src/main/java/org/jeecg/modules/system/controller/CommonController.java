@@ -10,12 +10,12 @@ import org.jeecg.common.exception.JeecgBootException;
 import org.jeecg.common.util.CommonUtils;
 import org.jeecg.common.util.filter.SsrfFileTypeFilter;
 import org.jeecg.common.util.oConvertUtils;
+import org.jeecg.common.util.storage.IStorageUploadService;
 import org.jeecg.modules.system.util.HttpFileToMultipartFileUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.util.AntPathMatcher;
-import org.springframework.util.FileCopyUtils;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.multipart.MultipartHttpServletRequest;
@@ -42,11 +42,8 @@ public class CommonController {
     @Value(value = "${jeecg.path.upload}")
     private String uploadpath;
 
-    /**
-     * 本地：local minio：minio 阿里：alioss
-     */
-    @Value(value="${jeecg.uploadType}")
-    private String uploadType;
+    @Autowired
+    private IStorageUploadService storageUploadService;
 
     /**
      * @Author 政辉
@@ -73,15 +70,7 @@ public class CommonController {
         
         // 文件安全校验，防止上传漏洞文件
         SsrfFileTypeFilter.checkUploadFileType(file, bizPath);
-  
-        if (oConvertUtils.isEmpty(bizPath)) {
-            bizPath = CommonConstant.UPLOAD_TYPE_OSS.equals(uploadType) ? "upload" : "";
-        }
-        if(CommonConstant.UPLOAD_TYPE_LOCAL.equals(uploadType)){
-            savePath = this.uploadLocal(file,bizPath);
-        }else{
-            savePath = CommonUtils.upload(file, bizPath, uploadType);
-        }
+        savePath = storageUploadService.upload(file, bizPath == null ? "" : bizPath);
         if(oConvertUtils.isNotEmpty(savePath)){
             
             //添加到文件表
@@ -97,48 +86,6 @@ public class CommonController {
             result.setSuccess(false);
         }
         return result;
-    }
-
-    /**
-     * 本地文件上传
-     * @param mf 文件
-     * @param bizPath  自定义路径
-     * @return
-     */
-    private String uploadLocal(MultipartFile mf,String bizPath){
-        try {
-            String ctxPath = uploadpath;
-            String fileName = null;
-            File file = new File(ctxPath + File.separator + bizPath + File.separator );
-            if (!file.exists()) {
-                // 创建文件根目录
-                file.mkdirs();
-            }
-            // 获取文件名
-            String orgName = mf.getOriginalFilename();
-            orgName = CommonUtils.getFileName(orgName);
-            if(orgName.indexOf(SymbolConstant.SPOT)!=-1){
-                fileName = orgName.substring(0, orgName.lastIndexOf(".")) + "_" + System.currentTimeMillis() + orgName.substring(orgName.lastIndexOf("."));
-            }else{
-                fileName = orgName+ "_" + System.currentTimeMillis();
-            }
-            String savePath = file.getPath() + File.separator + fileName;
-            File savefile = new File(savePath);
-            FileCopyUtils.copy(mf.getBytes(), savefile);
-            String dbpath = null;
-            if(oConvertUtils.isNotEmpty(bizPath)){
-                dbpath = bizPath + File.separator + fileName;
-            }else{
-                dbpath = fileName;
-            }
-            if (dbpath.contains(SymbolConstant.DOUBLE_BACKSLASH)) {
-                dbpath = dbpath.replace(SymbolConstant.DOUBLE_BACKSLASH, SymbolConstant.SINGLE_SLASH);
-            }
-            return dbpath;
-        } catch (IOException e) {
-            log.error(e.getMessage(), e);
-        }
-        return "";
     }
 
 //	@PostMapping(value = "/upload2")
@@ -362,14 +309,7 @@ public class CommonController {
             MultipartFile file = HttpFileToMultipartFileUtil.httpFileToMultipartFile(fileUrl, filename);
             // 文件安全校验，防止上传漏洞文件
             SsrfFileTypeFilter.checkUploadFileType(file, bizPath);
-            if (oConvertUtils.isEmpty(bizPath)) {
-                bizPath = CommonConstant.UPLOAD_TYPE_OSS.equals(uploadType) ? "upload" : "";
-            }
-            if(CommonConstant.UPLOAD_TYPE_LOCAL.equals(uploadType)){
-                savePath = this.uploadLocal(file,bizPath);
-            }else{
-                savePath = CommonUtils.upload(file, bizPath, uploadType);
-            }
+            savePath = storageUploadService.upload(file, bizPath == null ? "" : bizPath);
             return Result.OK(savePath);
         } catch (Exception e) {
             log.error(e.getMessage(), e);

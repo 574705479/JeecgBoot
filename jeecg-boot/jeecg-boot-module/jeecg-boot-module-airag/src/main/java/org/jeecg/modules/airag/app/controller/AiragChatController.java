@@ -4,9 +4,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.jeecg.common.api.vo.Result;
-import org.jeecg.common.constant.CommonConstant;
 import org.jeecg.common.util.CommonUtils;
 import org.jeecg.common.util.oConvertUtils;
+import org.jeecg.common.util.storage.IStorageUploadService;
 import org.jeecg.config.shiro.IgnoreAuth;
 import org.jeecg.modules.airag.app.service.IAiragChatService;
 import org.jeecg.modules.airag.app.vo.ChatConversation;
@@ -43,14 +43,11 @@ public class AiragChatController {
     @Autowired
     ICsFileHashService fileHashService;
 
+    @Autowired
+    private IStorageUploadService storageUploadService;
+
     @Value(value = "${jeecg.path.upload}")
     private String uploadpath;
-
-    /**
-     * 本地：local minio：minio 阿里：alioss
-     */
-    @Value(value="${jeecg.uploadType}")
-    private String uploadType;
 
 
     /**
@@ -238,12 +235,11 @@ public class AiragChatController {
         MultipartFile file = multipartRequest.getFile("file");
         String md5 = request.getParameter("md5");
 
-        String savePath;
-        if (CommonConstant.UPLOAD_TYPE_LOCAL.equals(uploadType)) {
-            savePath = CommonUtils.uploadLocal(file, bizPath, uploadpath);
-        } else {
-            savePath = CommonUtils.upload(file, bizPath, uploadType);
+        if (file == null || file.isEmpty()) {
+            return Result.error("请选择文件");
         }
+
+        String savePath = storageUploadService.upload(file, bizPath);
 
         try {
             if (oConvertUtils.isEmpty(md5)) {
@@ -261,7 +257,7 @@ public class AiragChatController {
     }
 
     private boolean verifyFileExists(String filePath) {
-        if (CommonConstant.UPLOAD_TYPE_LOCAL.equals(uploadType)) {
+        if (storageUploadService.isEffectiveLocal()) {
             return new File(uploadpath + File.separator + filePath).exists();
         }
         return true;

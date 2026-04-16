@@ -12,8 +12,10 @@ import org.jeecg.common.constant.DataBaseConstant;
 import org.jeecg.common.constant.ServiceNameConstants;
 import org.jeecg.common.constant.SymbolConstant;
 import org.jeecg.common.exception.JeecgBootException;
+import org.jeecg.common.util.SpringContextUtils;
 import org.jeecg.common.util.filter.SsrfFileTypeFilter;
 import org.jeecg.common.util.oss.OssBootUtil;
+import org.jeecg.common.util.storage.IStorageUploadService;
 import org.jeecgframework.poi.util.PoiPublicUtil;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.util.FileCopyUtils;
@@ -54,6 +56,14 @@ public class CommonUtils {
     private static String FILE_NAME_REGEX = "[^A-Za-z\\.\\(\\)\\-（）\\_0-9\\u4e00-\\u9fa5]";
 
     public static String uploadOnlineImage(byte[] data,String basePath,String bizPath,String uploadType){
+        try {
+            if (SpringContextUtils.getApplicationContext() != null) {
+                return SpringContextUtils.getApplicationContext().getBean(IStorageUploadService.class)
+                        .uploadOnlineImage(data, basePath, bizPath);
+            }
+        } catch (Exception e) {
+            log.debug("uploadOnlineImage delegate: {}", e.getMessage());
+        }
         String dbPath = null;
         String fileName = "image" + Math.round(Math.random() * 100000000000L);
         fileName += "." + PoiPublicUtil.getFileExtendName(data);

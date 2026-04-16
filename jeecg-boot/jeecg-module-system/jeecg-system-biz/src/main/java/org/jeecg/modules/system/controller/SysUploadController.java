@@ -3,8 +3,8 @@ package org.jeecg.modules.system.controller;
 import lombok.extern.slf4j.Slf4j;
 import org.jeecg.common.api.vo.Result;
 import org.jeecg.common.util.CommonUtils;
-import org.jeecg.common.util.MinioUtil;
 import org.jeecg.common.util.filter.SsrfFileTypeFilter;
+import org.jeecg.common.util.storage.IStorageUploadService;
 import org.jeecg.common.util.oConvertUtils;
 import org.jeecg.modules.oss.entity.OssFile;
 import org.jeecg.modules.oss.service.IOssFileService;
@@ -27,6 +27,8 @@ import jakarta.servlet.http.HttpServletRequest;
 public class SysUploadController {
     @Autowired
     private IOssFileService ossFileService;
+    @Autowired
+    private IStorageUploadService storageUploadService;
 
     /**
      * 上传
@@ -50,7 +52,7 @@ public class SysUploadController {
         // 获取文件名
         String orgName = file.getOriginalFilename();
         orgName = CommonUtils.getFileName(orgName);
-        String fileUrl =  MinioUtil.upload(file,bizPath);
+        String fileUrl = storageUploadService.upload(file, bizPath);
         if(oConvertUtils.isEmpty(fileUrl)){
             return Result.error("上传失败,请检查配置信息是否正确!");
         }

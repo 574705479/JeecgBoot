@@ -14,6 +14,7 @@ import org.jeecg.common.exception.JeecgBootException;
 import org.jeecg.common.system.api.ISysBaseAPI;
 import org.jeecg.common.system.vo.SysFilesModel;
 import org.jeecg.common.util.CommonUtils;
+import org.jeecg.common.util.storage.IStorageUploadService;
 import org.jeecg.common.util.RedisUtil;
 import org.jeecg.common.util.filter.SsrfFileTypeFilter;
 import org.jeecg.common.util.oConvertUtils;
@@ -26,17 +27,13 @@ import org.jeecg.modules.system.vo.SysCommentFileVo;
 import org.jeecg.modules.system.vo.SysCommentVO;
 import org.jeecg.modules.system.vo.UserAvatar;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.FileCopyUtils;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.multipart.MultipartHttpServletRequest;
 
 import jakarta.servlet.http.HttpServletRequest;
-import java.io.File;
-import java.io.IOException;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -62,11 +59,8 @@ public class SysCommentServiceImpl extends ServiceImpl<SysCommentMapper, SysComm
     @Autowired
     private RedisUtil redisUtil;
 
-    @Value(value = "${jeecg.path.upload}")
-    private String uploadpath;
-
-    @Value(value = "${jeecg.uploadType}")
-    private String uploadType;
+    @Autowired
+    private IStorageUploadService storageUploadService;
 
     /**
      * sysFormFile中的表名
@@ -137,13 +131,9 @@ public class SysCommentServiceImpl extends ServiceImpl<SysCommentMapper, SysComm
             }
 
             if (oConvertUtils.isEmpty(bizPath)) {
-                bizPath = CommonConstant.UPLOAD_TYPE_OSS.equals(uploadType) ? "upload" : "";
+                bizPath = "";
             }
-            if (CommonConstant.UPLOAD_TYPE_LOCAL.equals(uploadType)) {
-                savePath = this.uploadLocal(file, bizPath);
-            } else {
-                savePath = CommonUtils.upload(file, bizPath, uploadType);
-            }
+            savePath = storageUploadService.upload(file, bizPath);
 
             String orgName = file.getOriginalFilename();
             // 获取文件名
@@ -332,55 +322,6 @@ public class SysCommentServiceImpl extends ServiceImpl<SysCommentMapper, SysComm
             }
         }
         return set;
-    }
-
-
-    /**
-     * 本地文件上传
-     *
-     * @param mf      文件
-     * @param bizPath 自定义路径
-     * @return
-     */
-    private String uploadLocal(MultipartFile mf, String bizPath) {
-        try {
-            // 文件安全校验，防止上传漏洞文件
-            SsrfFileTypeFilter.checkUploadFileType(mf, bizPath);
-        } catch (Exception e) {
-            throw new JeecgBootException(e);
-        }
-        
-        try {
-            String ctxPath = uploadpath;
-            String fileName = null;
-            File file = new File(ctxPath + File.separator + bizPath + File.separator);
-            if (!file.exists()) {
-                file.mkdirs();// 创建文件根目录
-            }
-            String orgName = mf.getOriginalFilename();// 获取文件名
-            orgName = CommonUtils.getFileName(orgName);
-            if (orgName.indexOf(".") != -1) {
-                fileName = orgName.substring(0, orgName.lastIndexOf(".")) + "_" + System.currentTimeMillis() + orgName.substring(orgName.indexOf("."));
-            } else {
-                fileName = orgName + "_" + System.currentTimeMillis();
-            }
-            String savePath = file.getPath() + File.separator + fileName;
-            File savefile = new File(savePath);
-            FileCopyUtils.copy(mf.getBytes(), savefile);
-            String dbpath = null;
-            if (oConvertUtils.isNotEmpty(bizPath)) {
-                dbpath = bizPath + File.separator + fileName;
-            } else {
-                dbpath = fileName;
-            }
-            if (dbpath.contains("\\")) {
-                dbpath = dbpath.replace("\\", "/");
-            }
-            return dbpath;
-        } catch (IOException e) {
-            log.error(e.getMessage(), e);
-        }
-        return "";
     }
 
     /**

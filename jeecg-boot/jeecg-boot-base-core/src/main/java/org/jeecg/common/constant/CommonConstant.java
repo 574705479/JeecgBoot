@@ -247,6 +247,8 @@ public interface CommonConstant {
     String UPLOAD_TYPE_LOCAL = "local";
     String UPLOAD_TYPE_MINIO = "minio";
     String UPLOAD_TYPE_OSS = "alioss";
+    /** 腾讯云 COS */
+    String UPLOAD_TYPE_TENCENT_COS = "tencent_cos";
 
     /**
      * 文档上传自定义桶名称

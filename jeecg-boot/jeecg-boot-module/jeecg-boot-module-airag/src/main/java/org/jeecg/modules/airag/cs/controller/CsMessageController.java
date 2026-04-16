@@ -28,8 +28,8 @@ import org.apache.shiro.SecurityUtils;
 import org.jeecg.common.system.vo.LoginUser;
 import org.jeecg.modules.airag.cs.entity.CsAgent;
 import org.jeecg.modules.airag.cs.service.ICsAgentService;
-import org.jeecg.common.constant.CommonConstant;
 import org.jeecg.common.util.CommonUtils;
+import org.jeecg.common.util.storage.IStorageUploadService;
 import org.jeecg.modules.airag.cs.entity.CsFileHash;
 import org.jeecg.modules.airag.cs.service.ICsFileHashService;
 import org.springframework.beans.factory.annotation.Value;
@@ -75,8 +75,8 @@ public class CsMessageController {
     @Value(value = "${jeecg.path.upload}")
     private String uploadpath;
 
-    @Value(value = "${jeecg.uploadType}")
-    private String uploadType;
+    @Autowired
+    private IStorageUploadService storageUploadService;
 
     private static final List<String> ALLOWED_EXTENSIONS = Arrays.asList(
             "jpg", "jpeg", "png", "gif", "webp", "bmp", "svg",
@@ -208,12 +208,7 @@ public class CsMessageController {
 
             String bizPath = "cs-visitor";
             String md5 = request.getParameter("md5");
-            String savePath;
-            if (CommonConstant.UPLOAD_TYPE_LOCAL.equals(uploadType)) {
-                savePath = CommonUtils.uploadLocal(file, bizPath, uploadpath);
-            } else {
-                savePath = CommonUtils.upload(file, bizPath, uploadType);
-            }
+            String savePath = storageUploadService.upload(file, bizPath);
 
             try {
                 if (oConvertUtils.isEmpty(md5)) {
@@ -235,7 +230,7 @@ public class CsMessageController {
     }
 
     private boolean verifyFileExists(String filePath) {
-        if (CommonConstant.UPLOAD_TYPE_LOCAL.equals(uploadType)) {
+        if (storageUploadService.isEffectiveLocal()) {
             return new File(uploadpath + File.separator + filePath).exists();
         }
         return true;

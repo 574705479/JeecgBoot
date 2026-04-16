@@ -24,6 +24,12 @@
 			<artifactId>hibernate-re</artifactId>
 		</dependency>
 
+		<dependency>
+			<groupId>com.qcloud</groupId>
+			<artifactId>cos_api</artifactId>
+			<version>5.6.227</version>
+		</dependency>
+
 		<!-- AI大模型管理-->
 		<dependency>
 			<groupId>org.jeecgframework.boot3</groupId>
