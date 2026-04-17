@@ -78,4 +78,13 @@ public final class CsRedisKeys {
 
     /** 客服轮询分配游标 */
     public static final String REDIS_ROUND_ROBIN_INDEX = REDIS_PREFIX + "round_robin_index";
+
+    /**
+     * 客服"最近一次登录"标记 key 前缀（完整 key 形如 cs:agent:recent_login:{agentId}）。
+     * 用于在框架 SSO 挤下线场景中，让 WebSocket handleAgentDisconnect
+     * 跳过宽限期 goOffline，避免新登录刚 goOnline 又被旧 ws 关闭误置为 OFFLINE。
+     * 一次性消费：被命中后立即 del，30s TTL 兜底。
+     */
+    public static final String REDIS_AGENT_RECENT_LOGIN_PREFIX = "cs:agent:recent_login:";
+    public static final int RECENT_LOGIN_TTL_SECONDS = 30;
 }

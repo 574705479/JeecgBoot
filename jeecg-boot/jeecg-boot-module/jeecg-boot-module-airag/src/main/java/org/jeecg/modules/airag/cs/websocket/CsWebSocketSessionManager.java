@@ -403,6 +403,39 @@ public class CsWebSocketSessionManager {
     }
 
     /**
+     * 主动关闭指定客服的 WebSocket 会话（带 sessionId 防御性比对）。
+     * 用于框架 SSO 踢出同账号时，服务端兜底关闭旧的 /ws/cs/agent 会话。
+     *
+     * @param agentId            客服 ID
+     * @param expectedSessionId  期望关闭的 session.id；为 null 时不做比对
+     * @param code               关闭码（建议使用 4004 kicked_by_new_login，避免与 4002 替换/4001 token 过期等冲突）
+     * @param reason             关闭原因
+     * @return true 表示成功发出关闭；false 表示无匹配 session 或 sessionId 已被覆盖
+     */
+    public boolean closeAgentSession(String agentId, String expectedSessionId, int code, String reason) {
+        if (oConvertUtils.isEmpty(agentId)) {
+            return false;
+        }
+        WebSocketSession session = agentSessions.get(agentId);
+        if (session == null || !session.isOpen()) {
+            return false;
+        }
+        if (expectedSessionId != null && !expectedSessionId.equals(session.getId())) {
+            log.info("[CS-WebSocket] closeAgentSession 跳过：当前 session 非预期, agentId={}, expected={}, current={}",
+                    agentId, expectedSessionId, session.getId());
+            return false;
+        }
+        try {
+            session.close(new CloseStatus(code, reason));
+            log.info("[CS-WebSocket] 主动关闭客服会话: agentId={}, code={}, reason={}", agentId, code, reason);
+            return true;
+        } catch (Exception e) {
+            log.warn("[CS-WebSocket] 关闭客服会话失败: agentId={}, error={}", agentId, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * 检查用户是否在线
      */
     public boolean isUserOnline(String userId) {

@@ -3,8 +3,10 @@ package org.jeecg.modules.airag.cs.websocket;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import lombok.extern.slf4j.Slf4j;
+import org.jeecg.common.util.RedisUtil;
 import org.jeecg.common.util.oConvertUtils;
 import org.jeecg.common.license.core.LicenseClientService;
+import org.jeecg.modules.airag.cs.constant.CsRedisKeys;
 import org.jeecg.modules.airag.cs.entity.CsAgent;
 import org.jeecg.modules.airag.cs.entity.CsConversation;
 import org.jeecg.modules.airag.cs.service.ICsAgentService;
@@ -59,6 +61,9 @@ public class CsWebSocketHandler implements WebSocketHandler {
     @Autowired(required = false)
     private LicenseClientService licenseClientService;
 
+    @Autowired
+    private RedisUtil redisUtil;
+
     public CsWebSocketHandler(CsWebSocketSessionManager sessionManager,
                               @Lazy ICsMessageService messageService,
                               @Lazy ICsConversationService conversationService,
@@ -69,6 +74,28 @@ public class CsWebSocketHandler implements WebSocketHandler {
         this.conversationService = conversationService;
         this.agentService = agentService;
         this.csCryptoUtil = csCryptoUtil;
+    }
+
+    /**
+     * 仅在「客服未被新登录踢出」时才执行 goOffline。
+     * 命中 cs:agent:recent_login:{agentId} 标记则一次性消费并跳过下线，
+     * 避免框架 SSO 挤下线场景下，新登录的 status 被旧 ws 宽限期 callback 误置 OFFLINE。
+     */
+    private void goOfflineIfNotKicked(String agentId, String reason) {
+        if (oConvertUtils.isEmpty(agentId)) {
+            return;
+        }
+        try {
+            String redisKey = CsRedisKeys.REDIS_AGENT_RECENT_LOGIN_PREFIX + agentId;
+            if (redisUtil.hasKey(redisKey)) {
+                redisUtil.del(redisKey);
+                log.info("[CS-WebSocket] 检测到 recent_login 标记，跳过 goOffline: agentId={}, reason={}", agentId, reason);
+                return;
+            }
+        } catch (Exception e) {
+            log.warn("[CS-WebSocket] 检查 recent_login 标记异常，按正常下线处理: agentId={}, error={}", agentId, e.getMessage());
+        }
+        agentService.goOffline(agentId, reason);
     }
 
     @Override
@@ -488,12 +515,18 @@ public class CsWebSocketHandler implements WebSocketHandler {
      */
     private void handleAgentDisconnect(String agentId, CloseStatus closeStatus) {
         int code = closeStatus.getCode();
-        
+
+        // 被新登录主动踢出（CsAgentLoginLogFilter 兜底关闭），status 由新登录的 tryAutoAgentOnline 接管
+        if (code == 4004) {
+            log.info("[CS-WebSocket] 客服被新登录踢出（4004），跳过下线检查: agentId={}", agentId);
+            return;
+        }
+
         // Token过期，立即下线
         if (code == 4001) {
             log.info("[CS-WebSocket] Token过期，客服立即下线: agentId={}", agentId);
             try {
-                agentService.goOffline(agentId, "websocket_disconnect");
+                goOfflineIfNotKicked(agentId, "websocket_disconnect");
             } catch (Exception e) {
                 if (!isShutdownError(e)) {
                     log.error("[CS-WebSocket] 处理客服离线失败: {}", e.getMessage());
@@ -501,7 +534,7 @@ public class CsWebSocketHandler implements WebSocketHandler {
             }
             return;
         }
-        
+
         // 根据关闭原因选择宽限期
         int gracePeriod;
         if (code == CloseStatus.NORMAL.getCode()) {
@@ -511,15 +544,15 @@ public class CsWebSocketHandler implements WebSocketHandler {
             // 异常断连（1006等），较长宽限期
             gracePeriod = GRACE_PERIOD_ABNORMAL;
         }
-        
-        log.info("[CS-WebSocket] 客服断连，{}秒后检查是否真正离线: agentId={}, closeCode={}", 
+
+        log.info("[CS-WebSocket] 客服断连，{}秒后检查是否真正离线: agentId={}, closeCode={}",
                 gracePeriod, agentId, code);
-        
+
         disconnectScheduler.schedule(() -> {
             try {
                 if (!sessionManager.isAgentOnline(agentId)) {
                     log.info("[CS-WebSocket] 客服确认离线: agentId={}", agentId);
-                    agentService.goOffline(agentId, "websocket_disconnect");
+                    goOfflineIfNotKicked(agentId, "websocket_disconnect");
                 } else {
                     log.info("[CS-WebSocket] 客服已重连，取消离线: agentId={}", agentId);
                 }
