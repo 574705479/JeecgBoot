@@ -681,13 +681,5 @@
 				<config.password></config.password>
             </properties>
         </profile>
-		<!-- SpringCloud运行环境 -->
-		<profile>
-			<id>SpringCloud</id>
-			<modules>
-				<!-- 微服务模块 -->
-				<module>jeecg-server-cloud</module>
-			</modules>
-		</profile>
     </profiles>
 </project>

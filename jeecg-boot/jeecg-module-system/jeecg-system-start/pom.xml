@@ -36,13 +36,6 @@
             <groupId>jakarta.servlet</groupId>
             <artifactId>jakarta.servlet-api</artifactId>
         </dependency>
-        
-        <!-- 分库分表示例 -->
-     <!--  <dependency>
-           <groupId>org.jeecgframework.boot3</groupId>
-           <artifactId>jeecg-cloud-test-shardingsphere</artifactId>
-           <version>3.9.0</version>
-       </dependency>-->
     </dependencies>
 
     <build>
