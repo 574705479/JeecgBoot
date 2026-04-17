@@ -1,15 +1,12 @@
 package org.jeecg.modules.system.storage;
 
 import com.qcloud.cos.COSClient;
-import com.qcloud.cos.ClientConfig;
-import com.qcloud.cos.auth.BasicCOSCredentials;
-import com.qcloud.cos.auth.COSCredentials;
 import com.qcloud.cos.model.ObjectMetadata;
 import com.qcloud.cos.model.PutObjectRequest;
-import com.qcloud.cos.region.Region;
 import lombok.extern.slf4j.Slf4j;
 import org.jeecg.common.constant.SymbolConstant;
 import org.jeecg.common.util.CommonUtils;
+import org.jeecg.common.util.SpringContextUtils;
 import org.jeecg.common.util.filter.SsrfFileTypeFilter;
 import org.jeecg.common.util.filter.StrAttackFilter;
 import org.jeecg.common.util.oConvertUtils;
@@ -67,25 +64,17 @@ public final class TencentCosUpload {
     private static String putStream(InputStream in, long contentLength, String key,
                                     String regionId, String bucket, String secretId, String secretKey,
                                     String customDomain, boolean globalAccelerate) {
-        COSCredentials cred = new BasicCOSCredentials(secretId, secretKey);
-        ClientConfig clientConfig = new ClientConfig(new Region(regionId));
-        if (globalAccelerate) {
-            clientConfig.setEndPointSuffix("cos.accelerate.myqcloud.com");
+        COSClient cosClient = SpringContextUtils.getBean(CosClientPool.class)
+                .acquire(regionId, secretId, secretKey, globalAccelerate);
+        ObjectMetadata metadata = new ObjectMetadata();
+        metadata.setContentLength(contentLength);
+        PutObjectRequest putObjectRequest = new PutObjectRequest(bucket, key, in, metadata);
+        cosClient.putObject(putObjectRequest);
+        if (oConvertUtils.isNotEmpty(customDomain) && (customDomain.startsWith("http://") || customDomain.startsWith("https://"))) {
+            String d = customDomain.endsWith("/") ? customDomain.substring(0, customDomain.length() - 1) : customDomain;
+            return d + SymbolConstant.SINGLE_SLASH + key;
         }
-        COSClient cosClient = new COSClient(cred, clientConfig);
-        try {
-            ObjectMetadata metadata = new ObjectMetadata();
-            metadata.setContentLength(contentLength);
-            PutObjectRequest putObjectRequest = new PutObjectRequest(bucket, key, in, metadata);
-            cosClient.putObject(putObjectRequest);
-            if (oConvertUtils.isNotEmpty(customDomain) && (customDomain.startsWith("http://") || customDomain.startsWith("https://"))) {
-                String d = customDomain.endsWith("/") ? customDomain.substring(0, customDomain.length() - 1) : customDomain;
-                return d + SymbolConstant.SINGLE_SLASH + key;
-            }
-            java.net.URL u = cosClient.getObjectUrl(bucket, key);
-            return u != null ? u.toString() : "";
-        } finally {
-            cosClient.shutdown();
-        }
+        java.net.URL u = cosClient.getObjectUrl(bucket, key);
+        return u != null ? u.toString() : "";
     }
 }

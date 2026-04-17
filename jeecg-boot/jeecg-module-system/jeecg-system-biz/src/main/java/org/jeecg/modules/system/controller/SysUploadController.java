@@ -18,7 +18,7 @@ import org.springframework.web.multipart.MultipartHttpServletRequest;
 import jakarta.servlet.http.HttpServletRequest;
 
 /**
- * minio文件上传示例
+ * 通用上传 demo（保留 /uploadMinio 路径以避免接口契约变化）
  * @author: jeecg-boot
  */
 @Slf4j

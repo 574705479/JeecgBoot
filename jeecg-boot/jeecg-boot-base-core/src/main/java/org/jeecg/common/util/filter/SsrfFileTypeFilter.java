@@ -194,45 +194,46 @@ public class SsrfFileTypeFilter {
      */
 
     private static String getFileType(MultipartFile file, String customPath) throws Exception {
-        // 代码逻辑说明: [issue/4672]方法造成的文件被占用，注释掉此方法tomcat就能自动清理掉临时文件
         String fileExtendName = null;
-        InputStream is = null;
-        try {
-            //is = new FileInputStream(file);
-            is = file.getInputStream();
+        try (InputStream is = file.getInputStream()) {
             byte[] b = new byte[10];
-            is.read(b, 0, b.length);
-            String fileTypeHex = String.valueOf(bytesToHexString(b));
-            Iterator<String> keyIter = FILE_TYPE_MAP.keySet().iterator();
-            while (keyIter.hasNext()) {
-                String key = keyIter.next();
-                // 验证前5个字符比较
-                if (key.toLowerCase().startsWith(fileTypeHex.toLowerCase().substring(0, 5))
-                        || fileTypeHex.toLowerCase().substring(0, 5).startsWith(key.toLowerCase())) {
-                    fileExtendName = FILE_TYPE_MAP.get(key);
-                    break;
+            int n = is.read(b, 0, b.length);
+
+            String fileName = file.getOriginalFilename();
+            String suffixByName = (fileName != null && fileName.indexOf(".") != -1)
+                    ? getFileTypeBySuffix(fileName).toLowerCase()
+                    : "";
+
+            if (n >= 5) {
+                String fileTypeHex = String.valueOf(bytesToHexString(b));
+                String head5 = fileTypeHex.toLowerCase().substring(0, 5);
+                Iterator<String> keyIter = FILE_TYPE_MAP.keySet().iterator();
+                while (keyIter.hasNext()) {
+                    String origKey = keyIter.next();
+                    String key = origKey.toLowerCase();
+                    if (key.startsWith(head5) || head5.startsWith(key)) {
+                        fileExtendName = FILE_TYPE_MAP.get(origKey);
+                        break;
+                    }
                 }
+                log.debug("-----获取到的指定文件类型------{}", fileExtendName);
             }
-            log.debug("-----获取到的指定文件类型------"+fileExtendName);
-            // 如果不是上述类型，则判断扩展名
-            if (StringUtils.isBlank(fileExtendName)) {
-                String fileName = file.getOriginalFilename();
-                // 如果无扩展名，则直接返回空串
-                if (-1 == fileName.indexOf(".")) {
-                    return "";
-                }
-                // 如果有扩展名，则返回扩展名
-                return getFileTypeBySuffix(fileName);
+
+            if (!StringUtils.isBlank(fileExtendName)) {
+                return fileExtendName;
             }
-            is.close();
-            return fileExtendName;
+
+            if ("docx".equals(suffixByName) || "xlsx".equals(suffixByName) || "pptx".equals(suffixByName)) {
+                return suffixByName;
+            }
+
+            if (suffixByName.isEmpty()) {
+                return "";
+            }
+            return suffixByName;
         } catch (Exception e) {
             log.error(e.getMessage(), e);
             return "";
-        }finally {
-            if (is != null) {
-                is.close();
-            }
         }
     }
 

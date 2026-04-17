@@ -1,7 +1,9 @@
 package org.jeecg.config;
 
+import jakarta.annotation.PostConstruct;
 import lombok.Getter;
 import lombok.Setter;
+import lombok.extern.slf4j.Slf4j;
 import org.jeecg.config.tencent.JeecgTencent;
 import org.jeecg.config.vo.*;
 import org.springframework.beans.factory.config.BeanDefinition;
@@ -9,15 +11,51 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Role;
 import org.springframework.stereotype.Component;
 
+import java.io.File;
+import java.nio.file.Paths;
+
 
 /**
  * 加载项目配置
  * @author: jeecg-boot
  */
+@Slf4j
 @Component("jeecgBaseConfig")
 @ConfigurationProperties(prefix = "jeecg")
 @Role(BeanDefinition.ROLE_INFRASTRUCTURE)
 public class JeecgBaseConfig {
+
+    /**
+     * 启动校验：确保 jeecg.path.upload 配置存在且目录可创建/可写。
+     * 防止启动后才在文件上传时报错。
+     */
+    @PostConstruct
+    public void validatePath() {
+        if (path == null) {
+            path = new Path();
+        }
+        String uploadPath = path.getUpload();
+        if (uploadPath == null || uploadPath.trim().isEmpty()) {
+            uploadPath = "./upload";
+            path.setUpload(uploadPath);
+            log.warn("[JeecgBaseConfig] jeecg.path.upload 未配置，使用默认路径: {}", uploadPath);
+        }
+        try {
+            File dir = Paths.get(uploadPath).toAbsolutePath().normalize().toFile();
+            if (!dir.exists() && !dir.mkdirs()) {
+                throw new IllegalStateException("无法创建上传目录: " + dir.getAbsolutePath());
+            }
+            if (!dir.isDirectory() || !dir.canWrite()) {
+                throw new IllegalStateException("上传目录不可写: " + dir.getAbsolutePath());
+            }
+            log.info("[JeecgBaseConfig] 文件上传根目录: {}", dir.getAbsolutePath());
+        } catch (IllegalStateException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalStateException("校验 jeecg.path.upload 失败: " + uploadPath, e);
+        }
+    }
+
     /**
      * 签名密钥串(字典等敏感接口)
      * @TODO 降低使用成本加的默认值,实际以 yml配置 为准
@@ -32,8 +70,8 @@ public class JeecgBaseConfig {
      */
     private String signUrls;
     /**
-     * 上传模式  
-     * 本地：local\Minio：minio\阿里云：alioss
+     * 上传模式
+     * 本地：local、阿里云：alioss
      */
     private String uploadType;
     
@@ -77,13 +115,6 @@ public class JeecgBaseConfig {
      * 百度开放API配置
      */
     private BaiduApi baiduApi;
-
-    /**
-     * minio配置
-     */
-    @Getter
-    @Setter
-    private JeecgMinio minio;
 
     /**
      * oss配置

@@ -7,6 +7,7 @@ import org.jeecg.common.api.vo.Result;
 import org.jeecg.common.exception.JeecgBootException;
 import org.jeecg.common.system.vo.LoginUser;
 import org.jeecg.common.util.oConvertUtils;
+import org.jeecg.common.util.storage.IStorageConfigCacheInvalidator;
 import org.jeecg.config.JeecgBaseConfig;
 import org.jeecg.modules.system.entity.SysStorageConfig;
 import org.jeecg.modules.system.mapper.SysStorageConfigMapper;
@@ -31,6 +32,8 @@ public class SysStorageConfigController {
     private JeecgBaseConfig jeecgBaseConfig;
     @Autowired
     private StorageConfigConnectionTestService storageConfigConnectionTestService;
+    @Autowired
+    private IStorageConfigCacheInvalidator storageConfigCacheInvalidator;
 
     @RequiresRoles("admin")
     @GetMapping(value = "/config")
@@ -212,6 +215,7 @@ public class SysStorageConfigController {
         } else {
             storageConfigMapper.updateById(entity);
         }
+        storageConfigCacheInvalidator.invalidate();
         return Result.OK("保存成功");
     }
 

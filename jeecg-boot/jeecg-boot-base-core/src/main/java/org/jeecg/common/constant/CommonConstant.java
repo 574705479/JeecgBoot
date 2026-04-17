@@ -242,10 +242,9 @@ public interface CommonConstant {
     String ONLINE_PARAM_VAL_IS_FALSE = "N";
 
     /**
-     * 文件上传类型（本地：local，Minio：minio，阿里云：alioss）
+     * 文件上传类型（本地：local，阿里云：alioss）
      */
     String UPLOAD_TYPE_LOCAL = "local";
-    String UPLOAD_TYPE_MINIO = "minio";
     String UPLOAD_TYPE_OSS = "alioss";
     /** 腾讯云 COS */
     String UPLOAD_TYPE_TENCENT_COS = "tencent_cos";

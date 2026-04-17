@@ -25,6 +25,10 @@ import org.springframework.web.servlet.ModelAndView;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.*;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 
 /**
  * <p>
@@ -60,6 +64,9 @@ public class CommonController {
      * @param response
      * @return
      */
+    /** 单文件上传大小上限：50MB（仅 /upload 入口校验，不影响 Spring Multipart 全局配置） */
+    private static final long MAX_UPLOAD_BYTES = 50L * 1024 * 1024;
+
     @PostMapping(value = "/upload")
     public Result<?> upload(HttpServletRequest request, HttpServletResponse response) throws Exception {
         Result<?> result = new Result<>();
@@ -67,8 +74,23 @@ public class CommonController {
         String bizPath = request.getParameter("biz");
         MultipartHttpServletRequest multipartRequest = (MultipartHttpServletRequest) request;
         MultipartFile file = multipartRequest.getFile("file");
-        
-        // 文件安全校验，防止上传漏洞文件
+
+        if (file == null) {
+            result.setMessage("上传失败：未接收到文件");
+            result.setSuccess(false);
+            return result;
+        }
+        if (file.isEmpty() || file.getSize() <= 0) {
+            result.setMessage("上传失败：空文件");
+            result.setSuccess(false);
+            return result;
+        }
+        if (file.getSize() > MAX_UPLOAD_BYTES) {
+            result.setMessage("上传失败：文件大小超过 " + (MAX_UPLOAD_BYTES / 1024 / 1024) + "MB");
+            result.setSuccess(false);
+            return result;
+        }
+
         SsrfFileTypeFilter.checkUploadFileType(file, bizPath);
         savePath = storageUploadService.upload(file, bizPath == null ? "" : bizPath);
         if(oConvertUtils.isNotEmpty(savePath)){
@@ -134,27 +156,46 @@ public class CommonController {
      */
     @GetMapping(value = "/static/**")
     public void view(HttpServletRequest request, HttpServletResponse response) {
-        // ISO-8859-1 ==> UTF-8 进行编码转换
         String imgPath = extractPathFromPattern(request);
-        if(oConvertUtils.isEmpty(imgPath) || CommonConstant.STRING_NULL.equals(imgPath)){
+        if (oConvertUtils.isEmpty(imgPath) || CommonConstant.STRING_NULL.equals(imgPath)) {
             return;
         }
-        
-        try {
-            imgPath = imgPath.replace("..", "").replace("../","");
-            if (imgPath.endsWith(SymbolConstant.COMMA)) {
-                imgPath = imgPath.substring(0, imgPath.length() - 1);
-            }
-            // 代码逻辑说明: 检查下载文件类型--------------
-            SsrfFileTypeFilter.checkDownloadFileType(imgPath);
 
-            String filePath = uploadpath + File.separator + imgPath;
-            File file = new File(filePath);
-            if(!file.exists()){
-                response.setStatus(404);
-                log.warn("文件["+imgPath+"]不存在..");
+        try {
+            String decoded = imgPath;
+            for (int i = 0; i < 3; i++) {
+                String tmp = URLDecoder.decode(decoded, StandardCharsets.UTF_8);
+                if (tmp.equals(decoded)) {
+                    break;
+                }
+                decoded = tmp;
+            }
+            if (decoded.endsWith(SymbolConstant.COMMA)) {
+                decoded = decoded.substring(0, decoded.length() - 1);
+            }
+            if (decoded.contains("\0")
+                    || decoded.startsWith("/") || decoded.startsWith("\\")
+                    || decoded.matches("^[A-Za-z]:.*")) {
+                log.warn("非法访问路径(绝对路径/空字节): {}", imgPath);
+                response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
                 return;
-                //throw new RuntimeException();
+            }
+
+            SsrfFileTypeFilter.checkDownloadFileType(decoded);
+
+            Path uploadRoot = Paths.get(uploadpath).toAbsolutePath().normalize();
+            Path target = uploadRoot.resolve(decoded).normalize();
+            if (!target.startsWith(uploadRoot)) {
+                log.warn("路径穿越尝试被拦截: raw={}, resolved={}", imgPath, target);
+                response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                return;
+            }
+
+            File file = target.toFile();
+            if (!file.exists() || !file.isFile()) {
+                response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+                log.warn("文件[{}]不存在..", decoded);
+                return;
             }
             // 根据文件扩展名设置正确的Content-Type（图片等可直接预览，其他走下载）
             String contentType = resolveContentType(file.getName());

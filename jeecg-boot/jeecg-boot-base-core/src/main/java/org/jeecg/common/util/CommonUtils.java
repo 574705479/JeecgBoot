@@ -27,6 +27,8 @@ import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
@@ -80,9 +82,7 @@ public class CommonUtils {
             }else {
                 InputStream in = new ByteArrayInputStream(data);
                 String relativePath = bizPath+"/"+fileName;
-                if(CommonConstant.UPLOAD_TYPE_MINIO.equals(uploadType)){
-                    dbPath = MinioUtil.upload(in,relativePath);
-                }else if(CommonConstant.UPLOAD_TYPE_OSS.equals(uploadType)){
+                if(CommonConstant.UPLOAD_TYPE_OSS.equals(uploadType)){
                     dbPath = OssBootUtil.upload(in,relativePath);
                 }
             }
@@ -144,11 +144,7 @@ public class CommonUtils {
     public static String upload(MultipartFile file, String bizPath, String uploadType) {
         String url = "";
         try {
-            if (CommonConstant.UPLOAD_TYPE_MINIO.equals(uploadType)) {
-                url = MinioUtil.upload(file, bizPath);
-            } else {
-                url = OssBootUtil.upload(file, bizPath);
-            }
+            url = OssBootUtil.upload(file, bizPath);
         } catch (Exception e) {
             log.error(e.getMessage(), e);
             throw new JeecgBootException(e.getMessage());
@@ -163,35 +159,41 @@ public class CommonUtils {
      */
     public static String uploadLocal(MultipartFile mf,String bizPath,String uploadpath){
         try {
-            // 文件安全校验，防止上传漏洞文件
             SsrfFileTypeFilter.checkUploadFileType(mf, bizPath);
-            
-            String fileName = null;
-            File file = new File(uploadpath + File.separator + bizPath + File.separator );
+
+            Path uploadRoot = Paths.get(uploadpath).toAbsolutePath().normalize();
+            String safeBiz = (bizPath == null) ? "" : bizPath.replace("\\", "/");
+            Path bizDir = uploadRoot.resolve(safeBiz).normalize();
+            if (!bizDir.startsWith(uploadRoot)) {
+                throw new JeecgBootException("非法的上传业务路径");
+            }
+            File file = bizDir.toFile();
             if (!file.exists()) {
-                // 创建文件根目录
                 file.mkdirs();
             }
+
             String orgName = mf.getOriginalFilename();
             orgName = CommonUtils.getFileName(orgName);
-            if(orgName.indexOf(SymbolConstant.SPOT)!=-1){
+            String fileName;
+            if (orgName.indexOf(SymbolConstant.SPOT) != -1) {
                 fileName = orgName.substring(0, orgName.lastIndexOf(".")) + "_" + System.currentTimeMillis() + orgName.substring(orgName.lastIndexOf("."));
-            }else{
-                fileName = orgName+ "_" + System.currentTimeMillis();
+            } else {
+                fileName = orgName + "_" + System.currentTimeMillis();
             }
-            String savePath = file.getPath() + File.separator + fileName;
-            File savefile = new File(savePath);
-            FileCopyUtils.copy(mf.getBytes(), savefile);
-            String dbpath = null;
-            if(oConvertUtils.isNotEmpty(bizPath)){
+
+            Path savePath = bizDir.resolve(fileName).normalize();
+            if (!savePath.startsWith(uploadRoot)) {
+                throw new JeecgBootException("非法的上传文件名");
+            }
+            FileCopyUtils.copy(mf.getBytes(), savePath.toFile());
+
+            String dbpath;
+            if (oConvertUtils.isNotEmpty(bizPath)) {
                 dbpath = bizPath + File.separator + fileName;
-            }else{
+            } else {
                 dbpath = fileName;
             }
-            if (dbpath.contains(SymbolConstant.DOUBLE_BACKSLASH)) {
-                dbpath = dbpath.replace("\\", "/");
-            }
-            return dbpath;
+            return dbpath.replace("\\", "/");
         } catch (IOException e) {
             log.error(e.getMessage(), e);
             throw new JeecgBootException("文件上传失败: " + e.getMessage());
@@ -208,11 +210,7 @@ public class CommonUtils {
     public static String upload(MultipartFile file, String bizPath, String uploadType, String customBucket) {
         String url = "";
         try {
-            if (CommonConstant.UPLOAD_TYPE_MINIO.equals(uploadType)) {
-                url = MinioUtil.upload(file, bizPath, customBucket);
-            } else {
-                url = OssBootUtil.upload(file, bizPath, customBucket);
-            }
+            url = OssBootUtil.upload(file, bizPath, customBucket);
         } catch (Exception e) {
             log.error(e.getMessage(),e);
         }

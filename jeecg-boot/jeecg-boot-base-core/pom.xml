@@ -305,26 +305,6 @@
 			<optional>true</optional>
 		</dependency>
 
-		<!-- mini文件存储服务 -->
-		<dependency>
-			<groupId>io.minio</groupId>
-			<artifactId>minio</artifactId>
-			<exclusions>
-				<exclusion>
-					<artifactId>checker-qual</artifactId>
-					<groupId>org.checkerframework</groupId>
-				</exclusion>
-				<exclusion>
-					<groupId>com.google.errorprone</groupId>
-					<artifactId>error_prone_annotations</artifactId>
-				</exclusion>
-				<exclusion>
-					<groupId>org.apache.commons</groupId>
-					<artifactId>commons-compress</artifactId>
-				</exclusion>
-			</exclusions>
-		</dependency>
-
 		<!-- 阿里云短信 -->
 		<dependency>
 			<groupId>com.aliyun</groupId>
@@ -336,6 +316,12 @@
 			<groupId>com.aliyun.oss</groupId>
 			<artifactId>aliyun-sdk-oss</artifactId>
 			<version>${aliyun.oss.version}</version>
+		</dependency>
+		<!-- google guava (原由 minio 传递引入，minio 移除后显式声明) -->
+		<dependency>
+			<groupId>com.google.guava</groupId>
+			<artifactId>guava</artifactId>
+			<version>${guava.version}</version>
 		</dependency>
 		<!-- 第三方登录  -->
 		<dependency>

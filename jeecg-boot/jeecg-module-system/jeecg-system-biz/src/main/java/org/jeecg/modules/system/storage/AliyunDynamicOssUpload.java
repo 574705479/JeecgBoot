@@ -1,12 +1,12 @@
 package org.jeecg.modules.system.storage;
 
 import com.aliyun.oss.OSS;
-import com.aliyun.oss.OSSClientBuilder;
 import com.aliyun.oss.model.PutObjectResult;
 import lombok.extern.slf4j.Slf4j;
 import org.jeecg.common.constant.CommonConstant;
 import org.jeecg.common.constant.SymbolConstant;
 import org.jeecg.common.util.CommonUtils;
+import org.jeecg.common.util.SpringContextUtils;
 import org.jeecg.common.util.filter.SsrfFileTypeFilter;
 import org.jeecg.common.util.filter.StrAttackFilter;
 import org.jeecg.common.util.oConvertUtils;
@@ -64,43 +64,23 @@ public final class AliyunDynamicOssUpload {
     private static String putStream(InputStream in, long contentLength, String objectKey,
                                     String endpoint, String bucket, String accessKeyId, String accessKeySecret,
                                     String staticDomain, boolean transferAccelerate) {
-        String endpointForClient = transferAccelerate ? "https://oss-accelerate.aliyuncs.com" : endpointWithScheme(endpoint);
-        OSS oss = new OSSClientBuilder().build(endpointForClient, accessKeyId, accessKeySecret);
-        try {
-            com.aliyun.oss.model.ObjectMetadata meta = new com.aliyun.oss.model.ObjectMetadata();
-            meta.setContentLength(contentLength);
-            PutObjectResult result = oss.putObject(bucket, objectKey, in, meta);
-            String filePath;
-            if (oConvertUtils.isNotEmpty(staticDomain) && staticDomain.toLowerCase().startsWith(CommonConstant.STR_HTTP)) {
-                String dom = staticDomain.endsWith("/") ? staticDomain.substring(0, staticDomain.length() - 1) : staticDomain;
-                filePath = dom + SymbolConstant.SINGLE_SLASH + objectKey;
-            } else {
-                String host = transferAccelerate ? "oss-accelerate.aliyuncs.com" : endpointHostOnly(endpoint);
-                filePath = "https://" + bucket + "." + host + SymbolConstant.SINGLE_SLASH + objectKey;
-            }
-            if (result != null) {
-                log.debug("OSS dynamic upload ok: {}", objectKey);
-            }
-            return filePath;
-        } finally {
-            oss.shutdown();
+        OSS oss = SpringContextUtils.getBean(OssClientPool.class)
+                .acquire(endpoint, accessKeyId, accessKeySecret, transferAccelerate);
+        com.aliyun.oss.model.ObjectMetadata meta = new com.aliyun.oss.model.ObjectMetadata();
+        meta.setContentLength(contentLength);
+        PutObjectResult result = oss.putObject(bucket, objectKey, in, meta);
+        String filePath;
+        if (oConvertUtils.isNotEmpty(staticDomain) && staticDomain.toLowerCase().startsWith(CommonConstant.STR_HTTP)) {
+            String dom = staticDomain.endsWith("/") ? staticDomain.substring(0, staticDomain.length() - 1) : staticDomain;
+            filePath = dom + SymbolConstant.SINGLE_SLASH + objectKey;
+        } else {
+            String host = transferAccelerate ? "oss-accelerate.aliyuncs.com" : endpointHostOnly(endpoint);
+            filePath = "https://" + bucket + "." + host + SymbolConstant.SINGLE_SLASH + objectKey;
         }
-    }
-
-    /** SDK 需要带协议的 Endpoint */
-    private static String endpointWithScheme(String endpoint) {
-        if (endpoint == null) {
-            return null;
+        if (result != null) {
+            log.debug("OSS dynamic upload ok: {}", objectKey);
         }
-        String e = endpoint.trim();
-        if (e.isEmpty()) {
-            return e;
-        }
-        String lower = e.toLowerCase();
-        if (lower.startsWith("http://") || lower.startsWith("https://")) {
-            return e;
-        }
-        return "https://" + e;
+        return filePath;
     }
 
     /** 虚拟主机风格访问 URL 仅使用域名部分，避免 endpoint 含 https:// 时拼出非法地址 */
