@@ -113,22 +113,6 @@ public class CsVisitorServiceImpl extends ServiceImpl<CsVisitorMapper, CsVisitor
     }
 
     @Override
-    public String getDisplayName(String appId, String userId, String defaultName) {
-        CsVisitor visitor = baseMapper.selectByAppAndUser(appId, userId);
-        if (visitor != null) {
-            // 优先返回备注昵称
-            if (visitor.getNickname() != null && !visitor.getNickname().isEmpty()) {
-                return visitor.getNickname();
-            }
-            // 其次返回真实姓名
-            if (visitor.getRealName() != null && !visitor.getRealName().isEmpty()) {
-                return visitor.getRealName();
-            }
-        }
-        return defaultName;
-    }
-
-    @Override
     public void notifyVisitorUpdated(CsVisitor visitor) {
         if (visitor == null || visitor.getUserId() == null || visitor.getUserId().isEmpty()) {
             return;
@@ -144,7 +128,7 @@ public class CsVisitorServiceImpl extends ServiceImpl<CsVisitorMapper, CsVisitor
         extra.put("visitor", visitor);
         for (String conversationId : conversationIds) {
             CsWebSocketMessage message = CsWebSocketMessage.builder()
-                    .type("visitor_updated")
+                    .type(CsWebSocketMessage.TYPE_VISITOR_UPDATED)
                     .conversationId(conversationId)
                     .content("访客信息更新")
                     .extra(extra)

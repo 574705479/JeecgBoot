@@ -8,6 +8,7 @@ import org.jeecg.common.constant.CommonConstant;
 import org.jeecg.common.system.util.JwtUtil;
 import org.jeecg.common.system.vo.LoginUser;
 import org.jeecg.common.util.oConvertUtils;
+import org.jeecg.modules.airag.cs.constant.CsRedisKeys;
 import org.jeecg.modules.airag.cs.entity.CsGlobalConfig;
 import org.jeecg.modules.airag.cs.entity.CsIpBlacklist;
 import org.jeecg.modules.airag.cs.entity.CsVisitorBlacklist;
@@ -34,8 +35,6 @@ import java.util.concurrent.TimeUnit;
 @Service
 public class CsVisitorTokenServiceImpl implements ICsVisitorTokenService {
 
-    private static final String VISITOR_APP_REDIS_KEY = "cs:global:visitor_app_id";
-    private static final String VISITOR_APP_CONFIG_KEY = "visitor_app_id";
     private static final String VISITOR_TOKEN_PREFIX = "cs:visitor:token:";
     private static final String VISITOR_SESSION_PREFIX = "cs:visitor:session:";
     private static final String VISITOR_BLACKLIST_KEY = "cs:visitor:blacklist";
@@ -50,6 +49,9 @@ public class CsVisitorTokenServiceImpl implements ICsVisitorTokenService {
 
     @Autowired
     private CsGlobalConfigMapper csGlobalConfigMapper;
+
+    @Autowired
+    private org.jeecg.modules.airag.cs.service.CsGlobalConfigCache configCache;
 
     @Autowired
     private CsIpBlacklistMapper ipBlacklistMapper;
@@ -254,14 +256,6 @@ public class CsVisitorTokenServiceImpl implements ICsVisitorTokenService {
     }
 
     @Override
-    public void blacklist(String externalUserId) {
-        if (oConvertUtils.isEmpty(externalUserId)) {
-            return;
-        }
-        redisTemplate.opsForSet().add(VISITOR_BLACKLIST_KEY, externalUserId);
-    }
-
-    @Override
     public void blacklistWithReason(String externalUserId, String visitorName, String reason, String operator) {
         if (oConvertUtils.isEmpty(externalUserId)) {
             return;
@@ -397,15 +391,7 @@ public class CsVisitorTokenServiceImpl implements ICsVisitorTokenService {
 
     @Override
     public String getGlobalVisitorAppId() {
-        String appId = redisTemplate.opsForValue().get(VISITOR_APP_REDIS_KEY);
-        if (oConvertUtils.isNotEmpty(appId)) {
-            return appId;
-        }
-        CsGlobalConfig config = csGlobalConfigMapper.selectById(VISITOR_APP_CONFIG_KEY);
-        appId = config != null ? config.getConfigValue() : null;
-        if (oConvertUtils.isNotEmpty(appId)) {
-            redisTemplate.opsForValue().set(VISITOR_APP_REDIS_KEY, appId);
-        }
+        String appId = configCache.get(CsRedisKeys.REDIS_VISITOR_APP, CsRedisKeys.CONFIG_VISITOR_APP);
         return appId;
     }
 
@@ -427,16 +413,7 @@ public class CsVisitorTokenServiceImpl implements ICsVisitorTokenService {
 
     @Override
     public boolean isTokenRequired() {
-        // 先查Redis缓存
-        String json = redisTemplate.opsForValue().get(VISITOR_ACCESS_REDIS_KEY);
-        if (oConvertUtils.isEmpty(json)) {
-            // 再查数据库
-            CsGlobalConfig config = csGlobalConfigMapper.selectById(VISITOR_ACCESS_CONFIG_KEY);
-            json = config != null ? config.getConfigValue() : null;
-            if (oConvertUtils.isNotEmpty(json)) {
-                redisTemplate.opsForValue().set(VISITOR_ACCESS_REDIS_KEY, json);
-            }
-        }
+        String json = configCache.get(CsRedisKeys.REDIS_VISITOR_ACCESS, CsRedisKeys.CONFIG_VISITOR_ACCESS);
         if (oConvertUtils.isNotEmpty(json)) {
             try {
                 JSONObject obj = JSONObject.parseObject(json);
@@ -466,14 +443,7 @@ public class CsVisitorTokenServiceImpl implements ICsVisitorTokenService {
             return true;
         }
         // 读取全局配置中的secretKey
-        String json = redisTemplate.opsForValue().get(VISITOR_ACCESS_REDIS_KEY);
-        if (oConvertUtils.isEmpty(json)) {
-            CsGlobalConfig config = csGlobalConfigMapper.selectById(VISITOR_ACCESS_CONFIG_KEY);
-            json = config != null ? config.getConfigValue() : null;
-            if (oConvertUtils.isNotEmpty(json)) {
-                redisTemplate.opsForValue().set(VISITOR_ACCESS_REDIS_KEY, json);
-            }
-        }
+        String json = configCache.get(CsRedisKeys.REDIS_VISITOR_ACCESS, CsRedisKeys.CONFIG_VISITOR_ACCESS);
         if (oConvertUtils.isEmpty(json)) {
             return true; // 无配置，不校验
         }
@@ -499,6 +469,4 @@ public class CsVisitorTokenServiceImpl implements ICsVisitorTokenService {
         }
     }
 
-    private static final String VISITOR_ACCESS_REDIS_KEY = "cs:global:visitor_access";
-    private static final String VISITOR_ACCESS_CONFIG_KEY = "visitor_access";
 }

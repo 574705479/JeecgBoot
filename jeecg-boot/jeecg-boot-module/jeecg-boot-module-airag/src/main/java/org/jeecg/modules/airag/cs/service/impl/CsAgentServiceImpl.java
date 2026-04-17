@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.shiro.SecurityUtils;
 import org.jeecg.common.system.vo.LoginUser;
 import org.jeecg.common.util.oConvertUtils;
+import org.jeecg.modules.airag.cs.constant.CsRedisKeys;
 import org.jeecg.modules.airag.cs.entity.CsAgent;
 import org.jeecg.modules.airag.cs.entity.CsGlobalConfig;
 import org.jeecg.modules.airag.cs.mapper.CsAgentMapper;
@@ -37,9 +38,6 @@ import java.util.List;
 @Service
 public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> implements ICsAgentService {
 
-    private static final String CONVERSATION_ASSIGN_REDIS_KEY = "cs:global:conversation_assign";
-    private static final String CONVERSATION_ASSIGN_CONFIG_KEY = "conversation_assign";
-    private static final String ROUND_ROBIN_INDEX_KEY = "cs:global:round_robin_index";
 
     @Autowired
     private CsWebSocketSessionManager sessionManager;
@@ -49,6 +47,9 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
 
     @Autowired
     private CsGlobalConfigMapper csGlobalConfigMapper;
+
+    @Autowired
+    private org.jeecg.modules.airag.cs.service.CsGlobalConfigCache configCache;
 
     @Autowired
     private ICsAgentStatusLogService agentStatusLogService;
@@ -176,7 +177,7 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
             }
             
             CsWebSocketMessage message = CsWebSocketMessage.builder()
-                    .type("agent_status_changed")
+                    .type(CsWebSocketMessage.TYPE_AGENT_STATUS_CHANGED)
                     .senderId(agentId)
                     .senderName(agent.getNickname())
                     .extra(java.util.Map.of(
@@ -252,7 +253,7 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
         int size = agents.size();
         
         // 从Redis读取上次分配的客服ID，找到其在列表中的位置
-        String lastAgentId = redisTemplate.opsForValue().get(ROUND_ROBIN_INDEX_KEY);
+        String lastAgentId = redisTemplate.opsForValue().get(CsRedisKeys.REDIS_ROUND_ROBIN_INDEX);
         int startIndex = 0;
         if (lastAgentId != null) {
             for (int i = 0; i < size; i++) {
@@ -269,7 +270,7 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
             CsAgent agent = agents.get(idx);
             if (incrementSessions(agent.getId())) {
                 // 记录本次分配的客服ID（而不是索引）
-                redisTemplate.opsForValue().set(ROUND_ROBIN_INDEX_KEY, agent.getId());
+                redisTemplate.opsForValue().set(CsRedisKeys.REDIS_ROUND_ROBIN_INDEX, agent.getId());
                 log.info("[CS-Agent] 轮流分配客服: agentId={}, nickname={}", agent.getId(), agent.getNickname());
                 return agent;
             }
@@ -301,14 +302,7 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
      */
     private String getAssignMode() {
         try {
-            String json = redisTemplate.opsForValue().get(CONVERSATION_ASSIGN_REDIS_KEY);
-            if (json == null || json.isEmpty()) {
-                CsGlobalConfig config = csGlobalConfigMapper.selectById(CONVERSATION_ASSIGN_CONFIG_KEY);
-                json = config != null ? config.getConfigValue() : null;
-                if (json != null && !json.isEmpty()) {
-                    redisTemplate.opsForValue().set(CONVERSATION_ASSIGN_REDIS_KEY, json);
-                }
-            }
+            String json = configCache.get(CsRedisKeys.REDIS_CONVERSATION_ASSIGN, CsRedisKeys.CONFIG_CONVERSATION_ASSIGN);
             if (json != null && !json.isEmpty()) {
                 JSONObject obj = JSONObject.parseObject(json);
                 return obj.getString("assignMode");

@@ -10,6 +10,7 @@ import org.jeecg.common.util.oConvertUtils;
 import org.jeecg.modules.airag.cs.entity.CsAgent;
 import org.jeecg.modules.airag.cs.service.ICsAgentService;
 import org.jeecg.modules.airag.cs.service.ICsVisitorTokenService;
+import org.jeecg.modules.airag.cs.util.CsRequestUtil;
 import org.jeecg.modules.airag.cs.vo.CsVisitorTokenPayload;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.server.ServerHttpRequest;
@@ -210,18 +211,6 @@ public class CsWebSocketInterceptor implements HandshakeInterceptor {
     }
 
     private String getClientIp(ServletServerHttpRequest request) {
-        if (request == null || request.getServletRequest() == null) {
-            return null;
-        }
-        String ip = request.getServletRequest().getHeader("X-Forwarded-For");
-        if (oConvertUtils.isNotEmpty(ip)) {
-            int idx = ip.indexOf(',');
-            return idx > -1 ? ip.substring(0, idx).trim() : ip.trim();
-        }
-        ip = request.getServletRequest().getHeader("X-Real-IP");
-        if (oConvertUtils.isNotEmpty(ip)) {
-            return ip.trim();
-        }
-        return request.getServletRequest().getRemoteAddr();
+        return CsRequestUtil.getClientIp(request);
     }
 }

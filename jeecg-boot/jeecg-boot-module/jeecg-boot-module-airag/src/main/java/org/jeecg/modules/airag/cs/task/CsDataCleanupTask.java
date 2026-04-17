@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.jeecg.modules.airag.chat.entity.ChatMessage;
 import org.jeecg.modules.airag.chat.service.IChatMessageService;
+import org.jeecg.modules.airag.cs.constant.CsRedisKeys;
 import org.jeecg.modules.airag.cs.entity.*;
 import org.jeecg.modules.airag.cs.mapper.*;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,8 +25,6 @@ import java.util.concurrent.TimeUnit;
 public class CsDataCleanupTask {
 
     private static final String LOCK_KEY = "cs:lock:data_cleanup";
-    private static final String CONFIG_KEY = "data_cleanup";
-    private static final String CONFIG_REDIS_KEY = "cs:global:data_cleanup";
     private static final int BATCH_SIZE = 500;
 
     @Autowired
@@ -33,6 +32,9 @@ public class CsDataCleanupTask {
 
     @Autowired
     private CsGlobalConfigMapper csGlobalConfigMapper;
+
+    @Autowired
+    private org.jeecg.modules.airag.cs.service.CsGlobalConfigCache configCache;
 
     @Autowired
     private CsConversationMapper conversationMapper;
@@ -369,14 +371,7 @@ public class CsDataCleanupTask {
 
     private JSONObject getCleanupConfig() {
         try {
-            String json = redisTemplate.opsForValue().get(CONFIG_REDIS_KEY);
-            if (json == null || json.isEmpty()) {
-                CsGlobalConfig config = csGlobalConfigMapper.selectById(CONFIG_KEY);
-                json = config != null ? config.getConfigValue() : null;
-                if (json != null && !json.isEmpty()) {
-                    redisTemplate.opsForValue().set(CONFIG_REDIS_KEY, json);
-                }
-            }
+            String json = configCache.get(CsRedisKeys.REDIS_DATA_CLEANUP, CsRedisKeys.CONFIG_DATA_CLEANUP);
             return json != null ? JSON.parseObject(json) : null;
         } catch (Exception e) {
             log.warn("[CS-Cleanup] 读取清理配置失败", e);

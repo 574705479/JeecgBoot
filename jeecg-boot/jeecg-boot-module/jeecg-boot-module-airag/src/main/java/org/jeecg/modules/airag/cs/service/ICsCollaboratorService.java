@@ -56,14 +56,6 @@ public interface ICsCollaboratorService extends IService<CsCollaborator> {
     List<CsCollaborator> getCollaborators(String conversationId);
 
     /**
-     * 获取客服参与的会话ID列表
-     * 
-     * @param agentId 客服ID
-     * @return 会话ID列表
-     */
-    List<String> getConversationIdsByAgent(String agentId);
-
-    /**
      * 检查客服是否在会话中
      * 
      * @param conversationId 会话ID

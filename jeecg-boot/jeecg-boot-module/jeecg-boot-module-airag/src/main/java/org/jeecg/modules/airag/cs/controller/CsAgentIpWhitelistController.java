@@ -10,11 +10,13 @@ import org.apache.shiro.SecurityUtils;
 import org.jeecg.common.api.vo.Result;
 import org.jeecg.common.system.vo.LoginUser;
 import org.jeecg.common.util.oConvertUtils;
+import org.jeecg.modules.airag.cs.constant.CsRedisKeys;
 import org.jeecg.modules.airag.cs.entity.CsAgentIpWhitelist;
 import org.jeecg.modules.airag.cs.entity.CsGlobalConfig;
 import org.jeecg.modules.airag.cs.mapper.CsAgentIpWhitelistMapper;
 import org.jeecg.modules.airag.cs.mapper.CsGlobalConfigMapper;
 import org.jeecg.modules.airag.cs.util.CsIpMatchUtil;
+import org.jeecg.modules.airag.cs.util.CsRequestUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.web.bind.annotation.*;
@@ -35,9 +37,6 @@ import java.util.stream.Collectors;
 @RequestMapping("/cs/security/agent-ip-whitelist")
 public class CsAgentIpWhitelistController {
 
-    private static final String WHITELIST_ENABLED_CONFIG_KEY = "agent_ip_whitelist_enabled";
-    private static final String WHITELIST_ENABLED_REDIS_KEY = "cs:global:agent_ip_whitelist_enabled";
-
     @Autowired
     private CsAgentIpWhitelistMapper whitelistMapper;
 
@@ -46,6 +45,9 @@ public class CsAgentIpWhitelistController {
 
     @Autowired
     private RedisTemplate<String, String> redisTemplate;
+
+    @Autowired
+    private org.jeecg.modules.airag.cs.service.CsGlobalConfigCache configCache;
 
     @Operation(summary = "分页列表")
     @GetMapping("/list")
@@ -119,12 +121,10 @@ public class CsAgentIpWhitelistController {
     @Operation(summary = "获取白名单开关状态")
     @GetMapping("/enabled")
     public Result<Map<String, Object>> getEnabled() {
-        String value = redisTemplate.opsForValue().get(WHITELIST_ENABLED_REDIS_KEY);
-        if (value == null) {
-            CsGlobalConfig config = csGlobalConfigMapper.selectById(WHITELIST_ENABLED_CONFIG_KEY);
-            value = config != null ? config.getConfigValue() : "false";
-            redisTemplate.opsForValue().set(WHITELIST_ENABLED_REDIS_KEY, value);
-        }
+        String value = configCache.getOrCacheDefault(
+                CsRedisKeys.REDIS_WHITELIST_ENABLED,
+                CsRedisKeys.CONFIG_WHITELIST_ENABLED,
+                "false");
         Map<String, Object> result = new HashMap<>();
         result.put("enabled", "true".equalsIgnoreCase(value));
         return Result.OK(result);
@@ -151,11 +151,11 @@ public class CsAgentIpWhitelistController {
         String value = enabled.toString();
 
         // 保存到数据库
-        CsGlobalConfig existing = csGlobalConfigMapper.selectById(WHITELIST_ENABLED_CONFIG_KEY);
+        CsGlobalConfig existing = csGlobalConfigMapper.selectById(CsRedisKeys.CONFIG_WHITELIST_ENABLED);
         Date now = new Date();
         if (existing == null) {
             CsGlobalConfig config = new CsGlobalConfig();
-            config.setConfigKey(WHITELIST_ENABLED_CONFIG_KEY);
+            config.setConfigKey(CsRedisKeys.CONFIG_WHITELIST_ENABLED);
             config.setConfigValue(value);
             config.setCreateTime(now);
             config.setUpdateTime(now);
@@ -165,7 +165,7 @@ public class CsAgentIpWhitelistController {
             existing.setUpdateTime(now);
             csGlobalConfigMapper.updateById(existing);
         }
-        redisTemplate.opsForValue().set(WHITELIST_ENABLED_REDIS_KEY, value);
+        redisTemplate.opsForValue().set(CsRedisKeys.REDIS_WHITELIST_ENABLED, value);
 
         log.info("[CS-Security] 客服IP白名单开关: enabled={}", enabled);
         return Result.OK("设置成功");
@@ -186,15 +186,6 @@ public class CsAgentIpWhitelistController {
     }
 
     private String getClientIp(HttpServletRequest request) {
-        String ip = request.getHeader("X-Forwarded-For");
-        if (oConvertUtils.isNotEmpty(ip)) {
-            int idx = ip.indexOf(',');
-            return idx > -1 ? ip.substring(0, idx).trim() : ip.trim();
-        }
-        ip = request.getHeader("X-Real-IP");
-        if (oConvertUtils.isNotEmpty(ip)) {
-            return ip.trim();
-        }
-        return request.getRemoteAddr();
+        return CsRequestUtil.getClientIp(request);
     }
 }

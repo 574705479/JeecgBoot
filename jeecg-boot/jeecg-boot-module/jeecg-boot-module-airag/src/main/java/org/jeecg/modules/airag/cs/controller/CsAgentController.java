@@ -17,6 +17,7 @@ import org.jeecg.common.system.query.QueryGenerator;
 import org.jeecg.common.system.vo.LoginUser;
 import org.jeecg.common.util.PasswordUtil;
 import org.jeecg.common.util.oConvertUtils;
+import org.jeecg.modules.airag.cs.constant.CsRedisKeys;
 import org.jeecg.modules.airag.cs.entity.CsAgent;
 import org.jeecg.modules.airag.cs.entity.CsAgentLoginLog;
 import org.jeecg.modules.airag.cs.entity.CsAgentStatusLog;
@@ -26,6 +27,7 @@ import org.jeecg.modules.airag.cs.mapper.CsGlobalConfigMapper;
 import org.jeecg.modules.airag.cs.mapper.CsSubAgentMapper;
 import org.jeecg.modules.airag.cs.service.ICsAgentService;
 import org.jeecg.modules.airag.cs.util.CsCryptoUtil;
+import org.jeecg.modules.airag.cs.util.CsRequestUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.transaction.annotation.Transactional;
@@ -50,34 +52,6 @@ import java.util.UUID;
 @RequestMapping("/cs/agent")
 public class CsAgentController extends JeecgController<CsAgent, ICsAgentService> {
 
-    /** 访客AI应用全局配置的Redis Key */
-    private static final String VISITOR_APP_REDIS_KEY = "cs:global:visitor_app_id";
-    private static final String VISITOR_APP_CONFIG_KEY = "visitor_app_id";
-    private static final String VISITOR_ACCESS_REDIS_KEY = "cs:global:visitor_access";
-    private static final String VISITOR_ACCESS_CONFIG_KEY = "visitor_access";
-
-    /** AI开关配置 */
-    private static final String AI_ENABLED_REDIS_KEY = "cs:global:ai_enabled";
-    private static final String AI_ENABLED_CONFIG_KEY = "ai_enabled";
-    private static final String AI_PROLOGUE_ENABLED_REDIS_KEY = "cs:global:ai_prologue_enabled";
-    private static final String AI_PROLOGUE_ENABLED_CONFIG_KEY = "ai_prologue_enabled";
-
-    /** 对话分配配置 */
-    private static final String CONVERSATION_ASSIGN_REDIS_KEY = "cs:global:conversation_assign";
-    private static final String CONVERSATION_ASSIGN_CONFIG_KEY = "conversation_assign";
-
-    /** 留言板设置配置 */
-    private static final String MESSAGE_BOARD_REDIS_KEY = "cs:global:message_board";
-    private static final String MESSAGE_BOARD_CONFIG_KEY = "message_board";
-
-    /** 自动消息配置 */
-    private static final String AUTO_MESSAGES_REDIS_KEY = "cs:global:auto_messages";
-    private static final String AUTO_MESSAGES_CONFIG_KEY = "auto_messages";
-
-    /** 数据清理配置 */
-    private static final String DATA_CLEANUP_REDIS_KEY = "cs:global:data_cleanup";
-    private static final String DATA_CLEANUP_CONFIG_KEY = "data_cleanup";
-
     /** 管理员客服角色编码 */
     private static final String ADMIN_AGENT_ROLE_CODE = "cs_admin_agent";
     /** 子客服角色编码 */
@@ -91,6 +65,9 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
 
     @Autowired
     private CsGlobalConfigMapper csGlobalConfigMapper;
+
+    @Autowired
+    private org.jeecg.modules.airag.cs.service.CsGlobalConfigCache configCache;
 
     @Autowired
     private CsSubAgentMapper csSubAgentMapper;
@@ -410,11 +387,11 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     public Result<String> setGlobalVisitorApp(@RequestBody java.util.Map<String, String> params) {
         String appId = params.get("appId");
         if (appId == null || appId.isEmpty()) {
-            csGlobalConfigMapper.deleteById(VISITOR_APP_CONFIG_KEY);
-            redisTemplate.delete(VISITOR_APP_REDIS_KEY);
+            csGlobalConfigMapper.deleteById(CsRedisKeys.CONFIG_VISITOR_APP);
+            redisTemplate.delete(CsRedisKeys.REDIS_VISITOR_APP);
         } else {
-            saveGlobalConfigValue(VISITOR_APP_CONFIG_KEY, appId);
-            redisTemplate.opsForValue().set(VISITOR_APP_REDIS_KEY, appId);
+            saveGlobalConfigValue(CsRedisKeys.CONFIG_VISITOR_APP, appId);
+            redisTemplate.opsForValue().set(CsRedisKeys.REDIS_VISITOR_APP, appId);
         }
         log.info("[CS-Agent] 全局访客AI应用已更新: appId={}", appId);
         return Result.OK("设置成功");
@@ -427,13 +404,7 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     @org.jeecg.config.shiro.IgnoreAuth
     @GetMapping("/global/visitor-app")
     public Result<String> getGlobalVisitorApp() {
-        String appId = redisTemplate.opsForValue().get(VISITOR_APP_REDIS_KEY);
-        if (appId == null || appId.isEmpty()) {
-            appId = getGlobalConfigValue(VISITOR_APP_CONFIG_KEY);
-            if (appId != null && !appId.isEmpty()) {
-                redisTemplate.opsForValue().set(VISITOR_APP_REDIS_KEY, appId);
-            }
-        }
+        String appId = configCache.get(CsRedisKeys.REDIS_VISITOR_APP, CsRedisKeys.CONFIG_VISITOR_APP);
         java.util.Map<String, String> result = new java.util.HashMap<>();
         result.put("appId", appId);
         return Result.OK(csCryptoUtil.encryptTransport(JSON.toJSONString(result)));
@@ -446,13 +417,7 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     @org.jeecg.config.shiro.IgnoreAuth
     @GetMapping("/global/visitor-access")
     public Result<java.util.Map<String, String>> getGlobalVisitorAccess() {
-        String json = redisTemplate.opsForValue().get(VISITOR_ACCESS_REDIS_KEY);
-        if (json == null || json.isEmpty()) {
-            json = getGlobalConfigValue(VISITOR_ACCESS_CONFIG_KEY);
-            if (json != null && !json.isEmpty()) {
-                redisTemplate.opsForValue().set(VISITOR_ACCESS_REDIS_KEY, json);
-            }
-        }
+        String json = configCache.get(CsRedisKeys.REDIS_VISITOR_ACCESS, CsRedisKeys.CONFIG_VISITOR_ACCESS);
         java.util.Map<String, String> result = new java.util.HashMap<>();
         if (json != null && !json.isEmpty()) {
             try {
@@ -481,8 +446,8 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
         obj.put("secretKey", secretKey);
         obj.put("tokenRequired", "true".equals(tokenRequired));
         String json = obj.toJSONString();
-        saveGlobalConfigValue(VISITOR_ACCESS_CONFIG_KEY, json);
-        redisTemplate.opsForValue().set(VISITOR_ACCESS_REDIS_KEY, json);
+        saveGlobalConfigValue(CsRedisKeys.CONFIG_VISITOR_ACCESS, json);
+        redisTemplate.opsForValue().set(CsRedisKeys.REDIS_VISITOR_ACCESS, json);
         log.info("[CS-Agent] 全局访客接入配置已更新, tokenRequired={}", tokenRequired);
         return Result.OK("设置成功");
     }
@@ -499,11 +464,6 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
 
     // ==================== 聊天窗口设置 ====================
 
-    private static final String CHAT_WINDOW_REDIS_KEY = "cs:global:chat_window_settings";
-    private static final String CHAT_WINDOW_CONFIG_KEY = "chat_window_settings";
-    private static final String SENSITIVE_WORDS_REDIS_KEY = "cs:global:sensitive_words";
-    private static final String SENSITIVE_WORDS_CONFIG_KEY = "sensitive_words";
-
     /**
      * 获取聊天窗口设置（全局，访客端也需调用）
      */
@@ -511,13 +471,7 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     @org.jeecg.config.shiro.IgnoreAuth
     @GetMapping("/global/chat-window-settings")
     public Result<String> getChatWindowSettings() {
-        String json = redisTemplate.opsForValue().get(CHAT_WINDOW_REDIS_KEY);
-        if (json == null || json.isEmpty()) {
-            json = getGlobalConfigValue(CHAT_WINDOW_CONFIG_KEY);
-            if (json != null && !json.isEmpty()) {
-                redisTemplate.opsForValue().set(CHAT_WINDOW_REDIS_KEY, json);
-            }
-        }
+        String json = configCache.get(CsRedisKeys.REDIS_CHAT_WINDOW, CsRedisKeys.CONFIG_CHAT_WINDOW);
         String plainJson = json != null ? json : "{}";
         return Result.OK(csCryptoUtil.encryptTransport(plainJson));
     }
@@ -528,8 +482,8 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     @Operation(summary = "保存聊天窗口设置（全局）")
     @PutMapping("/global/chat-window-settings")
     public Result<String> saveChatWindowSettings(@RequestBody String body) {
-        saveGlobalConfigValue(CHAT_WINDOW_CONFIG_KEY, body);
-        redisTemplate.opsForValue().set(CHAT_WINDOW_REDIS_KEY, body);
+        saveGlobalConfigValue(CsRedisKeys.CONFIG_CHAT_WINDOW, body);
+        redisTemplate.opsForValue().set(CsRedisKeys.REDIS_CHAT_WINDOW, body);
         log.info("[CS-Agent] 聊天窗口设置已更新");
         return Result.OK("保存成功");
     }
@@ -541,13 +495,7 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     @org.jeecg.config.shiro.IgnoreAuth
     @GetMapping("/global/sensitive-words")
     public Result<String> getSensitiveWords() {
-        String json = redisTemplate.opsForValue().get(SENSITIVE_WORDS_REDIS_KEY);
-        if (json == null || json.isEmpty()) {
-            json = getGlobalConfigValue(SENSITIVE_WORDS_CONFIG_KEY);
-            if (json != null && !json.isEmpty()) {
-                redisTemplate.opsForValue().set(SENSITIVE_WORDS_REDIS_KEY, json);
-            }
-        }
+        String json = configCache.get(CsRedisKeys.REDIS_SENSITIVE_WORDS, CsRedisKeys.CONFIG_SENSITIVE_WORDS);
         String plainJson = json != null ? json : "{\"enabled\":false,\"words\":[]}";
         return Result.OK(csCryptoUtil.encryptTransport(plainJson));
     }
@@ -558,8 +506,8 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     @Operation(summary = "保存敏感词配置（全局）")
     @PutMapping("/global/sensitive-words")
     public Result<String> saveSensitiveWords(@RequestBody String body) {
-        saveGlobalConfigValue(SENSITIVE_WORDS_CONFIG_KEY, body);
-        redisTemplate.opsForValue().set(SENSITIVE_WORDS_REDIS_KEY, body);
+        saveGlobalConfigValue(CsRedisKeys.CONFIG_SENSITIVE_WORDS, body);
+        redisTemplate.opsForValue().set(CsRedisKeys.REDIS_SENSITIVE_WORDS, body);
         log.info("[CS-Agent] 敏感词配置已更新");
         return Result.OK("保存成功");
     }
@@ -589,13 +537,7 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     @org.jeecg.config.shiro.IgnoreAuth
     @GetMapping("/global/ai-enabled")
     public Result<String> getAiEnabled() {
-        String value = redisTemplate.opsForValue().get(AI_ENABLED_REDIS_KEY);
-        if (value == null) {
-            value = getGlobalConfigValue(AI_ENABLED_CONFIG_KEY);
-            if (value != null) {
-                redisTemplate.opsForValue().set(AI_ENABLED_REDIS_KEY, value);
-            }
-        }
+        String value = configCache.get(CsRedisKeys.REDIS_AI_ENABLED, CsRedisKeys.CONFIG_AI_ENABLED);
         boolean enabled = value == null || "true".equalsIgnoreCase(value);
         java.util.Map<String, Object> result = new java.util.HashMap<>();
         result.put("enabled", enabled);
@@ -613,8 +555,8 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
             enabled = true;
         }
         String value = enabled.toString();
-        saveGlobalConfigValue(AI_ENABLED_CONFIG_KEY, value);
-        redisTemplate.opsForValue().set(AI_ENABLED_REDIS_KEY, value);
+        saveGlobalConfigValue(CsRedisKeys.CONFIG_AI_ENABLED, value);
+        redisTemplate.opsForValue().set(CsRedisKeys.REDIS_AI_ENABLED, value);
         log.info("[CS-Agent] AI开关已更新: enabled={}", enabled);
         return Result.OK("设置成功");
     }
@@ -625,13 +567,7 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     @Operation(summary = "获取AI开场白开关状态（全局）")
     @GetMapping("/global/ai-prologue-enabled")
     public Result<java.util.Map<String, Object>> getAiPrologueEnabled() {
-        String value = redisTemplate.opsForValue().get(AI_PROLOGUE_ENABLED_REDIS_KEY);
-        if (value == null) {
-            value = getGlobalConfigValue(AI_PROLOGUE_ENABLED_CONFIG_KEY);
-            if (value != null) {
-                redisTemplate.opsForValue().set(AI_PROLOGUE_ENABLED_REDIS_KEY, value);
-            }
-        }
+        String value = configCache.get(CsRedisKeys.REDIS_AI_PROLOGUE_ENABLED, CsRedisKeys.CONFIG_AI_PROLOGUE_ENABLED);
         boolean enabled = value == null || "true".equalsIgnoreCase(value);
         java.util.Map<String, Object> result = new java.util.HashMap<>();
         result.put("enabled", enabled);
@@ -649,8 +585,8 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
             enabled = true;
         }
         String value = enabled.toString();
-        saveGlobalConfigValue(AI_PROLOGUE_ENABLED_CONFIG_KEY, value);
-        redisTemplate.opsForValue().set(AI_PROLOGUE_ENABLED_REDIS_KEY, value);
+        saveGlobalConfigValue(CsRedisKeys.CONFIG_AI_PROLOGUE_ENABLED, value);
+        redisTemplate.opsForValue().set(CsRedisKeys.REDIS_AI_PROLOGUE_ENABLED, value);
         log.info("[CS-Agent] AI开场白开关已更新: enabled={}", enabled);
         return Result.OK("设置成功");
     }
@@ -663,13 +599,7 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     @Operation(summary = "获取对话分配配置（全局）")
     @GetMapping("/global/conversation-assign")
     public Result<JSONObject> getConversationAssignConfig() {
-        String json = redisTemplate.opsForValue().get(CONVERSATION_ASSIGN_REDIS_KEY);
-        if (json == null || json.isEmpty()) {
-            json = getGlobalConfigValue(CONVERSATION_ASSIGN_CONFIG_KEY);
-            if (json != null && !json.isEmpty()) {
-                redisTemplate.opsForValue().set(CONVERSATION_ASSIGN_REDIS_KEY, json);
-            }
-        }
+        String json = configCache.get(CsRedisKeys.REDIS_CONVERSATION_ASSIGN, CsRedisKeys.CONFIG_CONVERSATION_ASSIGN);
         JSONObject result;
         if (json != null && !json.isEmpty()) {
             try {
@@ -691,8 +621,8 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     @PutMapping("/global/conversation-assign")
     public Result<String> setConversationAssignConfig(@RequestBody JSONObject config) {
         String json = config.toJSONString();
-        saveGlobalConfigValue(CONVERSATION_ASSIGN_CONFIG_KEY, json);
-        redisTemplate.opsForValue().set(CONVERSATION_ASSIGN_REDIS_KEY, json);
+        saveGlobalConfigValue(CsRedisKeys.CONFIG_CONVERSATION_ASSIGN, json);
+        redisTemplate.opsForValue().set(CsRedisKeys.REDIS_CONVERSATION_ASSIGN, json);
         log.info("[CS-Agent] 对话分配配置已更新");
         return Result.OK("设置成功");
     }
@@ -723,13 +653,7 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     @org.jeecg.config.shiro.IgnoreAuth
     @GetMapping("/global/message-board")
     public Result<String> getMessageBoardConfig() {
-        String json = redisTemplate.opsForValue().get(MESSAGE_BOARD_REDIS_KEY);
-        if (json == null || json.isEmpty()) {
-            json = getGlobalConfigValue(MESSAGE_BOARD_CONFIG_KEY);
-            if (json != null && !json.isEmpty()) {
-                redisTemplate.opsForValue().set(MESSAGE_BOARD_REDIS_KEY, json);
-            }
-        }
+        String json = configCache.get(CsRedisKeys.REDIS_MESSAGE_BOARD, CsRedisKeys.CONFIG_MESSAGE_BOARD);
         JSONObject result;
         if (json != null && !json.isEmpty()) {
             try {
@@ -751,8 +675,8 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     @PutMapping("/global/message-board")
     public Result<String> setMessageBoardConfig(@RequestBody JSONObject config) {
         String json = config.toJSONString();
-        saveGlobalConfigValue(MESSAGE_BOARD_CONFIG_KEY, json);
-        redisTemplate.opsForValue().set(MESSAGE_BOARD_REDIS_KEY, json);
+        saveGlobalConfigValue(CsRedisKeys.CONFIG_MESSAGE_BOARD, json);
+        redisTemplate.opsForValue().set(CsRedisKeys.REDIS_MESSAGE_BOARD, json);
         log.info("[CS-Agent] 留言板设置已更新");
         return Result.OK("设置成功");
     }
@@ -763,13 +687,7 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     @Operation(summary = "获取自动消息配置（全局）")
     @GetMapping("/global/auto-messages")
     public Result<JSONObject> getAutoMessagesConfig() {
-        String json = redisTemplate.opsForValue().get(AUTO_MESSAGES_REDIS_KEY);
-        if (json == null || json.isEmpty()) {
-            json = getGlobalConfigValue(AUTO_MESSAGES_CONFIG_KEY);
-            if (json != null && !json.isEmpty()) {
-                redisTemplate.opsForValue().set(AUTO_MESSAGES_REDIS_KEY, json);
-            }
-        }
+        String json = configCache.get(CsRedisKeys.REDIS_AUTO_MESSAGES, CsRedisKeys.CONFIG_AUTO_MESSAGES);
         JSONObject result;
         if (json != null && !json.isEmpty()) {
             try {
@@ -790,8 +708,8 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     @PutMapping("/global/auto-messages")
     public Result<String> setAutoMessagesConfig(@RequestBody JSONObject config) {
         String json = config.toJSONString();
-        saveGlobalConfigValue(AUTO_MESSAGES_CONFIG_KEY, json);
-        redisTemplate.opsForValue().set(AUTO_MESSAGES_REDIS_KEY, json);
+        saveGlobalConfigValue(CsRedisKeys.CONFIG_AUTO_MESSAGES, json);
+        redisTemplate.opsForValue().set(CsRedisKeys.REDIS_AUTO_MESSAGES, json);
         log.info("[CS-Agent] 自动消息配置已更新");
         return Result.OK("设置成功");
     }
@@ -835,11 +753,6 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
         return config;
     }
 
-    private String getGlobalConfigValue(String configKey) {
-        CsGlobalConfig config = csGlobalConfigMapper.selectById(configKey);
-        return config != null ? config.getConfigValue() : null;
-    }
-
     /**
      * 获取当前登录用户（子客服）可见菜单ID列表
      * 前端 permissionGuard 调用此接口来过滤菜单
@@ -879,13 +792,7 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     @Operation(summary = "获取数据清理配置")
     @GetMapping("/global/data-cleanup")
     public Result<JSONObject> getDataCleanupConfig() {
-        String json = redisTemplate.opsForValue().get(DATA_CLEANUP_REDIS_KEY);
-        if (json == null || json.isEmpty()) {
-            json = getGlobalConfigValue(DATA_CLEANUP_CONFIG_KEY);
-            if (json != null && !json.isEmpty()) {
-                redisTemplate.opsForValue().set(DATA_CLEANUP_REDIS_KEY, json);
-            }
-        }
+        String json = configCache.get(CsRedisKeys.REDIS_DATA_CLEANUP, CsRedisKeys.CONFIG_DATA_CLEANUP);
         JSONObject result;
         if (json != null && !json.isEmpty()) {
             result = JSONObject.parseObject(json);
@@ -910,8 +817,8 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
         if (cacheDays < 1) config.put("cacheDays", 1);
 
         String json = config.toJSONString();
-        saveGlobalConfigValue(DATA_CLEANUP_CONFIG_KEY, json);
-        redisTemplate.opsForValue().set(DATA_CLEANUP_REDIS_KEY, json);
+        saveGlobalConfigValue(CsRedisKeys.CONFIG_DATA_CLEANUP, json);
+        redisTemplate.opsForValue().set(CsRedisKeys.REDIS_DATA_CLEANUP, json);
         log.info("[CS-Agent] 数据清理配置已更新");
         return Result.OK("保存成功");
     }
@@ -959,17 +866,8 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     }
 
     private String getClientIp(HttpServletRequest request) {
-        if (request == null) return "unknown";
-        String ip = request.getHeader("X-Forwarded-For");
-        if (oConvertUtils.isNotEmpty(ip)) {
-            int idx = ip.indexOf(',');
-            return idx > -1 ? ip.substring(0, idx).trim() : ip.trim();
-        }
-        ip = request.getHeader("X-Real-IP");
-        if (oConvertUtils.isNotEmpty(ip)) {
-            return ip.trim();
-        }
-        return request.getRemoteAddr();
+        String ip = CsRequestUtil.getClientIp(request);
+        return ip != null ? ip : "unknown";
     }
 
 }

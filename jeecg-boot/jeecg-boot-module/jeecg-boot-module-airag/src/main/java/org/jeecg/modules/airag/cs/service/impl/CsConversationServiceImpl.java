@@ -8,6 +8,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.extern.slf4j.Slf4j;
 import org.jeecg.common.util.oConvertUtils;
+import org.jeecg.modules.airag.cs.constant.CsRedisKeys;
 import org.jeecg.modules.airag.cs.entity.CsAgent;
 import org.jeecg.modules.airag.cs.entity.CsCollaborator;
 import org.jeecg.modules.airag.cs.entity.CsConversation;
@@ -52,14 +53,6 @@ import java.util.List;
 public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper, CsConversation> 
         implements ICsConversationService {
 
-    private static final String AI_ENABLED_REDIS_KEY = "cs:global:ai_enabled";
-    private static final String AI_ENABLED_CONFIG_KEY = "ai_enabled";
-    private static final String AI_PROLOGUE_ENABLED_REDIS_KEY = "cs:global:ai_prologue_enabled";
-    private static final String AI_PROLOGUE_ENABLED_CONFIG_KEY = "ai_prologue_enabled";
-    private static final String CONVERSATION_ASSIGN_REDIS_KEY = "cs:global:conversation_assign";
-    private static final String CONVERSATION_ASSIGN_CONFIG_KEY = "conversation_assign";
-    private static final String CHAT_WINDOW_REDIS_KEY = "cs:global:chat_window_settings";
-
     @Autowired
     @Lazy
     private ICsAgentService agentService;
@@ -79,6 +72,9 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
 
     @Autowired
     private CsGlobalConfigMapper csGlobalConfigMapper;
+
+    @Autowired
+    private org.jeecg.modules.airag.cs.service.CsGlobalConfigCache configCache;
 
     @Autowired
     private CsIpGeoService ipGeoService;
@@ -105,7 +101,7 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         boolean humanAgentEnabled = false;
         boolean faqEnabled = false;
         try {
-            String chatWindowJson = redisTemplate.opsForValue().get(CHAT_WINDOW_REDIS_KEY);
+            String chatWindowJson = redisTemplate.opsForValue().get(CsRedisKeys.REDIS_CHAT_WINDOW);
             if (oConvertUtils.isNotEmpty(chatWindowJson)) {
                 JSONObject chatWindowConfig = com.alibaba.fastjson.JSON.parseObject(chatWindowJson);
                 Boolean hae = chatWindowConfig.getBoolean("humanAgentEnabled");
@@ -265,13 +261,9 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             broadcastNewConversation(conversation);
 
             // 通知用户客服已接入
-            Map<String, Object> extra = new HashMap<>();
-            extra.put("replyMode", conversation.getReplyMode());
-            extra.put("agentName", assignedAgent.getNickname());
-            extra.put("agentId", assignedAgent.getId());
-            extra.put("agentAvatar", assignedAgent.getAvatar());
-            notifyUser(conversation.getId(), "agent_connected", 
-                    "客服 " + assignedAgent.getNickname() + " 为您服务", extra);
+            notifyUser(conversation.getId(), "agent_connected",
+                    "客服 " + assignedAgent.getNickname() + " 为您服务",
+                    buildAgentConnectedExtra(conversation.getReplyMode(), assignedAgent));
 
             // AI欢迎消息分支
             if (aiEnabled) {
@@ -407,14 +399,7 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
      */
     private boolean isAiEnabled() {
         try {
-            String value = redisTemplate.opsForValue().get(AI_ENABLED_REDIS_KEY);
-            if (value == null) {
-                CsGlobalConfig config = csGlobalConfigMapper.selectById(AI_ENABLED_CONFIG_KEY);
-                value = config != null ? config.getConfigValue() : null;
-                if (value != null) {
-                    redisTemplate.opsForValue().set(AI_ENABLED_REDIS_KEY, value);
-                }
-            }
+            String value = configCache.get(CsRedisKeys.REDIS_AI_ENABLED, CsRedisKeys.CONFIG_AI_ENABLED);
             return value == null || "true".equalsIgnoreCase(value);
         } catch (Exception e) {
             log.warn("[CS-Conversation] 读取AI开关失败", e);
@@ -427,14 +412,7 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
      */
     private boolean isAiPrologueEnabled() {
         try {
-            String value = redisTemplate.opsForValue().get(AI_PROLOGUE_ENABLED_REDIS_KEY);
-            if (value == null) {
-                CsGlobalConfig config = csGlobalConfigMapper.selectById(AI_PROLOGUE_ENABLED_CONFIG_KEY);
-                value = config != null ? config.getConfigValue() : null;
-                if (value != null) {
-                    redisTemplate.opsForValue().set(AI_PROLOGUE_ENABLED_REDIS_KEY, value);
-                }
-            }
+            String value = configCache.get(CsRedisKeys.REDIS_AI_PROLOGUE_ENABLED, CsRedisKeys.CONFIG_AI_PROLOGUE_ENABLED);
             return value == null || "true".equalsIgnoreCase(value);
         } catch (Exception e) {
             log.warn("[CS-Conversation] 读取AI开场白开关失败", e);
@@ -447,14 +425,7 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
      */
     private JSONObject getConversationAssignConfig() {
         try {
-            String json = redisTemplate.opsForValue().get(CONVERSATION_ASSIGN_REDIS_KEY);
-            if (json == null || json.isEmpty()) {
-                CsGlobalConfig config = csGlobalConfigMapper.selectById(CONVERSATION_ASSIGN_CONFIG_KEY);
-                json = config != null ? config.getConfigValue() : null;
-                if (json != null && !json.isEmpty()) {
-                    redisTemplate.opsForValue().set(CONVERSATION_ASSIGN_REDIS_KEY, json);
-                }
-            }
+            String json = configCache.get(CsRedisKeys.REDIS_CONVERSATION_ASSIGN, CsRedisKeys.CONFIG_CONVERSATION_ASSIGN);
             if (json != null && !json.isEmpty()) {
                 return JSONObject.parseObject(json);
             }
@@ -502,7 +473,7 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             }
             
             CsWebSocketMessage notification = CsWebSocketMessage.builder()
-                    .type("new_conversation")
+                    .type(CsWebSocketMessage.TYPE_NEW_CONVERSATION)
                     .conversationId(conversation.getId())
                     .senderId(conversation.getUserId())
                     .senderName(conversation.getUserName())
@@ -657,21 +628,11 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             agentService.incrementSessions(agentId);
             
             // 广播会话被接入事件给所有客服（实时推送）
-            Map<String, Object> assignData = new HashMap<>();
-            assignData.put("conversationId", conversationId);
-            assignData.put("agentId", agentId);
-            assignData.put("agentName", agent.getNickname());
-            assignData.put("agentAvatar", agent.getAvatar());
-            assignData.put("assignTime", new Date());
-            broadcastToAllAgents("conversation_assigned", assignData);
-            
+            broadcastToAllAgents("conversation_assigned", buildConversationAssignedData(conversationId, agent));
+
             // 通知用户客服已接入，同时告知已切换为手动模式
-            Map<String, Object> extra = new HashMap<>();
-            extra.put("replyMode", CsConversation.REPLY_MODE_MANUAL);
-            extra.put("agentName", agent.getNickname());
-            extra.put("agentId", agent.getId());
-            extra.put("agentAvatar", agent.getAvatar());
-            notifyUser(conversationId, "agent_connected", "客服 " + agent.getNickname() + " 为您服务", extra);
+            notifyUser(conversationId, "agent_connected", "客服 " + agent.getNickname() + " 为您服务",
+                    buildAgentConnectedExtra(CsConversation.REPLY_MODE_MANUAL, agent));
         }
         
         log.info("[CS-Conversation] 客服接入成功: conversationId={}, agentId={}", conversationId, agentId);
@@ -1379,21 +1340,11 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             collaborator.setJoinTime(new Date());
             collaboratorMapper.insert(collaborator);
 
-            Map<String, Object> assignData = new HashMap<>();
-            assignData.put("conversationId", conversationId);
-            assignData.put("agentId", assignedAgent.getId());
-            assignData.put("agentName", assignedAgent.getNickname());
-            assignData.put("agentAvatar", assignedAgent.getAvatar());
-            assignData.put("assignTime", new Date());
-            broadcastToAllAgents("conversation_assigned", assignData);
+            broadcastToAllAgents("conversation_assigned", buildConversationAssignedData(conversationId, assignedAgent));
 
-            Map<String, Object> extra = new HashMap<>();
-            extra.put("replyMode", conversation.getReplyMode());
-            extra.put("agentName", assignedAgent.getNickname());
-            extra.put("agentId", assignedAgent.getId());
-            extra.put("agentAvatar", assignedAgent.getAvatar());
             notifyUser(conversationId, "agent_connected",
-                    "客服 " + assignedAgent.getNickname() + " 为您服务", extra);
+                    "客服 " + assignedAgent.getNickname() + " 为您服务",
+                    buildAgentConnectedExtra(conversation.getReplyMode(), assignedAgent));
 
             log.info("[CS-Conversation] 重新分配客服成功: conversationId={}, agentId={}", conversationId, assignedAgent.getId());
         } else {
@@ -1419,6 +1370,34 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             updateById(conversation);
             log.info("[CS-Conversation] 更新默认用户名: conversationId={}, newName={}", conversation.getId(), newName);
         }
+    }
+
+    /**
+     * 构造客服已接入通知给访客的 extra 数据（agent_connected 事件）。
+     * 三处使用：createConversation 自动分配、joinAgent 手动接入、reassignAgent 重新分配。
+     * 业务差异仅在 replyMode 取值（自动分配/重分配=会话当前 replyMode；手动接入=固定 MANUAL）。
+     */
+    private Map<String, Object> buildAgentConnectedExtra(int replyMode, CsAgent agent) {
+        Map<String, Object> extra = new HashMap<>();
+        extra.put("replyMode", replyMode);
+        extra.put("agentName", agent.getNickname());
+        extra.put("agentId", agent.getId());
+        extra.put("agentAvatar", agent.getAvatar());
+        return extra;
+    }
+
+    /**
+     * 构造广播给所有客服的 conversation_assigned 事件数据。
+     * 两处使用：joinAgent 手动接入、reassignAgent 重新分配。
+     */
+    private Map<String, Object> buildConversationAssignedData(String conversationId, CsAgent agent) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("conversationId", conversationId);
+        data.put("agentId", agent.getId());
+        data.put("agentName", agent.getNickname());
+        data.put("agentAvatar", agent.getAvatar());
+        data.put("assignTime", new Date());
+        return data;
     }
 
     @Override

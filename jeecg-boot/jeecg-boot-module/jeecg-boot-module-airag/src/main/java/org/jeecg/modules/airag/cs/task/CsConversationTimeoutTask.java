@@ -3,6 +3,7 @@ package org.jeecg.modules.airag.cs.task;
 import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.extern.slf4j.Slf4j;
+import org.jeecg.modules.airag.cs.constant.CsRedisKeys;
 import org.jeecg.modules.airag.cs.entity.CsConversation;
 import org.jeecg.modules.airag.cs.entity.CsGlobalConfig;
 import org.jeecg.modules.airag.cs.mapper.CsGlobalConfigMapper;
@@ -36,9 +37,6 @@ import java.util.Map;
 @Component
 public class CsConversationTimeoutTask {
 
-    private static final String CONVERSATION_ASSIGN_REDIS_KEY = "cs:global:conversation_assign";
-    private static final String CONVERSATION_ASSIGN_CONFIG_KEY = "conversation_assign";
-
     @Autowired
     @Lazy
     private ICsConversationService conversationService;
@@ -49,6 +47,9 @@ public class CsConversationTimeoutTask {
 
     @Autowired
     private CsGlobalConfigMapper csGlobalConfigMapper;
+
+    @Autowired
+    private org.jeecg.modules.airag.cs.service.CsGlobalConfigCache configCache;
 
     @Autowired
     private RedisTemplate<String, String> redisTemplate;
@@ -193,10 +194,10 @@ public class CsConversationTimeoutTask {
                 Map<String, Object> extra = new HashMap<>();
                 extra.put("conversationId", conv.getId());
                 extra.put("timeoutSeconds", timeoutSeconds);
-                extra.put("type", "agent_timeout_reminder");
+                extra.put("type", CsWebSocketMessage.TYPE_AGENT_TIMEOUT_REMINDER);
                 
                 CsWebSocketMessage wsMsg = CsWebSocketMessage.builder()
-                        .type("agent_timeout_reminder")
+                        .type(CsWebSocketMessage.TYPE_AGENT_TIMEOUT_REMINDER)
                         .conversationId(conv.getId())
                         .content(String.format("客服超过%d秒未回复", timeoutSeconds))
                         .extra(extra)
@@ -216,14 +217,7 @@ public class CsConversationTimeoutTask {
      */
     private JSONObject getConversationAssignConfig() {
         try {
-            String json = redisTemplate.opsForValue().get(CONVERSATION_ASSIGN_REDIS_KEY);
-            if (json == null || json.isEmpty()) {
-                CsGlobalConfig config = csGlobalConfigMapper.selectById(CONVERSATION_ASSIGN_CONFIG_KEY);
-                json = config != null ? config.getConfigValue() : null;
-                if (json != null && !json.isEmpty()) {
-                    redisTemplate.opsForValue().set(CONVERSATION_ASSIGN_REDIS_KEY, json);
-                }
-            }
+            String json = configCache.get(CsRedisKeys.REDIS_CONVERSATION_ASSIGN, CsRedisKeys.CONFIG_CONVERSATION_ASSIGN);
             if (json != null && !json.isEmpty()) {
                 return JSONObject.parseObject(json);
             }

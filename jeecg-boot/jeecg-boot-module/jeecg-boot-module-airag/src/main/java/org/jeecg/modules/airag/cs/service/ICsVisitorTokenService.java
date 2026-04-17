@@ -22,8 +22,6 @@ public interface ICsVisitorTokenService {
 
     boolean isBlacklisted(String externalUserId);
 
-    void blacklist(String externalUserId);
-
     /** 拉黑访客（含原因、名称、操作人，同步写入数据库） */
     void blacklistWithReason(String externalUserId, String visitorName, String reason, String operator);
 

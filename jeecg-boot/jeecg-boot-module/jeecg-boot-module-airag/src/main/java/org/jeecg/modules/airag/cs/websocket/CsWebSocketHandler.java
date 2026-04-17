@@ -84,7 +84,7 @@ public class CsWebSocketHandler implements WebSocketHandler {
                 if (licenseClientService != null && licenseClientService.isLicensed()
                     && licenseClientService.isQuotaExceeded("max_cs_agents")) {
                     CsWebSocketMessage quotaMsg = CsWebSocketMessage.builder()
-                            .type("quota_exceeded")
+                            .type(CsWebSocketMessage.TYPE_QUOTA_EXCEEDED)
                             .content(csCryptoUtil.encryptTransport("客服坐席已满，无法上线"))
                             .build();
                     session.sendMessage(new TextMessage(JSON.toJSONString(quotaMsg)));
@@ -115,7 +115,7 @@ public class CsWebSocketHandler implements WebSocketHandler {
         
         // 发送连接成功消息
         CsWebSocketMessage welcome = CsWebSocketMessage.builder()
-                .type("connected")
+                .type(CsWebSocketMessage.TYPE_CONNECTED)
                 .senderId(userId)
                 .conversationId(conversationId)
                 .content(csCryptoUtil.encryptTransport("连接成功"))
@@ -144,7 +144,7 @@ public class CsWebSocketHandler implements WebSocketHandler {
         try {
             // 通知相关客服用户已上线
             CsWebSocketMessage message = CsWebSocketMessage.builder()
-                    .type("user_online")
+                    .type(CsWebSocketMessage.TYPE_USER_ONLINE)
                     .conversationId(conversationId)
                     .senderId(userId)
                     .content(csCryptoUtil.encryptTransport("用户已上线"))
@@ -182,7 +182,7 @@ public class CsWebSocketHandler implements WebSocketHandler {
             extra.put("userLang", conversation.getUserLang());
 
             CsWebSocketMessage notification = CsWebSocketMessage.builder()
-                    .type("new_conversation")
+                    .type(CsWebSocketMessage.TYPE_NEW_CONVERSATION)
                     .conversationId(conversation.getId())
                     .senderId(conversation.getUserId())
                     .senderName(conversation.getUserName())
@@ -226,38 +226,38 @@ public class CsWebSocketHandler implements WebSocketHandler {
             String userType = sessionManager.getUserType(session);
 
             switch (type) {
-                case "ping":
+                case CsWebSocketMessage.TYPE_PING:
                     handlePing(session);
                     break;
-                    
-                case "message":
+
+                case CsWebSocketMessage.TYPE_MESSAGE:
                     handleSendMessage(json, userId, userType);
                     break;
-                    
-                case "read":
+
+                case CsWebSocketMessage.TYPE_READ:
                     handleRead(json, userId);
                     break;
-                    
-                case "typing":
+
+                case CsWebSocketMessage.TYPE_TYPING:
                     handleTyping(json, userId, userType);
                     break;
-                    
-                case "mode_change":
+
+                case CsWebSocketMessage.TYPE_MODE_CHANGE:
                     handleModeChange(json, userId, userType);
                     break;
-                    
-                case "confirm_ai":
+
+                case CsWebSocketMessage.TYPE_CONFIRM_AI:
                     handleConfirmAi(json, userId, userType);
                     break;
 
-                case "stop_ai":
+                case CsWebSocketMessage.TYPE_STOP_AI:
                     handleStopAi(json, userId);
                     break;
 
-                case "stop_ai_suggestion":
+                case CsWebSocketMessage.TYPE_STOP_AI_SUGGESTION:
                     handleStopAiSuggestion(json, userId);
                     break;
-                    
+
                 default:
                     log.debug("[CS-WebSocket] 未处理的消息类型: {}", type);
             }
@@ -283,7 +283,7 @@ public class CsWebSocketHandler implements WebSocketHandler {
             }
         }
         CsWebSocketMessage pong = CsWebSocketMessage.builder()
-                .type("pong")
+                .type(CsWebSocketMessage.TYPE_PONG)
                 .timestamp(new java.util.Date())
                 .build();
         session.sendMessage(new TextMessage(JSON.toJSONString(pong)));
@@ -308,7 +308,7 @@ public class CsWebSocketHandler implements WebSocketHandler {
                 String hitWord = messageService.checkSensitiveWords(content);
                 if (hitWord != null) {
                     CsWebSocketMessage errorMsg = CsWebSocketMessage.builder()
-                            .type("sensitive_word_blocked")
+                            .type(CsWebSocketMessage.TYPE_SENSITIVE_WORD_BLOCKED)
                             .conversationId(conversationId)
                             .content(csCryptoUtil.encryptTransport("消息包含敏感内容，请修改后重试"))
                             .timestamp(new java.util.Date())
@@ -353,7 +353,7 @@ public class CsWebSocketHandler implements WebSocketHandler {
     private void sendExpiredAndClose(WebSocketSession session) {
         try {
             CsWebSocketMessage message = CsWebSocketMessage.builder()
-                    .type("system")
+                    .type(CsWebSocketMessage.TYPE_SYSTEM)
                     .content(csCryptoUtil.encryptTransport("访客凭证无效或已过期"))
                     .timestamp(new java.util.Date())
                     .build();

@@ -8,11 +8,13 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
 import org.jeecg.common.api.vo.Result;
 import org.jeecg.common.system.base.controller.JeecgController;
+import org.jeecg.modules.airag.cs.constant.CsRedisKeys;
 import org.jeecg.modules.airag.cs.entity.CsVisitor;
 import org.jeecg.modules.airag.cs.entity.CsGlobalConfig;
 import org.jeecg.modules.airag.cs.mapper.CsGlobalConfigMapper;
 import org.jeecg.modules.airag.cs.service.ICsVisitorService;
 import org.jeecg.modules.airag.cs.service.ICsVisitorTokenService;
+import org.jeecg.modules.airag.cs.util.CsRequestUtil;
 import org.jeecg.modules.airag.cs.vo.CsVisitorTokenPayload;
 import org.jeecg.modules.airag.cs.websocket.CsWebSocketMessage;
 import org.jeecg.modules.airag.cs.websocket.CsWebSocketSessionManager;
@@ -44,14 +46,14 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
     @Autowired
     private ICsVisitorTokenService visitorTokenService;
 
-    private static final String VISITOR_ACCESS_REDIS_KEY = "cs:global:visitor_access";
-    private static final String VISITOR_ACCESS_CONFIG_KEY = "visitor_access";
-
     @Autowired
     private CsGlobalConfigMapper csGlobalConfigMapper;
 
     @Autowired
     private RedisTemplate<String, String> redisTemplate;
+
+    @Autowired
+    private org.jeecg.modules.airag.cs.service.CsGlobalConfigCache configCache;
 
     @Autowired
     private CsWebSocketSessionManager sessionManager;
@@ -441,19 +443,7 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
     }
 
     private String getClientIp(HttpServletRequest request) {
-        if (request == null) {
-            return null;
-        }
-        String ip = request.getHeader("X-Forwarded-For");
-        if (oConvertUtils.isNotEmpty(ip)) {
-            int idx = ip.indexOf(',');
-            return idx > -1 ? ip.substring(0, idx).trim() : ip.trim();
-        }
-        ip = request.getHeader("X-Real-IP");
-        if (oConvertUtils.isNotEmpty(ip)) {
-            return ip.trim();
-        }
-        return request.getRemoteAddr();
+        return CsRequestUtil.getClientIp(request);
     }
 
     private static class VisitorAccessConfig {
@@ -465,14 +455,7 @@ public class CsVisitorController extends JeecgController<CsVisitor, ICsVisitorSe
     }
 
     private VisitorAccessConfig getVisitorAccessConfig() {
-        String json = redisTemplate.opsForValue().get(VISITOR_ACCESS_REDIS_KEY);
-        if (oConvertUtils.isEmpty(json)) {
-            CsGlobalConfig config = csGlobalConfigMapper.selectById(VISITOR_ACCESS_CONFIG_KEY);
-            json = config != null ? config.getConfigValue() : null;
-            if (oConvertUtils.isNotEmpty(json)) {
-                redisTemplate.opsForValue().set(VISITOR_ACCESS_REDIS_KEY, json);
-            }
-        }
+        String json = configCache.get(CsRedisKeys.REDIS_VISITOR_ACCESS, CsRedisKeys.CONFIG_VISITOR_ACCESS);
         if (oConvertUtils.isEmpty(json)) {
             return new VisitorAccessConfig("");
         }

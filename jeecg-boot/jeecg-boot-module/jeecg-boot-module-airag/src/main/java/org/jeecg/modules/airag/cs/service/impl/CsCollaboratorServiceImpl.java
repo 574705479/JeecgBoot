@@ -76,7 +76,7 @@ public class CsCollaboratorServiceImpl extends ServiceImpl<CsCollaboratorMapper,
         String inviterName = inviter != null ? inviter.getNickname() : "系统";
         
         CsWebSocketMessage notification = CsWebSocketMessage.builder()
-                .type("invite_collab")
+                .type(CsWebSocketMessage.TYPE_INVITE_COLLAB)
                 .conversationId(conversationId)
                 .content(inviterName + " 邀请您协作处理会话")
                 .senderId(inviteBy)
@@ -176,11 +176,6 @@ public class CsCollaboratorServiceImpl extends ServiceImpl<CsCollaboratorMapper,
     @Override
     public List<CsCollaborator> getCollaborators(String conversationId) {
         return baseMapper.selectActiveCollaborators(conversationId);
-    }
-
-    @Override
-    public List<String> getConversationIdsByAgent(String agentId) {
-        return baseMapper.selectConversationIdsByAgent(agentId);
     }
 
     @Override

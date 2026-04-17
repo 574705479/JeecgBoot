@@ -125,83 +125,48 @@ public class CsWebSocketMessage {
     public static final String TYPE_VISITOR_BLOCKED = "visitor_blocked";
     /** 消息撤回 */
     public static final String TYPE_MESSAGE_RECALL = "message_recall";
+    /** 协作邀请 */
+    public static final String TYPE_INVITE_COLLAB = "invite_collab";
+    /** 客服状态变更 */
+    public static final String TYPE_AGENT_STATUS_CHANGED = "agent_status_changed";
+    /** 访客资料更新 */
+    public static final String TYPE_VISITOR_UPDATED = "visitor_updated";
+    /** 用户上线 */
+    public static final String TYPE_USER_ONLINE = "user_online";
+    /** 客服 WebSocket 连接成功 */
+    public static final String TYPE_CONNECTED = "connected";
+    /** 配额超限 */
+    public static final String TYPE_QUOTA_EXCEEDED = "quota_exceeded";
+    /** 敏感词拦截 */
+    public static final String TYPE_SENSITIVE_WORD_BLOCKED = "sensitive_word_blocked";
+    /** 客服超时未回复提醒 */
+    public static final String TYPE_AGENT_TIMEOUT_REMINDER = "agent_timeout_reminder";
+    /** 消息投递失败 */
+    public static final String TYPE_DELIVERY_FAILED = "delivery_failed";
 
-    /**
-     * 创建消息
-     */
-    public static CsWebSocketMessage message(String conversationId, String content, 
-                                              Integer senderType, String senderId, String senderName) {
-        return CsWebSocketMessage.builder()
-                .type(TYPE_MESSAGE)
-                .conversationId(conversationId)
-                .content(content)
-                .msgType(0)
-                .senderType(senderType)
-                .senderId(senderId)
-                .senderName(senderName)
-                .timestamp(new Date())
-                .build();
-    }
+    // ---------- AI 相关 ----------
+    /** AI 流式 */
+    public static final String TYPE_AI_STREAM = "ai_stream";
+    /** AI 流式完成 */
+    public static final String TYPE_AI_STREAM_COMPLETE = "ai_stream_complete";
+    /** AI 正在输入 */
+    public static final String TYPE_AI_TYPING = "ai_typing";
+    /** AI 建议（一次性） */
+    public static final String TYPE_AI_SUGGESTION = "ai_suggestion";
+    /** AI 建议流式 */
+    public static final String TYPE_AI_SUGGESTION_STREAM = "ai_suggestion_stream";
+    /** AI 建议流式完成 */
+    public static final String TYPE_AI_SUGGESTION_COMPLETE = "ai_suggestion_complete";
+    /** AI 建议错误 */
+    public static final String TYPE_AI_SUGGESTION_ERROR = "ai_suggestion_error";
 
-    /**
-     * 创建排队更新消息
-     */
-    public static CsWebSocketMessage queueUpdate(String conversationId, int position, int waitTime) {
-        return CsWebSocketMessage.builder()
-                .type(TYPE_QUEUE_UPDATE)
-                .conversationId(conversationId)
-                .extra(Map.of("position", position, "waitTime", waitTime))
-                .timestamp(new Date())
-                .build();
-    }
-
-    /**
-     * 创建客服接入消息
-     */
-    public static CsWebSocketMessage agentConnected(String conversationId, String agentId, 
-                                                     String agentName, String agentAvatar) {
-        return CsWebSocketMessage.builder()
-                .type(TYPE_AGENT_CONNECTED)
-                .conversationId(conversationId)
-                .senderId(agentId)
-                .senderName(agentName)
-                .senderAvatar(agentAvatar)
-                .timestamp(new Date())
-                .build();
-    }
-
-    /**
-     * 创建会话结束消息
-     */
-    public static CsWebSocketMessage conversationClosed(String conversationId) {
-        return CsWebSocketMessage.builder()
-                .type(TYPE_CONVERSATION_CLOSED)
-                .conversationId(conversationId)
-                .timestamp(new Date())
-                .build();
-    }
-
-    /**
-     * 创建错误消息
-     */
-    public static CsWebSocketMessage error(String error) {
-        return CsWebSocketMessage.builder()
-                .type(TYPE_ERROR)
-                .error(error)
-                .timestamp(new Date())
-                .build();
-    }
-
-    /**
-     * 创建系统消息
-     */
-    public static CsWebSocketMessage system(String conversationId, String content) {
-        return CsWebSocketMessage.builder()
-                .type(TYPE_SYSTEM)
-                .conversationId(conversationId)
-                .content(content)
-                .senderType(3)
-                .timestamp(new Date())
-                .build();
-    }
+    // ---------- 客户端 → 服务端 控制指令 ----------
+    /** 客户端切换会话模式 */
+    public static final String TYPE_MODE_CHANGE = "mode_change";
+    /** 客户端确认采用 AI 回复 */
+    public static final String TYPE_CONFIRM_AI = "confirm_ai";
+    /** 客户端中止 AI 回复 */
+    public static final String TYPE_STOP_AI = "stop_ai";
+    /** 客户端中止 AI 建议 */
+    public static final String TYPE_STOP_AI_SUGGESTION = "stop_ai_suggestion";
 }

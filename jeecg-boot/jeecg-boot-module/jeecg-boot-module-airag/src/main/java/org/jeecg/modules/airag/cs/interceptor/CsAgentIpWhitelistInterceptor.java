@@ -4,6 +4,7 @@ import com.alibaba.fastjson.JSONObject;
 import lombok.extern.slf4j.Slf4j;
 import org.jeecg.common.system.util.JwtUtil;
 import org.jeecg.common.util.oConvertUtils;
+import org.jeecg.modules.airag.cs.constant.CsRedisKeys;
 import org.jeecg.modules.airag.cs.entity.CsAgentIpWhitelist;
 import org.jeecg.modules.airag.cs.entity.CsAgentLoginLog;
 import org.jeecg.modules.airag.cs.entity.CsGlobalConfig;
@@ -12,6 +13,7 @@ import org.jeecg.modules.airag.cs.mapper.CsAgentLoginLogMapper;
 import org.jeecg.modules.airag.cs.mapper.CsGlobalConfigMapper;
 import org.jeecg.modules.airag.cs.mapper.CsSubAgentMapper;
 import org.jeecg.modules.airag.cs.util.CsIpMatchUtil;
+import org.jeecg.modules.airag.cs.util.CsRequestUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
@@ -31,14 +33,14 @@ import java.util.stream.Collectors;
 @Component
 public class CsAgentIpWhitelistInterceptor implements HandlerInterceptor {
 
-    private static final String WHITELIST_ENABLED_CONFIG_KEY = "agent_ip_whitelist_enabled";
-    private static final String WHITELIST_ENABLED_REDIS_KEY = "cs:global:agent_ip_whitelist_enabled";
-
     @Autowired
     private RedisTemplate<String, String> redisTemplate;
 
     @Autowired
     private CsGlobalConfigMapper csGlobalConfigMapper;
+
+    @Autowired
+    private org.jeecg.modules.airag.cs.service.CsGlobalConfigCache configCache;
 
     @Autowired
     private CsAgentIpWhitelistMapper whitelistMapper;
@@ -113,12 +115,10 @@ public class CsAgentIpWhitelistInterceptor implements HandlerInterceptor {
     }
 
     private boolean isWhitelistEnabled() {
-        String value = redisTemplate.opsForValue().get(WHITELIST_ENABLED_REDIS_KEY);
-        if (value == null) {
-            CsGlobalConfig config = csGlobalConfigMapper.selectById(WHITELIST_ENABLED_CONFIG_KEY);
-            value = config != null ? config.getConfigValue() : "false";
-            redisTemplate.opsForValue().set(WHITELIST_ENABLED_REDIS_KEY, value);
-        }
+        String value = configCache.getOrCacheDefault(
+                CsRedisKeys.REDIS_WHITELIST_ENABLED,
+                CsRedisKeys.CONFIG_WHITELIST_ENABLED,
+                "false");
         return "true".equalsIgnoreCase(value);
     }
 
@@ -146,15 +146,6 @@ public class CsAgentIpWhitelistInterceptor implements HandlerInterceptor {
     }
 
     private String getClientIp(HttpServletRequest request) {
-        String ip = request.getHeader("X-Forwarded-For");
-        if (oConvertUtils.isNotEmpty(ip)) {
-            int idx = ip.indexOf(',');
-            return idx > -1 ? ip.substring(0, idx).trim() : ip.trim();
-        }
-        ip = request.getHeader("X-Real-IP");
-        if (oConvertUtils.isNotEmpty(ip)) {
-            return ip.trim();
-        }
-        return request.getRemoteAddr();
+        return CsRequestUtil.getClientIp(request);
     }
 }

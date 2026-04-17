@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
 import org.jeecg.common.api.vo.Result;
 import org.jeecg.common.util.oConvertUtils;
+import org.jeecg.modules.airag.cs.constant.CsRedisKeys;
 import org.jeecg.modules.airag.cs.entity.CsConversation;
 import org.jeecg.modules.airag.cs.entity.CsMessage;
 import org.jeecg.modules.airag.cs.service.ICsConversationService;
@@ -87,14 +88,13 @@ public class CsMessageController {
     /** 默认文件大小限制 10MB，可在聊天窗口设置中配置（最大50MB） */
     private static final long DEFAULT_MAX_FILE_SIZE = 10 * 1024 * 1024;
     private static final long ABSOLUTE_MAX_FILE_SIZE = 50 * 1024 * 1024;
-    private static final String CHAT_WINDOW_REDIS_KEY = "cs:global:chat_window_settings";
 
     /**
      * 获取配置的最大文件大小（MB → bytes）
      */
     private long getConfiguredMaxFileSize() {
         try {
-            String json = redisTemplate.opsForValue().get(CHAT_WINDOW_REDIS_KEY);
+            String json = redisTemplate.opsForValue().get(CsRedisKeys.REDIS_CHAT_WINDOW);
             if (json != null && !json.isEmpty()) {
                 JSONObject config = JSON.parseObject(json);
                 Integer maxMb = config.getInteger("maxFileSize");
@@ -368,7 +368,7 @@ public class CsMessageController {
 
         // 校验答案是否为已配置的FAQ答案（防伪造）
         try {
-            String settingsJson = redisTemplate.opsForValue().get(CHAT_WINDOW_REDIS_KEY);
+            String settingsJson = redisTemplate.opsForValue().get(CsRedisKeys.REDIS_CHAT_WINDOW);
             if (oConvertUtils.isNotEmpty(settingsJson)) {
                 JSONObject settings = JSON.parseObject(settingsJson);
                 Boolean faqEnabled = settings.getBoolean("faqEnabled");

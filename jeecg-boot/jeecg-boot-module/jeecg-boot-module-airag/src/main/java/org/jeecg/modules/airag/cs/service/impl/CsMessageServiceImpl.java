@@ -15,6 +15,7 @@ import org.jeecg.modules.airag.chat.entity.ChatMessage;
 import org.jeecg.modules.airag.chat.service.IChatMessageService;
 import org.jeecg.modules.airag.common.handler.AIChatParams;
 import org.jeecg.modules.airag.cs.async.CsAsyncTaskExecutor;
+import org.jeecg.modules.airag.cs.constant.CsRedisKeys;
 import org.jeecg.modules.airag.cs.util.CsCryptoUtil;
 import org.jeecg.modules.airag.cs.entity.CsAgent;
 import org.jeecg.modules.airag.cs.entity.CsCollaborator;
@@ -54,13 +55,6 @@ import java.util.stream.Collectors;
 @Service
 public class CsMessageServiceImpl implements ICsMessageService {
 
-    /** 访客AI应用全局配置的Redis Key */
-    private static final String VISITOR_APP_REDIS_KEY = "cs:global:visitor_app_id";
-    private static final String VISITOR_APP_CONFIG_KEY = "visitor_app_id";
-
-    /** 聊天窗口设置的Redis Key（含FAQ配置） */
-    private static final String CHAT_WINDOW_REDIS_KEY = "cs:global:chat_window_settings";
-
     @Autowired
     private IChatMessageService chatMessageService;
 
@@ -69,6 +63,9 @@ public class CsMessageServiceImpl implements ICsMessageService {
 
     @Autowired
     private CsGlobalConfigMapper csGlobalConfigMapper;
+
+    @Autowired
+    private org.jeecg.modules.airag.cs.service.CsGlobalConfigCache configCache;
 
     @Autowired
     @Lazy
@@ -329,7 +326,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
             return FAQ_DISABLED;
         }
         try {
-            String settingsJson = redisTemplate.opsForValue().get(CHAT_WINDOW_REDIS_KEY);
+            String settingsJson = redisTemplate.opsForValue().get(CsRedisKeys.REDIS_CHAT_WINDOW);
             if (oConvertUtils.isEmpty(settingsJson)) {
                 return FAQ_DISABLED;
             }
@@ -456,7 +453,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
                 notifyExtra.put("userId", userId);
                 notifyExtra.put("messageId", agentMessage.getId());
                 CsWebSocketMessage deliveryFailed = CsWebSocketMessage.builder()
-                        .type("delivery_failed")
+                        .type(CsWebSocketMessage.TYPE_DELIVERY_FAILED)
                         .conversationId(conversationId)
                         .content("用户不在线，消息未送达")
                         .extra(notifyExtra)
@@ -582,16 +579,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
     }
 
     private List<String> resolveAutoMessageContents(String userLang) {
-        String autoMsgRedisKey = "cs:global:auto_messages";
-        String autoMsgConfigKey = "auto_messages";
-        String json = redisTemplate.opsForValue().get(autoMsgRedisKey);
-        if (json == null || json.isEmpty()) {
-            CsGlobalConfig config = csGlobalConfigMapper.selectById(autoMsgConfigKey);
-            json = config != null ? config.getConfigValue() : null;
-            if (json != null && !json.isEmpty()) {
-                redisTemplate.opsForValue().set(autoMsgRedisKey, json);
-            }
-        }
+        String json = configCache.get(CsRedisKeys.REDIS_AUTO_MESSAGES, CsRedisKeys.CONFIG_AUTO_MESSAGES);
         if (json == null || json.isEmpty()) {
             return Collections.emptyList();
         }
@@ -671,7 +659,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
                 notifyExtra.put("userId", userId);
                 notifyExtra.put("messageId", agentMessage.getId());
                 CsWebSocketMessage deliveryFailed = CsWebSocketMessage.builder()
-                        .type("delivery_failed")
+                        .type(CsWebSocketMessage.TYPE_DELIVERY_FAILED)
                         .conversationId(conversationId)
                         .content("用户不在线，消息未送达")
                         .extra(notifyExtra)
@@ -719,7 +707,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
     @Override
     public void sendInitialFaqMessage(String conversationId) {
         try {
-            String settingsJson = redisTemplate.opsForValue().get(CHAT_WINDOW_REDIS_KEY);
+            String settingsJson = redisTemplate.opsForValue().get(CsRedisKeys.REDIS_CHAT_WINDOW);
             if (oConvertUtils.isEmpty(settingsJson)) {
                 return;
             }
@@ -758,7 +746,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
     @Override
     public void handleFaqInteract(String conversationId, String action, Integer faqIndex, List<Integer> parentPath) {
         try {
-            String settingsJson = redisTemplate.opsForValue().get(CHAT_WINDOW_REDIS_KEY);
+            String settingsJson = redisTemplate.opsForValue().get(CsRedisKeys.REDIS_CHAT_WINDOW);
             if (oConvertUtils.isEmpty(settingsJson)) {
                 return;
             }
@@ -908,7 +896,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
 
     private void sendSmartAssistantNoMatchMessage(String conversationId) {
         try {
-            String settingsJson = redisTemplate.opsForValue().get(CHAT_WINDOW_REDIS_KEY);
+            String settingsJson = redisTemplate.opsForValue().get(CsRedisKeys.REDIS_CHAT_WINDOW);
             if (oConvertUtils.isEmpty(settingsJson)) {
                 return;
             }
@@ -1029,7 +1017,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
                             
                             // 通过WebSocket发送流式AI建议（仅传输加密）
                             CsWebSocketMessage streamMsg = CsWebSocketMessage.builder()
-                                    .type("ai_suggestion_stream")
+                                    .type(CsWebSocketMessage.TYPE_AI_SUGGESTION_STREAM)
                                     .conversationId(conversationId)
                                     .content(csCryptoUtil.encryptTransport(token))
                                     .extra(Map.of("isComplete", false))
@@ -1053,7 +1041,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
                             
                             // 发送完成消息（仅传输加密，建议不存储）
                             CsWebSocketMessage completeMsg = CsWebSocketMessage.builder()
-                                    .type("ai_suggestion_complete")
+                                    .type(CsWebSocketMessage.TYPE_AI_SUGGESTION_COMPLETE)
                                     .conversationId(conversationId)
                                     .content(csCryptoUtil.encryptTransport(suggestion))
                                     .build();
@@ -1073,7 +1061,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
             
             // 发送错误消息
             CsWebSocketMessage errorMsg = CsWebSocketMessage.builder()
-                    .type("ai_suggestion_error")
+                    .type(CsWebSocketMessage.TYPE_AI_SUGGESTION_ERROR)
                     .conversationId(conversationId)
                     .error("AI建议生成失败: " + e.getMessage())
                     .build();
@@ -1209,15 +1197,13 @@ public class CsMessageServiceImpl implements ICsMessageService {
 
     // ==================== 敏感词校验 ====================
 
-    private static final String SENSITIVE_WORDS_REDIS_KEY = "cs:global:sensitive_words";
-
     @Override
     public String checkSensitiveWords(String content) {
         if (oConvertUtils.isEmpty(content)) {
             return null;
         }
         try {
-            String json = redisTemplate.opsForValue().get(SENSITIVE_WORDS_REDIS_KEY);
+            String json = redisTemplate.opsForValue().get(CsRedisKeys.REDIS_SENSITIVE_WORDS);
             if (oConvertUtils.isEmpty(json)) {
                 return null;
             }
@@ -1399,12 +1385,13 @@ public class CsMessageServiceImpl implements ICsMessageService {
     }
 
     /**
-     * 推送消息给用户
+     * 构建对外推送的消息 payload（用户/客服共用）。
+     * 内容会经过 storage + transport 双层加密。
      */
-    private boolean pushToUser(String conversationId, CsMessage message) {
+    private CsWebSocketMessage buildMessageWsPayload(String conversationId, CsMessage message) {
         Map<String, Object> extraMap = parseExtraMap(message.getExtra());
-        CsWebSocketMessage wsMessage = CsWebSocketMessage.builder()
-                .type("message")
+        return CsWebSocketMessage.builder()
+                .type(CsWebSocketMessage.TYPE_MESSAGE)
                 .conversationId(conversationId)
                 .messageId(message.getId())
                 .content(csCryptoUtil.encryptTransport(csCryptoUtil.encryptStorage(message.getContent())))
@@ -1417,10 +1404,17 @@ public class CsMessageServiceImpl implements ICsMessageService {
                 .extra(extraMap)
                 .timestamp(message.getCreateTime())
                 .build();
-        
+    }
+
+    /**
+     * 推送消息给用户
+     */
+    private boolean pushToUser(String conversationId, CsMessage message) {
+        CsWebSocketMessage wsMessage = buildMessageWsPayload(conversationId, message);
+
         CsConversation conversation = conversationService.getById(conversationId);
         String userId = conversation != null ? conversation.getUserId() : conversationId;
-        
+
         return sessionManager.sendToUserByConversation(conversationId, userId, wsMessage);
     }
 
@@ -1431,22 +1425,8 @@ public class CsMessageServiceImpl implements ICsMessageService {
      * 全员广播由 {@link CsWebSocketSessionManager#sendToAllAgents} 完成。
      */
     private void pushToAgents(CsConversation conversation, CsMessage message) {
-        Map<String, Object> extraMap = parseExtraMap(message.getExtra());
-        CsWebSocketMessage wsMessage = CsWebSocketMessage.builder()
-                .type("message")
-                .conversationId(conversation.getId())
-                .messageId(message.getId())
-                .content(csCryptoUtil.encryptTransport(csCryptoUtil.encryptStorage(message.getContent())))
-                .msgType(message.getMsgType())
-                .senderId(message.getSenderId())
-                .senderName(message.getSenderName())
-                .senderAvatar(message.getSenderAvatar())
-                .senderType(message.getSenderType())
-                .isAiGenerated(message.getIsAiGenerated())
-                .extra(extraMap)
-                .timestamp(message.getCreateTime())
-                .build();
-        
+        CsWebSocketMessage wsMessage = buildMessageWsPayload(conversation.getId(), message);
+
         // 广播给所有在线客服（同事会话功能：所有客服都能看到所有会话）
         log.info("[CS-Message] 广播消息给所有在线客服: conversationId={}", conversation.getId());
         sessionManager.sendToAllAgents(wsMessage);
@@ -1463,21 +1443,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
         if (conversation == null) {
             return;
         }
-        Map<String, Object> extraMap = parseExtraMap(message.getExtra());
-        CsWebSocketMessage wsMessage = CsWebSocketMessage.builder()
-                .type("message")
-                .conversationId(conversationId)
-                .messageId(message.getId())
-                .content(csCryptoUtil.encryptTransport(csCryptoUtil.encryptStorage(message.getContent())))
-                .msgType(message.getMsgType())
-                .senderId(message.getSenderId())
-                .senderName(message.getSenderName())
-                .senderAvatar(message.getSenderAvatar())
-                .senderType(message.getSenderType())
-                .isAiGenerated(message.getIsAiGenerated())
-                .extra(extraMap)
-                .timestamp(message.getCreateTime())
-                .build();
+        CsWebSocketMessage wsMessage = buildMessageWsPayload(conversationId, message);
         
         // 收集所有在线客服ID（同事会话功能：全员推送，排除发送者）
         Set<String> agentIds = new HashSet<>();
@@ -1556,7 +1522,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
                             
                             // 通过WebSocket发送增量token（流式token仅传输加密）
                             CsWebSocketMessage streamMsg = CsWebSocketMessage.builder()
-                                    .type("ai_stream")
+                                    .type(CsWebSocketMessage.TYPE_AI_STREAM)
                                     .conversationId(conversationId)
                                     .messageId(messageId)
                                     .content(csCryptoUtil.encryptTransport(token))
@@ -1618,7 +1584,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
             
             // 发送完成消息（双层加密）
             CsWebSocketMessage completeMsg = CsWebSocketMessage.builder()
-                    .type("ai_stream_complete")
+                    .type(CsWebSocketMessage.TYPE_AI_STREAM_COMPLETE)
                     .conversationId(conversationId)
                     .messageId(messageId)
                     .content(csCryptoUtil.encryptTransport(csCryptoUtil.encryptStorage(aiReply)))
@@ -1638,7 +1604,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
      */
     private void sendAiTypingStatus(String conversationId, String userId, boolean isTyping) {
         CsWebSocketMessage statusMsg = CsWebSocketMessage.builder()
-                .type("ai_typing")
+                .type(CsWebSocketMessage.TYPE_AI_TYPING)
                 .conversationId(conversationId)
                 .extra(Map.of("isTyping", isTyping))
                 .build();
@@ -1859,15 +1825,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
     }
 
     private String getGlobalVisitorAppId() {
-        String appId = redisTemplate.opsForValue().get(VISITOR_APP_REDIS_KEY);
-        if (oConvertUtils.isNotEmpty(appId)) {
-            return appId;
-        }
-        CsGlobalConfig config = csGlobalConfigMapper.selectById(VISITOR_APP_CONFIG_KEY);
-        appId = config != null ? config.getConfigValue() : null;
-        if (oConvertUtils.isNotEmpty(appId)) {
-            redisTemplate.opsForValue().set(VISITOR_APP_REDIS_KEY, appId);
-        }
+        String appId = configCache.get(CsRedisKeys.REDIS_VISITOR_APP, CsRedisKeys.CONFIG_VISITOR_APP);
         return appId;
     }
 
@@ -1890,7 +1848,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
                 CsConversation conversation = conversationService.getConversation(conversationId);
                 if (conversation != null) {
                     CsWebSocketMessage wsMessage = CsWebSocketMessage.builder()
-                            .type("ai_suggestion")
+                            .type(CsWebSocketMessage.TYPE_AI_SUGGESTION)
                             .conversationId(conversationId)
                             .content(csCryptoUtil.encryptTransport(suggestion))
                             .build();

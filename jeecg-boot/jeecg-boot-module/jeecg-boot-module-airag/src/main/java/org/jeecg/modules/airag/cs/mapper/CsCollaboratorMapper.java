@@ -29,13 +29,6 @@ public interface CsCollaboratorMapper extends BaseMapper<CsCollaborator> {
     List<CsCollaborator> selectActiveCollaborators(@Param("conversationId") String conversationId);
 
     /**
-     * 获取客服参与的会话ID列表
-     */
-    @Select("SELECT DISTINCT conversation_id FROM cs_collaborator " +
-            "WHERE agent_id = #{agentId} AND leave_time IS NULL")
-    List<String> selectConversationIdsByAgent(@Param("agentId") String agentId);
-
-    /**
      * 检查客服是否已在协作中
      */
     @Select("SELECT COUNT(*) FROM cs_collaborator " +
