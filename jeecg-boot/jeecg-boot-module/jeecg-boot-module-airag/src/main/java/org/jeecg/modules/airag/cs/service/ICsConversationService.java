@@ -290,8 +290,10 @@ public interface ICsConversationService extends IService<CsConversation> {
     void notifyUser(String conversationId, String type, String content, java.util.Map<String, Object> extra);
 
     /**
-     * 通知所有相关客服 (主负责人 + 协作者)
-     * 
+     * 通知所有相关客服（主负责人 + 活跃协作者 + 在线管理者）
+     * 实际行为由 {@link #notifyRelatedAgents} / sendToRelatedAgentsInternal 执行，
+     * 未分配的会话会广播给所有在线客服。
+     *
      * @param conversationId 会话ID
      * @param type           消息类型
      * @param content        消息内容

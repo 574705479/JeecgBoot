@@ -13,7 +13,6 @@ import org.jeecg.modules.airag.cs.service.ICsAgentService;
 import org.jeecg.modules.airag.cs.service.ICsConversationService;
 import org.jeecg.modules.airag.cs.service.ICsLeaveMessageService;
 import org.jeecg.modules.airag.cs.service.ICsVisitorService;
-import org.jeecg.modules.airag.cs.websocket.CsWebSocketSessionManager;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -46,9 +45,6 @@ public class CsDashboardController {
 
     @Autowired
     private ICsLeaveMessageService leaveMessageService;
-
-    @Autowired
-    private CsWebSocketSessionManager sessionManager;
 
     @Autowired
     private org.jeecg.modules.airag.cs.mapper.CsSubAgentMapper csSubAgentMapper;

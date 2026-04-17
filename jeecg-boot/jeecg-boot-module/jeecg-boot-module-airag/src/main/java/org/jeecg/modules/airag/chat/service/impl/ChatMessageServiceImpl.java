@@ -202,12 +202,13 @@ public class ChatMessageServiceImpl implements IChatMessageService {
 
     @Override
     public List<ChatMessage> getRecentMessages(String conversationId, int limit) {
-        List<ChatMessage> messages = messageRepository.findTop100ByConversationIdAndDeletedIsFalseOrderByCreateTimeDesc(conversationId);
-        
-        // 限制数量并反转顺序（变为时间升序）
-        if (messages.size() > limit) {
-            messages = messages.subList(0, limit);
+        if (limit <= 0) {
+            return new ArrayList<>();
         }
+        org.springframework.data.domain.Page<ChatMessage> page =
+                messageRepository.findByConversationIdAndDeletedIsFalseOrderByCreateTimeDesc(
+                        conversationId, PageRequest.of(0, limit));
+        List<ChatMessage> messages = new ArrayList<>(page.getContent());
         Collections.reverse(messages);
         return messages;
     }

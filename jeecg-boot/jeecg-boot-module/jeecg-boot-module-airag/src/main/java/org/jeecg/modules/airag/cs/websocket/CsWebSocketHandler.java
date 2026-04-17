@@ -550,7 +550,7 @@ public class CsWebSocketHandler implements WebSocketHandler {
             if (conversation != null) {
                 // 通知相关客服用户已离线
                 CsWebSocketMessage message = CsWebSocketMessage.builder()
-                        .type("user_offline")
+                        .type(CsWebSocketMessage.TYPE_USER_OFFLINE)
                         .conversationId(conversationId)
                         .senderId(userId)
                         .content(csCryptoUtil.encryptTransport("用户已离线"))

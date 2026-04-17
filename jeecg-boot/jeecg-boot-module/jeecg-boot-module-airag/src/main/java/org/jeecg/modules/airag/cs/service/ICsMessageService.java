@@ -168,15 +168,6 @@ public interface ICsMessageService {
     void cancelAiSuggestionStream(String conversationId);
 
     /**
-     * 生成AI建议回复 (AI辅助模式)
-     * 
-     * @param conversationId 会话ID
-     * @param userMessage    用户消息
-     * @return AI建议内容
-     */
-    String generateAiSuggestion(String conversationId, String userMessage);
-
-    /**
      * 生成AI建议回复 (AI辅助模式) - 指定请求客服
      *
      * @param conversationId 会话ID
@@ -227,15 +218,6 @@ public interface ICsMessageService {
      * @return 消息列表
      */
     List<CsMessage> getMessages(String conversationId, String beforeId, int limit);
-
-    /**
-     * 获取最近消息
-     * 
-     * @param conversationId 会话ID
-     * @param limit          限制数量
-     * @return 消息列表
-     */
-    List<CsMessage> getRecentMessages(String conversationId, int limit);
 
     // ==================== 消息撤回 ====================
 

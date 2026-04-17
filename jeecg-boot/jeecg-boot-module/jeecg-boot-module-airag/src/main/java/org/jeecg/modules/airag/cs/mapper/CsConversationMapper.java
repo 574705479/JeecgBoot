@@ -87,14 +87,6 @@ public interface CsConversationMapper extends BaseMapper<CsConversation> {
     List<CsConversation> selectUnassigned(@Param("limit") int limit);
 
     /**
-     * 统计客服当前负责的会话数
-     */
-    @Select("SELECT COUNT(*) FROM cs_conversation " +
-            "WHERE agent_id = #{agentId} AND status = 1 " +
-            "AND (deleted = 0 OR deleted IS NULL)")
-    int countByOwnerAgent(@Param("agentId") String agentId);
-
-    /**
      * 获取客服工作量统计
      */
     @Select("SELECT c.agent_id AS agentId, " +

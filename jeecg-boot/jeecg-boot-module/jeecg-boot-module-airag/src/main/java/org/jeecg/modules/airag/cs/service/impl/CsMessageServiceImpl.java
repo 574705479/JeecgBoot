@@ -33,7 +33,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Async;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -103,9 +102,6 @@ public class CsMessageServiceImpl implements ICsMessageService {
 
     // AI流式回复取消标记 (conversationId -> cancelled flag)
     private final ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicBoolean> activeAiStreams = new ConcurrentHashMap<>();
-
-    private static final long COLLABORATOR_CACHE_TTL_MS = 30000L;
-    private final Map<String, CollaboratorCacheEntry> collaboratorCache = new ConcurrentHashMap<>();
 
     // ==================== AI流式取消 ====================
 
@@ -972,11 +968,6 @@ public class CsMessageServiceImpl implements ICsMessageService {
     // ==================== AI相关 ====================
 
     @Override
-    public String generateAiSuggestion(String conversationId, String userMessage) {
-        return generateAiSuggestion(conversationId, userMessage, null);
-    }
-
-    @Override
     public String generateAiSuggestion(String conversationId, String userMessage, String agentId) {
         try {
             log.info("[CS-Message] 开始生成流式AI建议: conversationId={}", conversationId);
@@ -1216,11 +1207,6 @@ public class CsMessageServiceImpl implements ICsMessageService {
         return toCsMessages(chatMessages, conversationId);
     }
 
-    @Override
-    public List<CsMessage> getRecentMessages(String conversationId, int limit) {
-        return getMessages(conversationId, limit);
-    }
-
     // ==================== 敏感词校验 ====================
 
     private static final String SENSITIVE_WORDS_REDIS_KEY = "cs:global:sensitive_words";
@@ -1302,47 +1288,6 @@ public class CsMessageServiceImpl implements ICsMessageService {
             chatMessageService.saveMessage(chatMessage);
         } catch (Exception e) {
             log.error("[CS-Message] 保存消息到MongoDB失败", e);
-        }
-    }
-
-    private List<CsCollaborator> getActiveCollaboratorsCached(String conversationId) {
-        if (oConvertUtils.isEmpty(conversationId)) {
-            return Collections.emptyList();
-        }
-        long now = System.currentTimeMillis();
-        CollaboratorCacheEntry cached = collaboratorCache.get(conversationId);
-        if (cached != null && cached.expiresAt > now) {
-            return cached.data;
-        }
-        List<CsCollaborator> list = collaboratorService.getCollaborators(conversationId);
-        List<CsCollaborator> safeList = list != null ? list : Collections.emptyList();
-        collaboratorCache.put(conversationId, new CollaboratorCacheEntry(safeList, now + COLLABORATOR_CACHE_TTL_MS));
-        return safeList;
-    }
-
-    private static class CollaboratorCacheEntry {
-        private final List<CsCollaborator> data;
-        private final long expiresAt;
-
-        private CollaboratorCacheEntry(List<CsCollaborator> data, long expiresAt) {
-            this.data = data;
-            this.expiresAt = expiresAt;
-        }
-    }
-
-    @Scheduled(fixedDelay = 60000)
-    public void cleanExpiredCollaboratorCache() {
-        long now = System.currentTimeMillis();
-        int removed = 0;
-        var it = collaboratorCache.entrySet().iterator();
-        while (it.hasNext()) {
-            if (it.next().getValue().expiresAt < now) {
-                it.remove();
-                removed++;
-            }
-        }
-        if (removed > 0) {
-            log.debug("[CS-Message] 清理过期协作者缓存: 移除{}条", removed);
         }
     }
 
@@ -1480,11 +1425,10 @@ public class CsMessageServiceImpl implements ICsMessageService {
     }
 
     /**
-     * 推送消息给所有相关客服（主负责人 + 协作者 + 管理者）
-     * 
-     * 推送策略：
-     * 1. 会话未分配 -> 广播给所有在线客服
-     * 2. 会话已分配 -> 推送给主负责人 + 所有活跃协作者 + 所有在线管理者（监控功能）
+     * 推送消息给所有在线客服（同事会话功能：所有客服都能看到所有会话）
+     *
+     * 注意：本方法行为与方法名"All"一致，不区分会话是否已分配，不区分协作者/管理者，
+     * 全员广播由 {@link CsWebSocketSessionManager#sendToAllAgents} 完成。
      */
     private void pushToAgents(CsConversation conversation, CsMessage message) {
         Map<String, Object> extraMap = parseExtraMap(message.getExtra());
@@ -1509,7 +1453,10 @@ public class CsMessageServiceImpl implements ICsMessageService {
     }
 
     /**
-     * 推送消息给其他客服（排除发送者）+ 管理者监控
+     * 推送消息给其他在线客服（同事会话功能：全员推送，排除发送者本人）
+     *
+     * 注意：当前实现取所有在线客服后排除发送者，并不单独区分协作者/管理者；
+     * 在线客服一般为数十人量级，使用顺序发送避免 ForkJoinPool 与 IO 调度开销。
      */
     private void pushToOtherAgents(String conversationId, String excludeAgentId, CsMessage message) {
         CsConversation conversation = conversationService.getConversation(conversationId);
@@ -1541,9 +1488,11 @@ public class CsMessageServiceImpl implements ICsMessageService {
             }
         }
         
-        // 排除发送者并推送
+        // 排除发送者并顺序推送（在线客服规模小，顺序发送比 parallelStream 更稳）
         agentIds.remove(excludeAgentId);
-        agentIds.parallelStream().forEach(targetAgentId -> sessionManager.sendToAgent(targetAgentId, wsMessage));
+        for (String targetAgentId : agentIds) {
+            sessionManager.sendToAgent(targetAgentId, wsMessage);
+        }
     }
 
     /**
