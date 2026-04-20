@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.shiro.authz.annotation.Logical;
+import org.apache.shiro.authz.annotation.RequiresRoles;
 import org.jeecg.common.api.vo.Result;
 import com.alibaba.fastjson.JSON;
 import org.jeecg.modules.airag.cs.entity.CsBrandConfig;
@@ -50,8 +52,15 @@ public class CsBrandConfigController {
 
     /**
      * 保存品牌配置（新增或更新）
+     *
+     * 权限：仅「管理员」(admin) 或「管理员客服」(cs_admin_agent) 可调用。
+     * 子客服 (cs_sub_agent) 与普通登录用户无权修改 brand 配置。
+     *
+     * 安全说明：brand 字段中的 fid 会被自动加入「匿名解密白名单」（CsBrandFileController），
+     * 任何能写 brand 字段的人都能间接让该 fid 被全网匿名访问。因此必须严格限制写权限。
      */
     @Operation(summary = "保存品牌配置")
+    @RequiresRoles(value = {"admin", "cs_admin_agent"}, logical = Logical.OR)
     @PostMapping("/save")
     public Result<String> saveBrandConfig(@RequestBody CsBrandConfig config) {
         Date now = new Date();

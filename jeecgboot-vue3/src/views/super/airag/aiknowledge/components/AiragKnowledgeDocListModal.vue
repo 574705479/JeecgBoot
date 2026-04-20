@@ -267,6 +267,8 @@
   import {Avatar, message, Modal, Pagination} from 'ant-design-vue';
   import { useUserStore } from '@/store/modules/user';
   import { getFileAccessHttpUrl, getHeaders } from '@/utils/common/compUtils';
+  import { withImageCache } from '/@/utils/file/imageCache';
+  import { isCseUrl } from '/@/utils/cse/cseUrl';
   import defaultImg from '/@/assets/images/header.jpg';
   import Icon from "@/components/Icon";
   import { useGlobSetting } from '/@/hooks/setting';
@@ -544,7 +546,12 @@
               }
             }
             hitShowSearchText.value = hitText.value;
-            avatar.value = userStore.getUserInfo.avatar ? getFileAccessHttpUrl(userStore.getUserInfo.avatar) : defaultImg;
+            {
+              const u = userStore.getUserInfo.avatar ? getFileAccessHttpUrl(userStore.getUserInfo.avatar) : '';
+              avatar.value = u
+                ? (isCseUrl(u) || u.startsWith('http') || u.startsWith('/') ? withImageCache(u) : u)
+                : defaultImg;
+            }
             hitText.value = '';
             notHit.value = hitTextList.value.length == 0;
             spinning.value = false;

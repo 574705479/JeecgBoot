@@ -105,7 +105,7 @@
   import MiniRegister from './MiniRegister.vue';
   import MiniCodelogin from './MiniCodelogin.vue';
   import { getBrandSetting } from '/@/settings/brandSetting';
-  import { resolveBrandUrl } from '/@/utils/brand';
+  import { resolveBrandPublicUrl } from '/@/utils/brand';
   import { AppLocalePicker, AppDarkModeToggle } from '/@/components/Application';
   import { useLocaleStore } from '/@/store/modules/locale';
   import { createLocalStorage } from '/@/utils/cache';
@@ -128,10 +128,12 @@
   const { prefixCls } = useDesign('mini-login');
   const { appTitle, appSubtitle, logoUrl, loginBgUrl } = getBrandSetting();
   const hideExtraLogin = true;
-  const logoDisplayUrl = computed(() => resolveBrandUrl(logoUrl));
+  // logo / 登录背景：cse:// 走匿名代理端点（登录前可访问）
+  const logoDisplayUrl = computed(() => resolveBrandPublicUrl(logoUrl));
   const loginBgStyle = computed(() => {
     if (!loginBgUrl) return {};
-    const bgUrl = resolveBrandUrl(loginBgUrl);
+    const bgUrl = resolveBrandPublicUrl(loginBgUrl);
+    if (!bgUrl) return {};
     return {
       backgroundImage: `url(${bgUrl})`,
       backgroundSize: 'cover',

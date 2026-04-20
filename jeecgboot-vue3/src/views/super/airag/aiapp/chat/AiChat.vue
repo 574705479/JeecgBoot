@@ -3,7 +3,7 @@
     <!-- 在线客服模式：简洁的聊天头部 -->
     <div v-if="isCustomerServiceMode" class="cs-header">
       <div class="cs-header-left">
-        <img v-if="appData?.icon" :src="appData.icon" class="cs-app-icon" />
+        <img v-if="appData?.icon" :src="wrapAppIcon(appData.icon)" class="cs-app-icon" />
         <div v-else class="cs-app-icon cs-app-icon-default">
           <Icon icon="ant-design:customer-service-outlined" :size="24" />
         </div>
@@ -18,7 +18,7 @@
     <WelcomePage
       v-if="showWelcomePage && !hasStartedChat && !isCustomerServiceMode"
       :appName="appData?.name"
-      :appIcon="appData?.icon"
+      :appIcon="wrapAppIcon(appData?.icon)"
       :welcomeTitle="externalParams.welcomeTitle"
       :welcomeDesc="externalParams.welcomeDesc"
       :prologue="prologue"
@@ -99,6 +99,14 @@
   import { useAppInject } from "@/hooks/web/useAppInject";
   import Loading from '@/components/Loading/src/Loading.vue';
   import { Icon } from '/@/components/Icon';
+  import { withImageCache } from '/@/utils/file/imageCache';
+  import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
+
+  // CSE: cse:// 应用图标必须经 withImageCache 解密成 blob URL
+  function wrapAppIcon(icon?: string) {
+    if (!icon) return icon;
+    return withImageCache(getFileAccessHttpUrl(icon));
+  }
 
   const router = useRouter();
   const userId = useUserStore().getUserInfo?.id;

@@ -1,6 +1,8 @@
 <script lang="tsx">
   import { defineComponent, ref, unref, computed, reactive, watchEffect } from 'vue';
   import { CloseOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons-vue';
+  import { isCseUrl, parseCseFid } from '/@/utils/cse/cseUrl';
+  import { decryptFileToObjectUrl } from '/@/utils/cse/cseDecrypt';
   import resumeSvg from '/@/assets/svg/preview/resume.svg';
   import rotateSvg from '/@/assets/svg/preview/p-rotate.svg';
   import scaleSvg from '/@/assets/svg/preview/scale.svg';
@@ -161,9 +163,40 @@
         imgEl.onmousemove = null;
       }
 
+      // CSE 解密缓存：fid -> blob URL
+      const cseBlobMap = new Map<string, string>();
+
+      async function resolveImageUrl(rawUrl: string): Promise<string> {
+        if (!isCseUrl(rawUrl)) return rawUrl;
+        const fid = parseCseFid(rawUrl);
+        if (!fid) return rawUrl;
+        const cached = cseBlobMap.get(fid);
+        if (cached) return cached;
+        try {
+          const u = await decryptFileToObjectUrl(fid, { mime: 'image/*' });
+          cseBlobMap.set(fid, u);
+          return u;
+        } catch {
+          return '';
+        }
+      }
+
+      function preheatNeighbor(idx: number) {
+        const list = props.imageList;
+        if (!list) return;
+        const targets = [idx - 1, idx + 1].map((i) => list[(i + list.length) % list.length]);
+        targets.forEach((u) => { if (u && isCseUrl(u)) resolveImageUrl(u); });
+      }
+
       // 更换图片
-      function handleIChangeImage(url: string) {
+      async function handleIChangeImage(rawUrl: string) {
         imgState.status = StatueEnum.LOADING;
+        preheatNeighbor(imgState.currentIndex);
+        const url = await resolveImageUrl(rawUrl);
+        if (!url) {
+          imgState.status = StatueEnum.FAIL;
+          return;
+        }
         const img = new Image();
         img.src = url;
         img.onload = (e: Event) => {

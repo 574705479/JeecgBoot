@@ -4,7 +4,7 @@
       <div :class="`${prefixCls}-image-mask`" :style="getImageWrapperStyle">
         <Icon icon="ant-design:cloud-upload-outlined" :size="getIconWidth" :style="getImageWrapperStyle" color="#d6d6d6" />
       </div>
-      <img :src="sourceValue" v-if="sourceValue" alt="avatar" />
+      <img :src="displayUrl" v-if="sourceValue" alt="avatar" />
     </div>
     <a-button :class="`${prefixCls}-upload-btn`" @click="openModal" v-if="showBtn" v-bind="btnProps">
       {{ btnText ? btnText : t('component.cropper.selectImage') }}
@@ -22,6 +22,8 @@
   import { useI18n } from '/@/hooks/web/useI18n';
   import type { ButtonProps } from '/@/components/Button';
   import Icon from '/@/components/Icon';
+  import { withImageCache } from '/@/utils/file/imageCache';
+  import { isCseUrl } from '/@/utils/cse/cseUrl';
 
   const props = {
     width: { type: [String, Number], default: '200px' },
@@ -54,6 +56,14 @@
 
       const getImageWrapperStyle = computed((): CSSProperties => ({ width: unref(getWidth), height: unref(getWidth) }));
 
+      // 显示用 URL：cse:// 走 withImageCache 解密；其他保持 sourceValue 原值
+      const displayUrl = computed(() => {
+        const v = sourceValue.value;
+        if (!v) return '';
+        if (isCseUrl(v) || v.startsWith('http') || v.startsWith('/')) return withImageCache(v);
+        return v; // data:/blob: 等保留原值
+      });
+
       watchEffect(() => {
         sourceValue.value = props.value || '';
       });
@@ -84,6 +94,7 @@
         getImageWrapperStyle,
         getStyle,
         handleUploadSuccess,
+        displayUrl,
       };
     },
   });

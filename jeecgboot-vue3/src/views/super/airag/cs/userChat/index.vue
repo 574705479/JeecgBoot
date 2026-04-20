@@ -169,7 +169,7 @@
                 <span class="sender-name">智能助手</span>
               </div>
               <div class="message-text">
-                <div v-if="msg.content" v-html="renderMessage(msg.content)"></div>
+                <div v-if="msg.content" v-html="renderMessage(msg.content)" v-cse-html></div>
                 <template v-if="getSmartAssistantFaqData(msg) && (getSmartAssistantFaqData(msg).faqItems?.length || getSmartAssistantFaqData(msg).showBack || getSmartAssistantFaqData(msg).showTop || getSmartAssistantFaqData(msg).showHumanAgent)">
                   <div class="sa-divider"></div>
                   <div v-if="getSmartAssistantFaqData(msg).faqItems?.length" class="sa-faq-list">
@@ -209,7 +209,7 @@
                   :key="`${item.url}_${index}`"
                 >
                   <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview(msg, item)" />
-                  <video v-else :src="getAttachmentUrl(item)" controls @click="openFilePreview(item)" />
+                  <video v-else-if="getAttachmentUrl(item)" :src="getAttachmentUrl(item)" controls @click="openFilePreview(item)" />
                   <div
                     v-if="index === getMediaGridData(msg).items.length - 1 && getMediaGridData(msg).extraCount > 0"
                     class="media-more"
@@ -241,7 +241,7 @@
                 <span class="sender-name">{{ msg.senderName || (isAiMessage(msg) ? 'AI客服' : '客服') }}</span>
                 <a-tag v-if="isAiMessage(msg)" color="blue" size="small">AI</a-tag>
               </div>
-              <div v-if="msg.content" class="message-text" v-html="msg.isStreaming ? renderStreamingText(msg.content) : renderMessage(msg.content)"></div>
+              <div v-if="msg.content" class="message-text" v-html="msg.isStreaming ? renderStreamingText(msg.content) : renderMessage(msg.content)" v-cse-html></div>
               <div
                 v-if="getMediaGridData(msg).items.length"
                 class="message-media-grid"
@@ -253,7 +253,7 @@
                   :key="`${item.url}_${index}`"
                 >
                   <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview(msg, item)" />
-                  <video v-else :src="getAttachmentUrl(item)" controls @click="openFilePreview(item)" />
+                  <video v-else-if="getAttachmentUrl(item)" :src="getAttachmentUrl(item)" controls @click="openFilePreview(item)" />
                   <div
                     v-if="index === getMediaGridData(msg).items.length - 1 && getMediaGridData(msg).extraCount > 0"
                     class="media-more"
@@ -313,7 +313,7 @@
       <!-- 附件预览 -->
       <div v-if="attachmentList.length > 0" class="attachment-preview-bar">
         <div v-for="(att, idx) in attachmentList" :key="idx" class="attachment-thumb">
-          <img v-if="att.type === 'image'" :src="att.previewUrl || att.url" class="att-img" />
+          <img v-if="att.type === 'image'" :src="resolveAttachmentThumb(att)" class="att-img" />
           <div v-else class="att-file">
             <span v-if="att.type === 'video'">🎬</span>
             <span v-else>📄</span>
@@ -374,7 +374,7 @@
             :key="`${item.url}_${index}`"
           >
             <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview({ extra: { attachments: mediaViewerList } }, item)" />
-            <video v-else :src="getAttachmentUrl(item)" controls @click="openFilePreview(item)" />
+            <video v-else-if="getAttachmentUrl(item)" :src="getAttachmentUrl(item)" controls @click="openFilePreview(item)" />
           </div>
         </div>
       </a-modal>
@@ -500,6 +500,14 @@ import { computeFileMd5 } from '../utils/fileHash';
 import { encryptTransport, decryptTransport, decryptMessage, decryptStorage } from '../utils/csEncrypt';
 import { playCsNotificationSound } from '../utils/csNotificationSound';
 import { withImageCache, preloadImages, onImageError, getCachedChatWindowConfig, setCachedChatWindowConfig } from '../utils/csImageCache';
+import { withMediaCache, releaseAllMedia } from '/@/utils/file/imageCache';
+import { isCseUrl } from '/@/utils/cse/cseUrl';
+import { resolveBrandPublicUrl } from '/@/utils/brand';
+// Phase 3.2e：把访客 sessionToken 同步到 cseAuthContext，
+// 让公共 CSE 解密管线（cseDecrypt.ts / imageCache）也能在访客模式下正确派生 IKM 与注入 X-Visitor-Session
+import { setVisitorCredential, clearVisitorCredential } from '/@/utils/cse/cseAuthContext';
+import { clearDekCache } from '/@/utils/cse/cseDecrypt';
+import { vCseHtml } from '../utils/cseHtmlImg';
 import { getBrandSetting, DEFAULT_BRAND } from '/@/settings/brandSetting';
 
 const globSetting = useGlobSetting();
@@ -733,6 +741,9 @@ const dynamicCssVars = computed(() => ({
 
 function resolveFileUrl(url: string) {
   if (!url) return '';
+  // cse:// 走匿名代理 /cs/brand/file/{fid}：未登录访客（嵌入端 / H5 / iframe）也能加载，
+  // 而 withImageCache 走 /sys/secure/file/{fid}/key 解密链路需要 token，访客侧会破图
+  if (isCseUrl(url)) return resolveBrandPublicUrl(url);
   if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return withImageCache(url);
   return withImageCache(getFileAccessHttpUrl(url));
 }
@@ -1460,6 +1471,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  releaseAllMedia(); // 释放所有视频 blob URL
   disconnectWebSocket();
   stopFallbackPoll();
   stopTokenValidateTimer();
@@ -1472,6 +1484,9 @@ onUnmounted(() => {
   window.removeEventListener('online', handleNetworkOnline);
   document.removeEventListener('visibilitychange', handleVisibilityChange);
   if (audioCtx) { audioCtx.close(); audioCtx = null; }
+  // Phase 3.2e：离开访客页时清空 cseAuthContext，避免下一次进入「登录态页面」时还残留访客凭证
+  clearVisitorCredential();
+  try { clearDekCache(); } catch {}
 });
 
 // 初始化用户ID
@@ -1636,11 +1651,24 @@ function canProceedWithToken() {
   return true;
 }
 
+// Phase 3.2e：兜底监听 —— sessionToken/visitorToken 任一变化都同步到 cseAuthContext，
+// 避免 loadSessionToken / 直接赋值等绕过 saveSessionToken 的路径漏同步。
+watch([sessionToken, rawVisitorToken], ([sess, raw]) => {
+  if (sess) {
+    setVisitorCredential(sess, raw || undefined);
+  } else {
+    clearVisitorCredential();
+  }
+}, { immediate: true });
+
 function blockForInvalidToken(messageText?: string) {
   fatalError.value = true;
   fatalErrorMessage.value = messageText || 'token无效或已过期，请回到第三方应用重新打开';
   disconnectWebSocket();
   stopFallbackPoll();
+  // Phase 3.2e：失效时一并清空访客凭证与 DEK 缓存，避免后续 CSE 解密读取过期 token 报 AuthError
+  clearVisitorCredential();
+  try { clearDekCache(); } catch {}
 }
 
 function saveSessionToken(token: string, expireAt: number) {
@@ -1651,6 +1679,14 @@ function saveSessionToken(token: string, expireAt: number) {
     localStorage.setItem(lastSessionTokenKey, JSON.stringify({ token, expireAt, userId: userId.value || '' }));
   } catch {
     // ignore
+  }
+  // Phase 3.2e：每次 session token 刷新都同步到 cseAuthContext，并清掉旧 DEK 缓存
+  if (token) {
+    setVisitorCredential(token, rawVisitorToken.value || undefined);
+    try { clearDekCache(); } catch {}
+  } else {
+    clearVisitorCredential();
+    try { clearDekCache(); } catch {}
   }
 }
 
@@ -2846,6 +2882,8 @@ async function restartConversation() {
     messages.value = [];
     conversationClosed.value = false;
     conversationId.value = '';
+    // 释放上一会话产生的视频 blob URL，避免新会话期间内存堆积
+    releaseAllMedia();
     // 创建新会话
     await initConversation();
 
@@ -3113,7 +3151,38 @@ function getMediaGridData(msg: any) {
 }
 
 function getAttachmentUrl(attachment: any) {
-  return getFileAccessHttpUrl(attachment?.url);
+  const url = attachment?.url;
+  if (!url) return '';
+  const type = String(attachment?.type || '').toLowerCase();
+  const resolved = getFileAccessHttpUrl(url);
+  // 图片走 withImageCache（同步占位 + reactive 触发刷新）
+  if (type === 'image') {
+    return withImageCache(resolved);
+  }
+  // 视频走 withMediaCache（独立通道：cse:// 解密为 blob URL，模板需 v-if 保护）
+  if (type === 'video') {
+    if (isCseUrl(resolved)) {
+      const mime = String(attachment?.mime || attachment?.contentType || 'video/mp4');
+      return withMediaCache(resolved, mime);
+    }
+    return resolved;
+  }
+  // 【S-P0-8】未知/file/audio 等类型：cse:// 不能直接交给 <img>/<video>/window.open，兜底返回 ''；
+  // 业务侧用 v-if + 下载入口（downloadCse）处理。
+  if (isCseUrl(resolved)) return '';
+  return resolved;
+}
+
+/**
+ * 输入区附件缩略图：优先用本地 blob 预览（previewUrl，上传期间立即可见），
+ * 若 previewUrl 已被释放则回退到 att.url（后端返回的 cse:// 或 http(s) URL），
+ * 并通过 withImageCache 解密 / 缓存。
+ */
+function resolveAttachmentThumb(att: any): string {
+  if (!att) return '';
+  if (att.previewUrl) return att.previewUrl;
+  if (!att.url) return '';
+  return withImageCache(getFileAccessHttpUrl(att.url));
 }
 
 function openFilePreview(item: any) {
@@ -3199,11 +3268,17 @@ function renderStreamingText(content: string) {
     .replace(/\n/g, '<br>');
 }
 
+// 默认 ALLOWED_URI_REGEXP 拒绝 cse:// → 富文本里的加密图 src 会被剥离；
+// 这里在白名单中加入 cse:，由 v-cse-html 指令负责异步解密为 blob: URL
+const CSE_ALLOWED_URI_REGEXP =
+  /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|cse):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
+
 function sanitizeHtml(html: string): string {
   return DOMPurify.sanitize(html, {
     ADD_TAGS: ['iframe'],
     ADD_ATTR: ['target', 'allowfullscreen', 'frameborder'],
     ALLOW_DATA_ATTR: false,
+    ALLOWED_URI_REGEXP: CSE_ALLOWED_URI_REGEXP,
   });
 }
 

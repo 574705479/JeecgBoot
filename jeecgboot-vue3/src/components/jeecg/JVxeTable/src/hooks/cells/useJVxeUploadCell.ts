@@ -2,6 +2,8 @@ import { ref, computed, watch } from 'vue';
 
 import {getTenantId, getToken} from '/@/utils/auth';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
+import { isCseUrl } from '/@/utils/cse/cseUrl';
+import { downloadCse } from '/@/utils/cse/downloadCse';
 import { JVxeComponent } from '../../types/JVxeComponent';
 import { useJVxeComponent } from '../useJVxeComponent';
 
@@ -90,15 +92,19 @@ export function useJVxeUploadCell(props: JVxeComponent.Props, options?) {
   }
 
   function handleClickDownloadFile() {
-    let { url, path } = innerFile.value || {};
+    let { url, path, name } = innerFile.value || {};
     if (!url || url.length === 0) {
       if (path && path.length > 0) {
         url = getFileAccessHttpUrl(path.split(',')[0]);
       }
     }
-    if (url) {
-      window.open(url);
+    if (!url) return;
+    // cse:// 不可被浏览器直接打开，走解密下载
+    if (isCseUrl(url)) {
+      downloadCse(url, name).catch(() => {});
+      return;
     }
+    window.open(url);
   }
 
   function handleClickDeleteFile() {

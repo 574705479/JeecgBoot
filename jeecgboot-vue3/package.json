@@ -37,6 +37,8 @@
     "@logicflow/core": "^2.0.10",
     "@logicflow/extension": "^2.0.14",
     "@logicflow/vue-node-registry": "^1.0.12",
+    "@noble/ciphers": "^2.2.0",
+    "@noble/hashes": "^2.2.0",
     "@tinymce/tinymce-vue": "4.0.7",
     "@traptitech/markdown-it-katex": "^3.6.0",
     "@vant/area-data": "^1.5.2",

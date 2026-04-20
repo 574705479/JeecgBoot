@@ -564,7 +564,7 @@
                   <span class="sender-name">{{ getVisitorDisplayName(msg) }}</span>
                 </div>
                 <div class="msg-bubble user-bubble">
-                  <div v-if="msg.content" class="msg-text" v-html="renderMessage(msg.content)"></div>
+                  <div v-if="msg.content" class="msg-text" v-html="renderMessage(msg.content)" v-cse-html></div>
                   <div
                     v-if="getMediaGridData(msg).items.length"
                     class="msg-media-grid"
@@ -576,7 +576,7 @@
                       :key="`${item.url}_${index}`"
                     >
                       <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview(msg, item)" />
-                      <video v-else :src="getAttachmentUrl(item)" controls playsinline />
+                      <video v-else-if="getAttachmentUrl(item)" :src="getAttachmentUrl(item)" controls playsinline />
                       <div
                         v-if="index === getMediaGridData(msg).items.length - 1 && getMediaGridData(msg).extraCount > 0"
                         class="media-more"
@@ -626,7 +626,7 @@
                   </a-avatar>
                 </div>
                 <div class="msg-bubble agent-bubble" :class="{ 'ai-bubble': isAiMessage(msg), 'assistant-bubble': isSmartAssistant(msg) }">
-                  <div v-if="msg.content" class="msg-text" v-html="msg.isStreaming ? renderStreamingText(msg.content) : renderMessage(msg.content)"></div>
+                  <div v-if="msg.content" class="msg-text" v-html="msg.isStreaming ? renderStreamingText(msg.content) : renderMessage(msg.content)" v-cse-html></div>
                   <div
                     v-if="getMediaGridData(msg).items.length"
                     class="msg-media-grid"
@@ -638,7 +638,7 @@
                       :key="`${item.url}_${index}`"
                     >
                       <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview(msg, item)" />
-                      <video v-else :src="getAttachmentUrl(item)" controls playsinline />
+                      <video v-else-if="getAttachmentUrl(item)" :src="getAttachmentUrl(item)" controls playsinline />
                       <div
                         v-if="index === getMediaGridData(msg).items.length - 1 && getMediaGridData(msg).extraCount > 0"
                         class="media-more"
@@ -683,7 +683,7 @@
             <RobotOutlined /> 回复建议
             <a-tag v-if="aiSuggestionLoading" color="processing" size="small">生成中...</a-tag>
           </div>
-          <div class="suggestion-text" v-html="renderMarkdown(aiSuggestion)"></div>
+          <div class="suggestion-text" v-html="renderMarkdown(aiSuggestion)" v-cse-html></div>
           <div class="suggestion-btns">
             <a-button type="primary" size="small" @click="useSuggestion(true)" :disabled="aiSuggestionLoading">直接发送</a-button>
             <a-button size="small" @click="useSuggestion(false)" :disabled="aiSuggestionLoading">填入编辑</a-button>
@@ -756,9 +756,9 @@
                 </a-popover>
                 <a-popover v-else-if="item.msgType === 5" placement="topLeft" trigger="hover" :overlayStyle="{ maxWidth: '450px' }">
                   <template #content>
-                    <div class="quick-reply-preview-richtext" v-html="sanitizeHtml(item.content || '')"></div>
+                    <div class="quick-reply-preview-richtext" v-html="sanitizeHtml(item.content || '')" v-cse-html></div>
                   </template>
-                  <div class="quick-reply-content quick-reply-richtext" v-html="sanitizeHtml(item.content || '')"></div>
+                  <div class="quick-reply-content quick-reply-richtext" v-html="sanitizeHtml(item.content || '')" v-cse-html></div>
                 </a-popover>
                 <div class="quick-reply-content" v-else-if="item.msgType === 2">
                   <PaperClipOutlined style="margin-right: 4px" />{{ item.content?.split('/').pop() || '文件' }}
@@ -776,7 +776,7 @@
             :key="`${item.url}_${index}`"
           >
             <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreviewFromList(attachmentList, item)" />
-            <video v-else-if="item.type === 'video'" :src="getAttachmentUrl(item)" @click="openVideoPreview(item)" />
+            <video v-else-if="item.type === 'video' && getAttachmentUrl(item)" :src="getAttachmentUrl(item)" @click="openVideoPreview(item)" />
             <div v-else class="attachment-file">
               <span class="file-name" @click="openFilePreview(item)">{{ item.name }}</span>
             </div>
@@ -819,7 +819,7 @@
             :key="`${item.url}_${index}`"
           >
             <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreviewFromList(mediaViewerList, item)" />
-            <video v-else :src="getAttachmentUrl(item)" controls @click="openVideoPreview(item)" />
+            <video v-else-if="getAttachmentUrl(item)" :src="getAttachmentUrl(item)" controls @click="openVideoPreview(item)" />
           </div>
         </div>
       </a-modal>
@@ -1149,7 +1149,7 @@ import { useGlobSetting } from '/@/hooks/setting';
 import { ElectronEnum } from '/@/enums/jeecgEnum';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
 import { getBrandSetting } from '/@/settings/brandSetting';
-import { resolveBrandUrl } from '/@/utils/brand';
+import { resolveBrandPublicUrl } from '/@/utils/brand';
 import { createImgPreview } from '/@/components/Preview';
 import { getToken } from '/@/utils/auth';
 import EmojiPicker from '../components/EmojiPicker.vue';
@@ -1157,6 +1157,9 @@ import { computeFileMd5 } from '../utils/fileHash';
 import { encryptTransport, decryptTransport, decryptMessage } from '../utils/csEncrypt';
 import { playCsNotificationSound, CS_NOTIFY_MAX_GAIN } from '../utils/csNotificationSound';
 import { withImageCache, preloadImages, onImageError, getCachedChatWindowConfig, setCachedChatWindowConfig } from '../utils/csImageCache';
+import { withMediaCache, releaseAllMedia, warmupAvatars } from '/@/utils/file/imageCache';
+import { isCseUrl } from '/@/utils/cse/cseUrl';
+import { vCseHtml } from '../utils/cseHtmlImg';
 // ★ 为回复建议保留Markdown渲染能力
 import MarkdownIt from 'markdown-it';
 import DOMPurify from 'dompurify';
@@ -1975,7 +1978,29 @@ onMounted(async () => {
   window.addEventListener('app-logout', handleAppLogout);
 });
 
+// 【S-P0-9】会话切换时按"上一会话"释放视频 blob：
+//  - withMediaCache 没有显式 releaseMedia(url)，全量 releaseAllMedia 会让其他正在渲染的会话视频破图，
+//    所以仅在用户主动切到"另一个会话"时调用，且只清未在视图的旧 url；
+//  - 没有 oldId 跟踪到具体 url 列表的能力时，当前实现选择「切会话即整体释放」（业务上同一时间只看一个会话，安全）。
+watch(
+  () => currentConversation.value?.id,
+  (newId, oldId) => {
+    if (oldId && newId !== oldId) {
+      releaseAllMedia();
+    }
+  },
+);
+
+// 【S-P0-9】keep-alive 长时间未激活（>5 分钟）时全量释放 media：
+//  - 避免后台 Tab 长期占着大量解密视频 blob 内存；
+//  - onActivated 时清除该 timer。
+const MEDIA_RELEASE_DEACTIVATE_MS = 5 * 60 * 1000;
+let mediaReleaseTimer: ReturnType<typeof setTimeout> | null = null;
+
 onUnmounted(() => {
+  // 释放所有视频 blob URL，避免内存泄漏（图片走 LRU 不需此处）
+  releaseAllMedia();
+  if (mediaReleaseTimer) { clearTimeout(mediaReleaseTimer); mediaReleaseTimer = null; }
   if (!keepConnectionOnDeactivate) {
     closeWebSocket();
     stopFallbackPoll();
@@ -2008,6 +2033,8 @@ onUnmounted(() => {
 });
 
 onActivated(async () => {
+  // 【S-P0-9】激活时取消"长时间未激活全清 media"的延迟任务
+  if (mediaReleaseTimer) { clearTimeout(mediaReleaseTimer); mediaReleaseTimer = null; }
   if (keepConnectionOnDeactivate) {
     restoreMessageScroll();
     if (isActivating.value) return;
@@ -2049,6 +2076,13 @@ onActivated(async () => {
 });
 
 onDeactivated(() => {
+  // 【S-P0-9】超过 5 分钟未激活则全量释放 media（避免长期占内存）
+  if (mediaReleaseTimer) clearTimeout(mediaReleaseTimer);
+  mediaReleaseTimer = setTimeout(() => {
+    releaseAllMedia();
+    mediaReleaseTimer = null;
+  }, MEDIA_RELEASE_DEACTIVATE_MS);
+
   if (keepConnectionOnDeactivate) {
     saveMessageScroll();
     return;
@@ -2066,6 +2100,21 @@ watch(filter, () => {
   }
   loadConversations();
 });
+
+// Phase 4.2 (M4)：会话列表变化时按 5 分钟去重批量预热访客头像，
+// 让 Electron 长会话场景在切换 filter / 收到新会话时也能立刻命中 IDB 缓存。
+watch(conversations, (list) => {
+  if (!list || !list.length) return;
+  try {
+    const urls = list
+      .map((c: any) => c?.userAvatar || c?.visitorAvatar || c?.avatar)
+      .filter((u: any) => !!u)
+      .map((u: string) => getFileAccessHttpUrl(u));
+    if (urls.length) warmupAvatars(urls);
+  } catch {
+    // 预热失败不阻塞业务
+  }
+}, { flush: 'post' });
 watch(messagesRef, (el, prev) => {
   if (prev) {
     prev.removeEventListener('scroll', handleMessageScroll);
@@ -2280,7 +2329,27 @@ function removeAttachment(index: number) {
 }
 
 function getAttachmentUrl(attachment: any) {
-  return getFileAccessHttpUrl(attachment?.url);
+  const url = attachment?.url;
+  if (!url) return '';
+  const type = String(attachment?.type || '').toLowerCase();
+  const resolved = getFileAccessHttpUrl(url);
+  // 图片走 withImageCache（同步占位 + reactive 触发刷新）
+  if (type === 'image') {
+    return withImageCache(resolved);
+  }
+  // 视频走 withMediaCache（独立通道：不入 LRU/IDB，引用计数管理；模板必须 v-if 套条件渲染）
+  if (type === 'video') {
+    if (isCseUrl(resolved)) {
+      const mime = String(attachment?.mime || attachment?.contentType || 'video/mp4');
+      return withMediaCache(resolved, mime);
+    }
+    return resolved;
+  }
+  // 【S-P0-8】未知/file/audio 等类型：cse:// 不能直接交给 <img>/<video>/window.open，兜底返回 ''；
+  // 业务侧用 v-if + 下载入口（downloadCse）处理。
+  // 后端正在通过 Flyway 回填 + NOT NULL 收紧 type 字段；前端兜底是双保险。
+  if (isCseUrl(resolved)) return '';
+  return resolved;
 }
 
 function isSmartAssistant(msg: any): boolean {
@@ -2303,7 +2372,8 @@ function getMessageAvatarUrl(msg: any) {
     }
     const brandLogo = getBrandSetting().logoUrl;
     if (brandLogo) {
-      return withImageCache(resolveBrandUrl(brandLogo));
+      // 品牌 logo 走匿名代理端点（无需 token），与登录页保持一致
+      return resolveBrandPublicUrl(brandLogo);
     }
   }
   if (Number(msg?.senderType) !== 0) {
@@ -5051,11 +5121,17 @@ function renderStreamingText(content: string) {
     .replace(/\n/g, '<br>');
 }
 
+// 默认 ALLOWED_URI_REGEXP 拒绝 cse:// → 富文本里的加密图 src 会被剥离；
+// 这里在白名单中加入 cse:，由 v-cse-html 指令负责异步解密为 blob: URL
+const CSE_ALLOWED_URI_REGEXP =
+  /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|cse):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
+
 function sanitizeHtml(html: string): string {
   return DOMPurify.sanitize(html, {
     ADD_TAGS: ['iframe'],
     ADD_ATTR: ['target', 'allowfullscreen', 'frameborder'],
     ALLOW_DATA_ATTR: false,
+    ALLOWED_URI_REGEXP: CSE_ALLOWED_URI_REGEXP,
   });
 }
 

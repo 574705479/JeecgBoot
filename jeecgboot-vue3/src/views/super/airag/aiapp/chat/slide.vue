@@ -86,6 +86,13 @@
   import { useRouter } from 'vue-router';
   import { defHttp } from '@/utils/http/axios';
   import { getFileAccessHttpUrl } from '@/utils/common/compUtils';
+  import { withImageCache } from '/@/utils/file/imageCache';
+  import { isCseUrl } from '/@/utils/cse/cseUrl';
+  function wrapCse(u: string): string {
+    if (!u) return u;
+    if (isCseUrl(u) || u.startsWith('http') || u.startsWith('/')) return withImageCache(u);
+    return u;
+  }
   import defaultImg from '../img/ailogo.png';
   const props = defineProps(['dataSource', 'appData','source']);
   const emit = defineEmits(['save', 'click', 'reloadRight', 'prologue']);
@@ -173,7 +180,7 @@
    * 获取图片
    */
   function getImage() {
-    return props.appData.icon ? getFileAccessHttpUrl(props.appData.icon) : defaultImg;
+    return props.appData.icon ? wrapCse(getFileAccessHttpUrl(props.appData.icon)) : defaultImg;
   }
 
   watch(

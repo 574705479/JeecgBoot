@@ -33,6 +33,10 @@ export function checkStatus(status: number, msg: string, errorMessageMode: Error
           createMessage.warning(msg);
         }
         userStore.setToken(undefined);
+        // CSE: 401 后立即统一清空所有 cse 缓存，避免上一个会话残留
+        try {
+          import('/@/utils/cse/clearAllCseCache').then((m) => m.clearAllCseCache());
+        } catch {}
         if (stp === SessionTimeoutProcessingEnum.PAGE_COVERAGE) {
           userStore.setSessionTimeout(true);
         } else {

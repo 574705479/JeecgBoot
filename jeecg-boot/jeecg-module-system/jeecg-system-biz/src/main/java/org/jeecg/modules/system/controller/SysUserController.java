@@ -109,6 +109,14 @@ public class SysUserController {
     private JeecgRedisClient jeecgRedisClient;
     @Autowired
     private JeecgBaseConfig jeecgBaseConfig;
+    @Autowired
+    private org.jeecg.modules.system.security.cse.service.OssFileAvatarGuard avatarGuard;
+    @Autowired
+    private org.jeecg.modules.system.security.cse.service.OssFileMetaService ossFileMetaService;
+    @Autowired
+    private org.jeecg.modules.system.security.cse.config.CseProperties cseProperties;
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
     
     /**
      * 获取租户下用户数据（支持租户隔离）
@@ -163,6 +171,8 @@ public class SysUserController {
 		String selectedDeparts = jsonObject.getString("selecteddeparts");
 		try {
 			SysUser user = JSON.parseObject(jsonObject.toJSONString(), SysUser.class);
+			// CSE Phase2 Guard: 拒绝非 avatar/ 业务前缀的 cse:// fid 写入头像字段（防 B2 越权升公开）
+			avatarGuard.validateAvatar(user.getAvatar());
 			user.setCreateTime(new Date());//设置创建时间
 			String salt = oConvertUtils.randomGen(8);
 			user.setSalt(salt);
@@ -197,6 +207,8 @@ public class SysUserController {
 				result.error500("未找到对应实体");
 			}else {
 				SysUser user = JSON.parseObject(jsonObject.toJSONString(), SysUser.class);
+				// CSE Phase2 Guard: 拒绝非 avatar/ 业务前缀的 cse:// fid 写入头像字段
+				avatarGuard.validateAvatar(user.getAvatar());
 				user.setUpdateTime(new Date());
 				//String passwordEncode = PasswordUtil.encrypt(user.getUsername(), user.getPassword(), sysUser.getSalt());
 				user.setPassword(sysUser.getPassword());
@@ -682,6 +694,110 @@ public class SysUserController {
         baseCommonService.addLog("修改密码，username： " +loginUser.getUsername() ,CommonConstant.LOG_TYPE_2, 2);
 		return sysUserService.resetPassword(username,oldpassword,password,confirmpassword);
 	}
+
+    /**
+     * 用户自助迁移历史 fid 到 avatar 业务（CSE Phase2 T4）。
+     *
+     * 适用场景：用户在 Phase 2 Guard 上线前已经上传过 cse:// 头像，但当时 biz_path 不是
+     * "avatar/"（例如 "temp/" / "leave-msg/"），新版 Guard 会拒绝写入。
+     *
+     * 安全设计（B2 反越权）：
+     * 1) 只允许 oss_file.create_by == 当前登录 username 的 fid 走迁移；
+     * 2) 反查业务表（cse.migrate-avatar.scan-tables 配置）若 fid 已被消息/附件等业务字段引用，
+     *    一律拒绝迁移，避免把别人的私密附件升格为公开头像；
+     * 3) 仅做 WARN 审计的天数阈值（warn-after-days），不阻塞，方便用户长期沿用旧 fid；
+     * 4) 通过校验后 UPDATE oss_file SET biz_path='avatar/cs-agent', public_flag=1。
+     */
+    @RequestMapping(value = "/migrateAvatar", method = RequestMethod.POST)
+    public Result<String> migrateAvatar(@RequestBody JSONObject body) {
+        String fid = body == null ? null : body.getString("fid");
+        if (fid == null || fid.trim().isEmpty()) {
+            return Result.error("fid 不能为空");
+        }
+        // 兼容前端传整段 cse://xxx
+        int idx = fid.indexOf("cse://");
+        if (idx >= 0) {
+            String tail = fid.substring(idx + "cse://".length());
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < tail.length(); i++) {
+                char c = tail.charAt(i);
+                if (Character.isLetterOrDigit(c) || c == '-' || c == '_') sb.append(c); else break;
+            }
+            fid = sb.toString();
+        }
+        if (fid.isEmpty()) {
+            return Result.error("fid 解析失败");
+        }
+        LoginUser loginUser = (LoginUser) SecurityUtils.getSubject().getPrincipal();
+        if (loginUser == null) {
+            return Result.error("未登录");
+        }
+        org.jeecg.modules.oss.entity.OssFile file = ossFileMetaService.getByFileId(fid);
+        if (file == null) {
+            return Result.error("文件不存在");
+        }
+        // 1) 归属校验：只能迁移自己上传的 fid
+        if (!loginUser.getUsername().equals(file.getCreateBy())) {
+            log.warn("[migrateAvatar] 拒绝跨用户迁移：fid={} owner={} requester={}",
+                    fid, file.getCreateBy(), loginUser.getUsername());
+            return Result.error("仅可迁移自己上传的文件");
+        }
+        // 2) 业务表反查：若 fid 已被消息/附件引用，禁止升格为公开头像
+        java.util.List<String> scanTables = cseProperties.getMigrateAvatar() == null
+                ? java.util.Collections.emptyList()
+                : cseProperties.getMigrateAvatar().getScanTables();
+        if (scanTables != null) {
+            for (String tc : scanTables) {
+                if (tc == null || !tc.contains(".")) continue;
+                String[] arr = tc.split("\\.", 2);
+                String table = arr[0];
+                String column = arr[1];
+                if (!isSafeIdent(table) || !isSafeIdent(column)) continue;
+                try {
+                    Integer cnt = jdbcTemplate.queryForObject(
+                            "SELECT COUNT(1) FROM " + table + " WHERE " + column + " LIKE ?",
+                            Integer.class, "%" + fid + "%");
+                    if (cnt != null && cnt > 0) {
+                        log.warn("[migrateAvatar] 拒绝迁移：fid={} 已被业务表 {}.{} 引用 cnt={}",
+                                fid, table, column, cnt);
+                        return Result.error("该文件已用于消息/附件，禁止改为公开头像");
+                    }
+                } catch (Exception e) {
+                    // 表不存在或字段名错误时仅记日志，不阻塞用户操作
+                    log.warn("[migrateAvatar] 反查表 {}.{} 异常：{}", table, column, e.getMessage());
+                }
+            }
+        }
+        // 3) 天数阈值：仅 WARN，不阻塞
+        int warnDays = cseProperties.getMigrateAvatar() == null ? 30
+                : cseProperties.getMigrateAvatar().getWarnAfterDays();
+        if (warnDays > 0 && file.getCreateTime() != null) {
+            long ageDays = (System.currentTimeMillis() - file.getCreateTime().getTime())
+                    / (1000L * 60 * 60 * 24);
+            if (ageDays > warnDays) {
+                log.warn("[migrateAvatar] 提示：fid={} 距上传已 {} 天 (>{}d)，按合规策略请关注", fid, ageDays, warnDays);
+            }
+        }
+        // 4) 升格为头像并打开 public_flag（与 SecureFileController 头像策略对齐）
+        int updated = jdbcTemplate.update(
+                "UPDATE oss_file SET biz_path='avatar/cs-agent', public_flag=1 WHERE file_id=?", fid);
+        if (updated <= 0) {
+            return Result.error("迁移失败");
+        }
+        baseCommonService.addLog("迁移头像 fid=" + fid + " by=" + loginUser.getUsername(),
+                CommonConstant.LOG_TYPE_2, 2);
+        return Result.OK("迁移成功");
+    }
+
+    /** SQL 标识符白名单：仅允许字母/数字/下划线，杜绝注入 */
+    private boolean isSafeIdent(String s) {
+        if (s == null || s.isEmpty()) return false;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (!(Character.isLetterOrDigit(c) || c == '_')) return false;
+        }
+        return true;
+    }
 
     @RequestMapping(value = "/userRoleList", method = RequestMethod.GET)
     public Result<IPage<SysUser>> userRoleList(@RequestParam(name="pageNo", defaultValue="1") Integer pageNo,
@@ -1463,6 +1579,8 @@ public class SysUserController {
                     sysUser.setRealname(realname);
                 }
                 if(StringUtils.isNotBlank(avatar)){
+                    // CSE Phase2 Guard: 拒绝非 avatar/ 业务前缀的 cse:// fid 写入头像字段
+                    avatarGuard.validateAvatar(avatar);
                     sysUser.setAvatar(avatar);
                 }
                 if(StringUtils.isNotBlank(sex)){
@@ -1811,6 +1929,8 @@ public class SysUserController {
         if(!username.equals(user.getUsername())){
             return Result.error("只能修改自己的数据");
         }
+        // CSE Phase2 Guard: 拒绝非 avatar/ 业务前缀的 cse:// fid 写入头像字段
+        avatarGuard.validateAvatar(sysUser.getAvatar());
         sysUserService.updateById(sysUser);
         return Result.ok("更新个人信息成功");
     }

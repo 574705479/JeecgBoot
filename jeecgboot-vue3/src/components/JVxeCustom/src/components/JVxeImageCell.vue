@@ -39,7 +39,7 @@
   </div>
 </template>
 <script lang="ts">
-  import { computed, defineComponent ,unref } from 'vue';
+  import { computed, defineComponent, unref } from 'vue';
   import { useMessage } from '/@/hooks/web/useMessage';
   import { JVxeComponent } from '/@/components/jeecg/JVxeTable/types';
   import { useJVxeCompProps } from '/@/components/jeecg/JVxeTable/hooks';
@@ -47,6 +47,7 @@
   import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
   import { components, enhanced, useFileCell } from '../hooks/useFileCell';
   import { createImgPreview } from '/@/components/Preview/index';
+  import { withImageCache } from '/@/utils/file/imageCache';
 
   export default defineComponent({
     name: 'JVxeImageCell',
@@ -64,16 +65,21 @@
       });
       const { innerFile, maxCount } = setup;
 
+      // 【S-P0-5】cse:// 必须走 withImageCache 同步占位，禁止把 cse:// 直接喂给 <img src>。
+      // withImageCache 命中返回 blob URL，未命中返回 1x1 透明 PNG 占位，
+      // 同时触发后台解密；解密完成写入 cseReactiveMap 自动重渲染。
+      // 普通 http(s) URL 也透传 withImageCache 享受两级缓存。
       const imgList = computed(() => {
+        let raw: string[] = [];
         if (innerFile.value) {
           if (innerFile.value['url']) {
-            return [innerFile.value['url']];
+            raw = [innerFile.value['url']];
           } else if (innerFile.value['path']) {
             let paths = innerFile.value['path'].split(',');
-            return paths.map((p) => getFileAccessHttpUrl(p));
+            raw = paths.map((p) => getFileAccessHttpUrl(p));
           }
         }
-        return [];
+        return raw.map((u) => withImageCache(u));
       });
 
       // 弹出上传出错详细信息

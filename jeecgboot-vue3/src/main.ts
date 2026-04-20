@@ -24,7 +24,13 @@ import { autoUseQiankunMicro } from "/@/qiankun/micro/qiankunMicro";
 import { useAppStoreWithOut } from "@/store/modules/app";
 import { useUserStoreWithOut } from '/@/store/modules/user';
 import { loadBrandConfig } from '/@/utils/brand';
-import { initImageCache, cleanupImageCache } from '/@/views/super/airag/cs/utils/csImageCache';
+// Phase 4.3 (T1)：客服模块的 initImageCache 历史上是 utils/file/imageCache 的转发壳，
+// 与下行的 initCseImageCache 在 main.ts 看起来像被「双重调用」。
+// 现已重命名为 initCsAvatarCache（语义化客服头像缓存初始化），二者逻辑等价。
+// 这里只调用一次全局 initCseImageCache 即可，cleanupImageCache 仍保留 no-op 兼容性导入。
+import { cleanupImageCache } from '/@/views/super/airag/cs/utils/csImageCache';
+import { initImageCache as initCseImageCache, clearImageCache as clearCseImageCache } from '/@/utils/file/imageCache';
+import { cseSelfTest } from '/@/utils/cse/cseDecrypt';
 import { useGlobSetting } from '/@/hooks/setting';
 import { ElectronEnum } from '/@/enums/jeecgEnum';
 import { defHttp } from '/@/utils/http/axios';
@@ -62,8 +68,18 @@ async function bootstrap(props?: MainAppProps) {
   setupStore(app);
 
   // 读取品牌配置 + 初始化图片缓存（并行，互不阻塞）
-  await Promise.all([loadBrandConfig(), initImageCache()]);
-  window.addEventListener('beforeunload', cleanupImageCache);
+  // Phase 4.3 (T1)：只需调用一次全站 IDB 头像缓存初始化（含客服模块）
+  await Promise.all([loadBrandConfig(), initCseImageCache()]);
+  window.addEventListener('beforeunload', () => {
+    cleanupImageCache();
+    clearCseImageCache();
+  });
+  // CSE 启动自检：异步触发，结果在 app.mount 后通过 toast 反馈（见下方 mount 流程）
+  // 这里仅启动 Promise，避免阻塞启动；console 兜底保留方便排查
+  const cseSelfTestPromise = cseSelfTest().then((ok) => {
+    if (!ok) console.warn('[CSE] SubtleCrypto + noble fallback 自检失败，加密图片可能无法解密');
+    return ok;
+  });
 
   // 配置参数
   setupProps(props);
@@ -129,6 +145,21 @@ async function bootstrap(props?: MainAppProps) {
 
   // 挂载应用
   app.mount(getMountContainer(props), true);
+
+  // Phase 4.4 (m1)：cseSelfTest 失败时友好 toast 提醒。
+  // 必须等到 app.mount + nextTick 之后，message 组件才能正常渲染；
+  // 失败也只是降级（noble fallback），不强制阻塞用户。
+  cseSelfTestPromise.then(async (ok) => {
+    if (ok) return;
+    try {
+      const { nextTick } = await import('vue');
+      await nextTick();
+      const { message } = await import('ant-design-vue');
+      message.warning('图片加密自检失败，部分加密图片可能无法显示，请尝试更换浏览器或刷新页面');
+    } catch (e) {
+      console.warn('[CSE] selftest toast 渲染失败:', e);
+    }
+  });
 
   // Electron: app 完全就绪后同步托盘昵称 + 刷新缓存
   if (glob.isElectronPlatform && glob.apiUrl) {

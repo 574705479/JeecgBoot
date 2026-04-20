@@ -1,6 +1,7 @@
 import { h } from 'vue';
 import { Avatar, Tag, Tooltip, Image } from 'ant-design-vue';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
+import { withImageCache } from '/@/utils/file/imageCache';
 import { Tinymce } from '/@/components/Tinymce';
 import Icon from '/@/components/Icon';
 import { getDictItemsByCode } from '/@/utils/dict/index';
@@ -20,7 +21,7 @@ const render = {
         'span',
         avatarList.map((item) => {
           return h(Avatar, {
-            src: getFileAccessHttpUrl(item),
+            src: withImageCache(getFileAccessHttpUrl(item)),
             shape: 'square',
             size: 'default',
             style: { marginRight: '5px' },
@@ -76,7 +77,8 @@ const render = {
       'span',
       avatarList.map((item) => {
         return h(Image, {
-          src: getFileAccessHttpUrl(item),
+          // CSE: cse:// 图片需经 withImageCache 解密成 blob URL
+          src: withImageCache(getFileAccessHttpUrl(item)),
           width: 30,
           height: 30,
           style: { marginRight: '5px' },

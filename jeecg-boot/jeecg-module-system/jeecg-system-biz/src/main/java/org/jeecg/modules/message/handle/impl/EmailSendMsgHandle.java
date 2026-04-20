@@ -16,6 +16,7 @@ import org.jeecg.modules.message.handle.ISendMsgHandle;
 import org.jeecg.modules.message.mapper.SysMessageMapper;
 import org.jeecg.modules.system.entity.SysUser;
 import org.jeecg.modules.system.mapper.SysUserMapper;
+import org.jeecg.modules.system.security.cse.service.CseEmailContentProcessor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
@@ -54,6 +55,10 @@ public class EmailSendMsgHandle implements ISendMsgHandle {
     @Autowired
     private SysMessageMapper sysMessageMapper;
 
+    /** CSE: 邮件 HTML 中 cse:// 图片的预处理器（Spring 自动注入；为 null 时跳过处理） */
+    @Autowired(required = false)
+    private CseEmailContentProcessor cseEmailContentProcessor;
+
     /**
      * 真实姓名变量
      */
@@ -81,7 +86,13 @@ public class EmailSendMsgHandle implements ISendMsgHandle {
                 helper.setFrom(emailFrom);
                 helper.setTo(esReceiver);
                 helper.setSubject(esTitle);
-                helper.setText(esContent, true);
+                // CSE: HTML 中 cse:// 图片转换为 cid 内嵌附件（multipart/related）
+                String body = esContent;
+                if (cseEmailContentProcessor != null) {
+                    try { body = cseEmailContentProcessor.process(esContent, helper); }
+                    catch (Exception ex) { log.warn("CSE 邮件内容预处理异常，使用原文：{}", ex.getMessage()); }
+                }
+                helper.setText(body, true);
                 mailSender.send(message);
                 log.info("============> 邮件发送成功，接收人："+esReceiver);
             } catch (MessagingException e) {
@@ -199,7 +210,13 @@ public class EmailSendMsgHandle implements ISendMsgHandle {
                 //设置抄送人
                 helper.setCc(email);
                 helper.setSubject(title);
-                helper.setText(content, true);
+                // CSE: HTML 中 cse:// 图片转换为 cid 内嵌附件
+                String body = content;
+                if (cseEmailContentProcessor != null) {
+                    try { body = cseEmailContentProcessor.process(content, helper); }
+                    catch (Exception ex) { log.warn("CSE 邮件内容预处理异常，使用原文：{}", ex.getMessage()); }
+                }
+                helper.setText(body, true);
                 mailSender.send(message);
                 log.info("============> 邮件发送成功，接收人："+email);
             } catch (MessagingException e) {

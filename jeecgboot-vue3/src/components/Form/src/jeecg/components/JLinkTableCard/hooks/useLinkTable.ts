@@ -3,6 +3,7 @@ import { ref, watchEffect, computed, reactive } from 'vue';
 import { pick } from 'lodash-es';
 import { filterMultiDictText } from '/@/utils/dict/JDictSelectUtil';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
+import { withImageCache } from '/@/utils/file/imageCache';
 
 function queryTableData(tableName, params) {
   const url = '/online/cgform/api/getData/' + tableName;
@@ -293,7 +294,9 @@ export function useLinkTable(props) {
         // 有多张图时默认取第一张
         url = url.split(',')[0];
       }
-      return getFileAccessHttpUrl(url);
+      // CSE: cse:// 图片需经 withImageCache 解密成 blob URL
+      const u = getFileAccessHttpUrl(url);
+      return u ? withImageCache(u) : '';
     }
     return '';
   }

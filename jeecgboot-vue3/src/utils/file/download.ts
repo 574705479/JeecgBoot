@@ -8,7 +8,16 @@ import { dataURLtoBlob, urlToBase64 } from './base64Conver';
  * @param mime
  * @param bom
  */
-export function downloadByOnlineUrl(url: string, filename: string, mime?: string, bom?: BlobPart) {
+export async function downloadByOnlineUrl(url: string, filename: string, mime?: string, bom?: BlobPart) {
+  // CSE 加密文件：跳过 canvas → base64 路径，直接走专用解密下载
+  try {
+    const { isCseUrl } = await import('/@/utils/cse/cseUrl');
+    if (isCseUrl(url)) {
+      const { downloadCse } = await import('/@/utils/cse/downloadCse');
+      await downloadCse(url, filename, mime);
+      return;
+    }
+  } catch {}
   urlToBase64(url).then((base64) => {
     downloadByBase64(base64, filename, mime, bom);
   });

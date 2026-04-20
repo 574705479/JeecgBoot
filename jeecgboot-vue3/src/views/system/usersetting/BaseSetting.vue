@@ -3,7 +3,7 @@
     <div class="user-setting-top">
       <div class="account-avatar">
         <CropperAvatar
-          :uploadApi="uploadImg"
+          :uploadApi="uploadAvatarImg"
           :showBtn="false"
           :value="avatar"
           :btnProps="{ preIcon: 'ant-design:cloud-upload-outlined' }"
@@ -113,7 +113,7 @@ import { useMessage } from '/@/hooks/web/useMessage';
 import headerImg from '/@/assets/images/header.jpg';
 import { defHttp } from '/@/utils/http/axios';
 import { useUserStore } from '/@/store/modules/user';
-import { uploadImg } from '/@/api/sys/upload';
+import { uploadAvatarImg } from '/@/api/sys/upload';
 import { getFileAccessHttpUrl, getRandom } from '/@/utils/common/compUtils';
 import dayjs from 'dayjs';
 import { ajaxGetDictItems, getDictItemsByCode, initDictOptions } from '/@/utils/dict';

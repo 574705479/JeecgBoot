@@ -30,7 +30,7 @@
                           <a-checkbox v-model:checked="item.checked" />
                           <div class="right">
                             <div class="search-user-item-circle">
-                              <img v-if="item.avatar" :src="getFileAccessHttpUrl(item.avatar)" alt="avatar" />
+                              <img v-if="item.avatar" :src="avatarUrl(item.avatar)" alt="avatar" />
                             </div>
                             <div class="search-user-item-info">
                               <div class="search-user-item-name">{{ item.realname }}</div>
@@ -85,7 +85,7 @@
                       <a-checkbox v-model:checked="item.checked" />
                       <div class="right">
                         <div class="depart-users-tree-item-circle">
-                          <img v-if="item.avatar" :src="getFileAccessHttpUrl(item.avatar)" alt="avatar" />
+                          <img v-if="item.avatar" :src="avatarUrl(item.avatar)" alt="avatar" />
                         </div>
                         <div class="depart-users-tree-item-name">{{ item.realname }}</div>
                       </div>
@@ -116,7 +116,7 @@
             <div class="content">
               <div v-for="user in selectedUsers" :key="user.id" class="user-avatar" @click="handleDelUser(user)">
                 <div class="avatar-circle">
-                  <img v-if="user.avatar" :src="getFileAccessHttpUrl(user.avatar)" alt="avatar" />
+                  <img v-if="user.avatar" :src="avatarUrl(user.avatar)" alt="avatar" />
                   <div class="mask">
                     <CloseOutlined></CloseOutlined>
                   </div>
@@ -137,6 +137,14 @@
   import { BasicModal, useModalInner } from '/@/components/Modal';
   import { queryTreeList, getTableList as getTableListOrigin } from '/@/api/common/api';
   import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
+  import { withImageCache } from '/@/utils/file/imageCache';
+  import { isCseUrl } from '/@/utils/cse/cseUrl';
+  function avatarUrl(raw: string): string {
+    const u = getFileAccessHttpUrl(raw);
+    if (!u) return u;
+    if (isCseUrl(u) || u.startsWith('http') || u.startsWith('/')) return withImageCache(u);
+    return u;
+  }
   import { isArray } from '/@/utils/is';
   import { defHttp } from '/@/utils/http/axios';
 

@@ -36,7 +36,7 @@
         </a-form-item>
         <a-form-item label="头像">
           <CropperAvatar
-            :uploadApi="uploadImg"
+            :uploadApi="uploadAvatarImg"
             :value="getAvatarFullUrl(formState.avatar)"
             @change="handleAvatarChange"
             width="100"
@@ -85,7 +85,7 @@ import { BasicModal, useModal } from '/@/components/Modal';
 import { defHttp } from '/@/utils/http/axios';
 import { useMessage } from '/@/hooks/web/useMessage';
 import { CropperAvatar } from '/@/components/Cropper';
-import { uploadImg } from '/@/api/sys/upload';
+import { uploadAvatarImg } from '/@/api/sys/upload';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
 import { withImageCache } from '../utils/csImageCache';
 import { isMenuAllowed } from '/@/utils/license/featureMenuMap';

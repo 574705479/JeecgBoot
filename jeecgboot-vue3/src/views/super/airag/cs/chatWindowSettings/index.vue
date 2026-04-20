@@ -23,12 +23,12 @@
               </a-col>
               <a-col :span="12">
                 <a-form-item label="Logo">
-                  <CropperUpload v-model:value="config.logo" :uploadApi="uploadImg" btnText="上传Logo" />
+                  <CropperUpload v-model:value="config.logo" :uploadApi="uploadBrandImg" btnText="上传Logo" />
                 </a-form-item>
               </a-col>
               <a-col :span="12">
                 <a-form-item label="背景图片（聊天区域）">
-                  <CropperUpload v-model:value="config.backgroundImage" :uploadApi="uploadImg" btnText="上传背景" />
+                  <CropperUpload v-model:value="config.backgroundImage" :uploadApi="uploadBrandImg" btnText="上传背景" />
                 </a-form-item>
               </a-col>
               <a-col :span="6">
@@ -77,7 +77,7 @@
               </a-col>
               <a-col :span="12">
                 <a-form-item label="头部背景图">
-                  <CropperUpload v-model:value="config.headerBgImage" :uploadApi="uploadImg" btnText="上传背景图" />
+                  <CropperUpload v-model:value="config.headerBgImage" :uploadApi="uploadBrandImg" btnText="上传背景图" />
                   <div class="upload-hint">上传后头部将使用背景图替代纯色</div>
                 </a-form-item>
                 <a-form-item v-if="config.headerBgImage" label="背景图显示模式">
@@ -105,7 +105,7 @@
               </a-col>
               <a-col :span="12">
                 <a-form-item label="手机端头部背景图">
-                  <CropperUpload v-model:value="config.mobileHeaderBgImage" :uploadApi="uploadImg" btnText="上传手机端背景图" />
+                  <CropperUpload v-model:value="config.mobileHeaderBgImage" :uploadApi="uploadBrandImg" btnText="上传手机端背景图" />
                   <div class="upload-hint">未设置时使用通用头部背景图</div>
                 </a-form-item>
                 <a-form-item v-if="config.mobileHeaderBgImage" label="手机端背景图显示模式">
@@ -171,7 +171,7 @@
                 <div class="header-icon-row-fields">
                   <div class="header-icon-field">
                     <span class="header-icon-label">图标</span>
-                    <CropperUpload v-model:value="item.icon" :uploadApi="uploadImg" :aspectRatio="1" btnText="上传" inputWidth="140px" />
+                    <CropperUpload v-model:value="item.icon" :uploadApi="uploadBrandImg" :aspectRatio="1" btnText="上传" inputWidth="140px" />
                   </div>
                   <div class="header-icon-field">
                     <span class="header-icon-label">昵称</span>
@@ -242,7 +242,7 @@
               </a-col>
               <a-col :span="12">
                 <a-form-item label="访客头像">
-                  <CropperUpload v-model:value="config.visitorAvatar" :uploadApi="uploadImg" :aspectRatio="1" btnText="上传头像" inputWidth="160px" />
+                  <CropperUpload v-model:value="config.visitorAvatar" :uploadApi="uploadBrandImg" :aspectRatio="1" btnText="上传头像" inputWidth="160px" />
                   <div class="upload-hint">建议尺寸 80×80 px</div>
                 </a-form-item>
               </a-col>
@@ -351,7 +351,7 @@
               </a-col>
               <a-col :span="12">
                 <a-form-item label="广告图片">
-                  <CropperUpload v-model:value="config.pcAdImage" :uploadApi="uploadImg" btnText="上传广告图" inputWidth="160px" />
+                  <CropperUpload v-model:value="config.pcAdImage" :uploadApi="uploadBrandImg" btnText="上传广告图" inputWidth="160px" />
                   <div class="upload-hint">建议尺寸 {{ config.rightSidebarWidth || 200 }}×540 px</div>
                 </a-form-item>
               </a-col>
@@ -644,7 +644,7 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { defHttp } from '/@/utils/http/axios';
 import { useMessage } from '/@/hooks/web/useMessage';
-import { uploadImg } from '/@/api/sys/upload';
+import { uploadBrandImg } from '/@/api/sys/upload';
 import { DeleteOutlined, EditOutlined, LeftOutlined, PlusOutlined, QuestionCircleOutlined } from '@ant-design/icons-vue';
 import { Tinymce } from '/@/components/Tinymce/index';
 import { CropperUpload } from '/@/components/Cropper';

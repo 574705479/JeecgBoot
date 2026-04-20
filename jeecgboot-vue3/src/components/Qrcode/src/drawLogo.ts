@@ -1,6 +1,6 @@
 import { isString } from '/@/utils/is';
 import { RenderQrCodeParams, LogoType } from './typing';
-export const drawLogo = ({ canvas, logo }: RenderQrCodeParams) => {
+export const drawLogo = async ({ canvas, logo }: RenderQrCodeParams) => {
   if (!logo) {
     return new Promise((resolve) => {
       resolve((canvas as HTMLCanvasElement).toDataURL());
@@ -9,7 +9,20 @@ export const drawLogo = ({ canvas, logo }: RenderQrCodeParams) => {
   const canvasWidth = (canvas as HTMLCanvasElement).width;
   const { logoSize = 0.15, bgColor = '#ffffff', borderSize = 0.05, crossOrigin, borderRadius = 8, logoRadius = 0 } = logo as LogoType;
 
-  const logoSrc: string = isString(logo) ? logo : logo.src;
+  let logoSrc: string = isString(logo) ? logo : logo.src;
+  // CSE 加密图：浏览器 <img> 不能加载 cse://，先解密为 blob URL
+  try {
+    const { isCseUrl, parseCseFid } = await import('/@/utils/cse/cseUrl');
+    if (isCseUrl(logoSrc)) {
+      const fid = parseCseFid(logoSrc);
+      if (fid) {
+        const { decryptFileToObjectUrl } = await import('/@/utils/cse/cseDecrypt');
+        logoSrc = await decryptFileToObjectUrl(fid, { mime: 'image/*' });
+      }
+    }
+  } catch (e) {
+    console.warn('[drawLogo] cse decrypt fail', e);
+  }
   const logoWidth = canvasWidth * logoSize;
   const logoXY = (canvasWidth * (1 - logoSize)) / 2;
   const logoBgWidth = canvasWidth * (logoSize + borderSize);

@@ -15,7 +15,7 @@
           <template v-for="(item, index) in bindData.jwUserDepartVos">
             <a-col :span="12" class="border-right padding-left border-bottom">
               <div class="we-account">
-                <a-avatar v-if="item.avatar" :src="getFileAccessHttpUrl(item.avatar)" :size="28"></a-avatar>
+                <a-avatar v-if="item.avatar" :src="wrapAvatar(item.avatar)" :size="28"></a-avatar>
                 <a-avatar v-else :size="28">
                   {{ item.realName.length > 2 ? item.realName.substr(0, 2) : item.realName }}
                 </a-avatar>
@@ -53,6 +53,7 @@
   import { BasicModal, useModalInner } from '/@/components/Modal';
   import { getThirdUserByWechat, wechatEnterpriseToLocal, getThirdUserBindByWechat, deleteThirdAccount } from './ThirdApp.api';
   import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
+  import { withImageCache } from '/@/utils/file/imageCache';
   import { useMessage } from '@/hooks/web/useMessage';
   import { Modal } from 'ant-design-vue';
   import { useUserStore } from '@/store/modules/user';
@@ -73,6 +74,8 @@
       //是否已绑定数据，展示不同的列表
       const izBind = ref<boolean>(false);
       const userStore = useUserStore();
+      // CSE: cse:// 头像必须经 withImageCache 解密成 blob URL
+      const wrapAvatar = (a: string) => (a ? withImageCache(getFileAccessHttpUrl(a)) : a);
       //表单赋值
       const [registerModal, { closeModal }] = useModalInner(async (data) => {
         loading.value = true;
@@ -262,6 +265,7 @@
         handleSubmit,
         bindData,
         getFileAccessHttpUrl,
+        wrapAvatar,
         loading,
         userList,
         handleSelect,

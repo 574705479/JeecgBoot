@@ -146,6 +146,13 @@
   import { LoadingOutlined } from '@ant-design/icons-vue';
   import { Avatar, Modal, Pagination } from 'ant-design-vue';
   import { getFileAccessHttpUrl } from '@/utils/common/compUtils';
+  import { withImageCache } from '/@/utils/file/imageCache';
+  import { isCseUrl } from '/@/utils/cse/cseUrl';
+  function wrapCse(u: string): string {
+    if (!u) return u;
+    if (isCseUrl(u) || u.startsWith('http') || u.startsWith('/')) return withImageCache(u);
+    return u;
+  }
   import defaultImg from './img/ailogo.png';
   import AiAppModal from './components/AiAppModal.vue';
   import AiAppSettingModal from './components/AiAppSettingModal.vue';
@@ -267,7 +274,7 @@
        * @param url
        */
       function getImage(url) {
-        return url ? getFileAccessHttpUrl(url) : defaultImg;
+        return url ? wrapCse(getFileAccessHttpUrl(url)) : defaultImg;
       }
 
       /**

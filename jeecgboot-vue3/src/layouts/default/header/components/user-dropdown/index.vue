@@ -50,6 +50,7 @@
   import { DB_DICT_DATA_KEY } from '/src/enums/cacheEnum';
   import { removeAuthCache, setAuthCache } from '/src/utils/auth';
   import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
+  import { withImageCache } from '/@/utils/file/imageCache';
   import { getRefPromise } from '/@/utils/index';
   import { refreshDragCache } from "@/api/common/api";
 
@@ -87,13 +88,13 @@
       const getAvatarUrl = computed(() => {
         const csAgent = userStore.getCsAgentInfo;
         if (csAgent?.avatar) {
-          return getFileAccessHttpUrl(csAgent.avatar);
+          return withImageCache(getFileAccessHttpUrl(csAgent.avatar));
         }
         let { avatar } = getUserInfo.value;
         if (avatar == headerImg) {
           return avatar;
         } else {
-          return getFileAccessHttpUrl(avatar);
+          return withImageCache(getFileAccessHttpUrl(avatar));
         }
       });
 

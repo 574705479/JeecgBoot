@@ -32,7 +32,7 @@
               <h2 class="pp-card-title">{{ plan.planName }}</h2>
             </div>
             <div class="pp-card-body">
-              <div v-if="plan.description" class="pp-rich-content" v-html="plan.description"></div>
+              <div v-if="plan.description" class="pp-rich-content" v-html="plan.description" v-cse-html></div>
               <div v-else class="pp-no-desc">暂无功能说明</div>
             </div>
           </div>

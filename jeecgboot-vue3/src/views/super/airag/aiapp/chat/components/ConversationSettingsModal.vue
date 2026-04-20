@@ -91,6 +91,9 @@
   import { message } from 'ant-design-vue';
   import { Icon } from '/@/components/Icon';
   import { getFileAccessHttpUrl, getHeaders } from '@/utils/common/compUtils';
+  import { withImageCache } from '/@/utils/file/imageCache';
+  import { isCseUrl } from '/@/utils/cse/cseUrl';
+  import { createImgPreview } from '/@/components/Preview';
   import { useGlobSetting } from '@/hooks/setting';
 
   const props = defineProps<{
@@ -183,18 +186,28 @@
 
   // 获取图片URL
   const getImageUrl = (img: any) => {
-    if (typeof img === 'string') {
-      return getFileAccessHttpUrl(img);
+    const raw = typeof img === 'string' ? img : (img.url || img);
+    const resolved = getFileAccessHttpUrl(raw);
+    if (!resolved) return resolved;
+    // cse:// / http(s) 走 withImageCache 解密
+    if (isCseUrl(resolved) || resolved.startsWith('http') || resolved.startsWith('/')) {
+      return withImageCache(resolved);
     }
-    return getFileAccessHttpUrl(img.url || img);
+    return resolved;
   };
 
-  // 图片预览
+  // 图片预览：cse:// 走解密预览，避免 window.open(cse://...) 浏览器无法识别协议
   const handlePreview = (img: any) => {
     const url = typeof img === 'string' ? img : (img.url || img);
-    const imageUrl = getFileAccessHttpUrl(url);
-    // 可以使用 ant-design-vue 的 Image 预览功能
-    window.open(imageUrl, '_blank');
+    const resolved = getFileAccessHttpUrl(url);
+    if (!resolved) return;
+    if (isCseUrl(resolved)) {
+      // 通过 withImageCache 拿到解密后的 blob URL，复用 createImgPreview 弹窗预览
+      const blobOrPlaceholder = withImageCache(resolved);
+      createImgPreview({ imageList: [blobOrPlaceholder], defaultWidth: 700 });
+    } else {
+      window.open(resolved, '_blank');
+    }
   };
 
   // 移除图片

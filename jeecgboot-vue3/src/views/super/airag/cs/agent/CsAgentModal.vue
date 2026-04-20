@@ -9,7 +9,7 @@
     <BasicForm @register="registerForm">
       <template #avatar="{ model, field }">
         <CropperAvatar
-          :uploadApi="uploadImg"
+          :uploadApi="uploadAvatarImg"
           :value="getAvatarFullUrl(model[field])"
           @change="(src, data) => { model[field] = data }"
           width="100"
@@ -26,7 +26,7 @@ import { BasicForm, useForm } from '/@/components/Form';
 import { CropperAvatar } from '/@/components/Cropper';
 import { defHttp } from '/@/utils/http/axios';
 import { useMessage } from '/@/hooks/web/useMessage';
-import { uploadImg } from '/@/api/sys/upload';
+import { uploadAvatarImg } from '/@/api/sys/upload';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
 
 const emit = defineEmits(['success', 'register']);

@@ -192,17 +192,25 @@
             }
             return url;
           }
+          // 检测 cse:// 协议：浏览器不识别，inline JS 也无法解密。
+          // 直接退回默认 logo，等 main.ts 加载完成后由 applyBrandToDom 异步替换为公开代理 URL。
+          // 不在 inline JS 转换为 /cs/brand/file/{fid}：避免硬编码后端上下文路径（dev / nginx 反代环境不同）。
+          function safe(url) {
+            if (typeof url !== 'string' || !url) return '';
+            if (url.indexOf('cse://') === 0) return '';
+            return fixPath(url);
+          }
           var brand = window.__APP_BRAND__ || {};
           var el = document.getElementById('app-loading-title');
           if (el) el.textContent = brand.loadingTitle || brand.title || el.textContent || '';
-          // 根据品牌配置替换 loading logo（优先使用预解析的完整URL）
-          var logoUrl = fixPath(brand._resolvedLogoUrl || brand.logoUrl);
+          // 根据品牌配置替换 loading logo（cse:// 退回默认）
+          var logoUrl = safe(brand._resolvedLogoUrl) || safe(brand.logoUrl);
           if (logoUrl) {
             var logoEl = document.getElementById('app-loading-logo');
             if (logoEl) logoEl.src = logoUrl;
           }
-          // 根据品牌配置替换 favicon
-          var faviconUrl = fixPath(brand._resolvedFaviconUrl || brand.faviconUrl || logoUrl);
+          // 根据品牌配置替换 favicon（cse:// 退回默认；main.ts 完成后会异步覆盖）
+          var faviconUrl = safe(brand._resolvedFaviconUrl) || safe(brand.faviconUrl) || logoUrl;
           if (faviconUrl) {
             var iconLinks = document.querySelectorAll("link[rel='icon'], link[rel='shortcut icon']");
             for (var i = 0; i < iconLinks.length; i++) {

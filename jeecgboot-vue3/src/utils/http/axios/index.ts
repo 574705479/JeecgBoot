@@ -176,6 +176,21 @@ const transform: AxiosTransform = {
     config.headers[ConfigEnum.Sign] = signMd5Utils.getSign(config.url, cloneDeep(config.params), cloneDeep(config.data));
     
     config.headers[ConfigEnum.VERSION] = 'v3';
+
+    // CSE Phase 3.2d (T3) 终审护栏：
+    //   /sys/secure/file/* 在访客模式下严禁混入空 X-Access-Token / Authorization，
+    //   否则后端 SecureFileController.resolveVisitorCredential 会误把空串当登录 token，
+    //   走错 sealToken 分支导致 AES-GCM AuthError。
+    // 这里只清理「空字符串」的污染头，真实非空 token 仍在下方分支正常注入。
+    const isSecureFileUrl = typeof config.url === 'string' && config.url.indexOf('/sys/secure/file/') >= 0;
+    if (isSecureFileUrl && (!token || token === '')) {
+      try {
+        delete config.headers[ConfigEnum.TOKEN];
+        delete config.headers['Authorization'];
+        delete config.headers['authorization'];
+      } catch {}
+    }
+
     if (token && (config as Recordable)?.requestOptions?.withToken !== false) {
       // jwt token
       config.headers.Authorization = options.authenticationScheme ? `${options.authenticationScheme} ${token}` : token;

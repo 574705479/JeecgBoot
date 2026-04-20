@@ -29,6 +29,8 @@
   import { useUserStore } from '/@/store/modules/user';
   import { useLockStore } from '/@/store/modules/lock';
   import headerImg from '/@/assets/images/header.jpg';
+  import { withImageCache } from '/@/utils/file/imageCache';
+  import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
   export default defineComponent({
     name: 'LockModal',
     components: { BasicModal, BasicForm },
@@ -74,7 +76,8 @@
 
       const avatar = computed(() => {
         const { avatar } = userStore.getUserInfo;
-        return avatar || headerImg;
+        if (!avatar || avatar === headerImg) return avatar || headerImg;
+        return withImageCache(getFileAccessHttpUrl(avatar));
       });
 
       return {

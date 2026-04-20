@@ -390,12 +390,14 @@ expireAt: {{ expireAt || '' }}</pre>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { message } from 'ant-design-vue';
 import { defHttp } from '/@/utils/http/axios';
 import { uploadImg } from '/@/api/sys/upload';
 import { CropperUpload } from '/@/components/Cropper';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
+import { withImageCache } from '/@/utils/file/imageCache';
+import { isCseUrl } from '/@/utils/cse/cseUrl';
 import { useGlobSetting } from '/@/hooks/setting';
 import MarkdownIt from 'markdown-it';
 import hljs from 'highlight.js';
@@ -455,6 +457,7 @@ const accessType = ref('url');
 const wc = reactive({
   buttonSize: 56,
   buttonColor: '#4c6ef5',
+  /** 嵌入按钮图标。⚠️ 不允许 cse:// 协议，第三方页面无法解密。watch 校验并自动清空 */
   buttonIcon: '',
   buttonText: '',
   buttonBorderRadius: 28,
@@ -469,6 +472,17 @@ const wc = reactive({
   panelColor: '#4c6ef5',
   zIndex: 9999,
 });
+
+// t21 第二层防御：buttonIcon 不允许 cse://（第三方嵌入端无 token 无法解密）
+watch(
+  () => wc.buttonIcon,
+  (v) => {
+    if (typeof v === 'string' && v.indexOf('cse://') === 0) {
+      message.warning('按钮图标不能使用加密上传图（cse://）。请使用公开 HTTP 图片或外链 URL。');
+      wc.buttonIcon = '';
+    }
+  },
+);
 
 onMounted(async () => {
   await Promise.all([
@@ -605,6 +619,7 @@ let widgetScriptEl: HTMLScriptElement | null = null;
 const widgetLoaded = ref(false);
 function resolveUrl(url: string) {
   if (!url) return '';
+  if (isCseUrl(url)) return withImageCache(url);
   if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return url;
   return getFileAccessHttpUrl(url);
 }
@@ -844,7 +859,19 @@ function buildWidgetOptionsCode() {
   const lines: string[] = [];
   if (wc.buttonSize !== 56) lines.push(`  buttonSize: ${wc.buttonSize},`);
   if (wc.buttonColor !== '#4c6ef5') lines.push(`  buttonColor: "${wc.buttonColor}",`);
-  if (wc.buttonIcon) lines.push(`  buttonIcon: "${resolveUrl(wc.buttonIcon)}",`);
+  if (wc.buttonIcon) {
+    // 嵌入代码使用静态可访问的 URL：cse:// 在第三方页面无法解密，回退为后端 HTTP URL（需上传时设置 publicFlag=1，否则第三方加载会被拒）
+    const v = wc.buttonIcon;
+    let staticUrl: string;
+    if (isCseUrl(v)) {
+      staticUrl = getFileAccessHttpUrl(v);
+    } else if (/^https?:\/\//i.test(v) || v.startsWith('data:')) {
+      staticUrl = v;
+    } else {
+      staticUrl = getFileAccessHttpUrl(v);
+    }
+    lines.push(`  buttonIcon: "${staticUrl}",`);
+  }
   if (wc.buttonText) lines.push(`  buttonText: "${wc.buttonText}",`);
   if (wc.buttonBorderRadius !== 28) lines.push(`  buttonBorderRadius: ${wc.buttonBorderRadius},`);
   if (wc.panelWidth !== 420) lines.push(`  width: ${wc.panelWidth},`);

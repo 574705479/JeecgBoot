@@ -61,6 +61,15 @@
   import { useAppStore } from '/@/store/modules/app';
   import { uploadFile } from '/@/api/common/api';
   import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
+  import { isCseUrl, parseCseFid } from '/@/utils/cse/cseUrl';
+  import { decryptFileToObjectUrl } from '/@/utils/cse/cseDecrypt';
+  // blob URL -> fid 映射，用于 GetContent 时还原 cse://{fid}
+  const cseBlobToFid = new Map<string, string>();
+  // fid -> blob URL 缓存：避免同一图片在 SetContent 反复触发时重复解密
+  const cseFidToBlob = new Map<string, string>();
+  // 1×1 透明 PNG，作为解密期间的占位符（避免 src="" 导致浏览器破图）
+  const CSE_TRANSPARENT_PNG =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
   import { ThemeEnum } from '/@/enums/appEnum';
   import { defHttp } from "@/utils/http/axios";
   const tinymceProps = {
@@ -170,7 +179,6 @@
           // 添加以下粘贴相关配置
           paste_data_images: true, // 允许粘贴图片
           paste_as_text: false, // 不以纯文本粘贴
-          paste_retain_style_properties: 'all', // 保留所有样式属性
           paste_webkit_styles: 'all', // 保留webkit样式
           paste_merge_formats: true, // 合并格式
           paste_block_drop: true, // 允许拖放粘贴
@@ -202,17 +210,37 @@
           skin: skinName.value,
           skin_url: publicPath + 'resource/tinymce/skins/ui/' + skinName.value,
           images_upload_handler: (blobInfo, process) =>
-            new Promise((resolve, reject) => {
+            new Promise(async (resolve, reject) => {
+            // CSE 占位 PNG（1×1 透明）短路：BeforeSetContent 注入的占位被 TinyMCE 当作粘贴图触发自动上传，
+            // 一定要拒绝/原样返回，否则会出现 "图片上传失败" 提示且占位被错误的服务器图替换。
+            try {
+              const b = blobInfo.blob();
+              if (b && b.size < 200) {
+                resolve(CSE_TRANSPARENT_PNG);
+                return;
+              }
+            } catch (_) {}
             let params = {
               file: blobInfo.blob(),
               filename: blobInfo.filename(),
               data: { biz: 'jeditor', jeditor: '1' },
             };
-            const uploadSuccess = (res) => {
+            const uploadSuccess = async (res) => {
               if (res.success) {
                 if (res.message == 'local') {
                   const img = 'data:image/jpeg;base64,' + blobInfo.base64();
                       resolve(img);
+                } else if (isCseUrl(res.message)) {
+                  // CSE 加密图：解密为 blob URL 临时显示，GetContent 时再还原 cse://
+                  try {
+                    const fid = parseCseFid(res.message)!;
+                    const blobUrl = await decryptFileToObjectUrl(fid, { mime: blobInfo.blob().type || 'image/png' });
+                    cseBlobToFid.set(blobUrl, fid);
+                    cseFidToBlob.set(fid, blobUrl);
+                    resolve(blobUrl);
+                  } catch (e) {
+                    reject('加密图解密失败');
+                  }
                 } else {
                   let img = getFileAccessHttpUrl(res.message);
                   resolve(img);
@@ -228,6 +256,62 @@
           setup: (editor: any) => {
             editorRef.value = editor;
             editor.on('init', (e) => initSetup(e));
+            // CSE: BeforeSetContent 时把 cse://{fid} 替换为 blob URL（懒解密）
+            // 必须用 BeforeSetContent；SetContent 在内容已渲染到 iframe 后触发，再改 e.content 已无效
+            // - 命中缓存：直接用现成 blob URL
+            // - 未命中：先用透明 PNG 占位（避免 src="cse://..." 触发浏览器破图），异步解密完成后回写到 iframe DOM
+            editor.on('BeforeSetContent', (e: any) => {
+              try {
+                const html = e.content as string;
+                if (!html || html.indexOf('cse://') < 0) return;
+                e.content = html.replace(/<img\b([^>]*?)\bsrc=["'](cse:\/\/[^"']+)["']([^>]*)>/gi,
+                  (_m, before, src, after) => {
+                    const fid = parseCseFid(src);
+                    if (!fid) return _m;
+                    const cached = cseFidToBlob.get(fid);
+                    if (cached) {
+                      // 已经解密过：直接用 blob URL，且仍写 data-fid 以便 GetContent 还原
+                      return `<img${before}data-fid="${fid}" src="${cached}"${after}>`;
+                    }
+                    decryptFileToObjectUrl(fid, { mime: 'image/*' })
+                      .then((u) => {
+                        cseBlobToFid.set(u, fid);
+                        cseFidToBlob.set(fid, u);
+                        try {
+                          const imgs = editor.getBody().querySelectorAll('img[data-fid="' + fid + '"]');
+                          imgs.forEach((im: HTMLImageElement) => { im.src = u; });
+                        } catch (_) {}
+                      })
+                      .catch((err) => {
+                        console.warn('[Tinymce] cse decrypt fail', fid, err?.message || err);
+                      });
+                    return `<img${before}data-fid="${fid}" src="${CSE_TRANSPARENT_PNG}"${after}>`;
+                  });
+              } catch (_) {}
+            });
+            // CSE: GetContent 时把 blob: URL 还原回 cse://{fid}
+            editor.on('GetContent', (e: any) => {
+              try {
+                let html = e.content as string;
+                if (!html) return;
+                if (html.indexOf('blob:') >= 0) {
+                  cseBlobToFid.forEach((fid, blobUrl) => {
+                    const re = new RegExp(blobUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+                    html = html.replace(re, 'cse://' + fid);
+                  });
+                }
+                // data-fid 占位也还原（保留 width/height/alt 等其他属性）
+                html = html.replace(/<img\b([^>]*?)\bdata-fid=["']([^"']+)["']([^>]*)>/gi,
+                  (_m, before, fid, after) => {
+                    // 同时去掉残留的 src/data-mce-src 占位，避免重复 src
+                    const cleaned = (before + ' ' + after)
+                      .replace(/\bsrc=["'][^"']*["']/gi, '')
+                      .replace(/\bdata-mce-src=["'][^"']*["']/gi, '');
+                    return `<img${cleaned} src="cse://${fid}">`;
+                  });
+                e.content = html;
+              } catch (_) {}
+            });
             //update-begin-author:liusq---date:2025-11-19--for: JHHB-1070 从word复制的表格不能对齐
             // 表格对齐功能
             initTableAlignment(editor);

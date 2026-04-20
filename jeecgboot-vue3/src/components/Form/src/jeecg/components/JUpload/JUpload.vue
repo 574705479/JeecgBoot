@@ -37,6 +37,8 @@
   import { useDesign } from '/@/hooks/web/useDesign';
   import { UploadTypeEnum } from './upload.data';
   import { getFileAccessHttpUrl, getHeaders } from '/@/utils/common/compUtils';
+  import { isCseUrl } from '/@/utils/cse/cseUrl';
+  import { downloadCse } from '/@/utils/cse/downloadCse';
   import UploadItemActions from './components/UploadItemActions.vue';
   import { split } from '/@/utils/index';
 
@@ -149,7 +151,15 @@
     if (!uploadItems || uploadItems.length === 0) {
       return;
     }
-    for (const uploadItem of uploadItems) {
+    // 【S-P0-6】把每个 ant-upload item 与 fileList 中对应记录的 uid 绑定到 dataset，
+    // 让 UploadItemActions 通过 uid 反查 fileList 索引，避免依赖 <img>.src 与 url 比对（cse:// 与 blob URL 永远不匹配）。
+    const list = unref(fileList) || [];
+    for (let i = 0; i < uploadItems.length; i++) {
+      const uploadItem = uploadItems[i] as HTMLElement;
+      const uid = list[i]?.uid;
+      if (uid != null) {
+        uploadItem.dataset.uid = String(uid);
+      }
       let hasActions = uploadItem.getAttribute('data-has-actions') === 'true';
       if (!hasActions) {
         uploadItem.addEventListener('mouseover', onAddActionsButton);
@@ -183,6 +193,7 @@
     createApp(UploadItemActions, {
       element: uploadItem,
       fileList: fileList,
+      uid: uploadItem.dataset.uid || '',
       mover: props.mover,
       download: props.download,
       emitValue: emitValue,
@@ -352,10 +363,13 @@
     emitValue(path);
   }
 
-  // 预览文件、图片
+  // 预览文件、图片：cse:// 走解密；非图片直接 downloadCse；图片复用 createImgPreview（已支持 cse://）
   function onFilePreview(file) {
     if (isImageMode.value) {
       createImgPreview({ imageList: [file.url], maskClosable: true });
+    } else if (isCseUrl(file.url)) {
+      // cse:// 不可被浏览器直接打开，走解密下载
+      downloadCse(file.url, file.name).catch(() => {});
     } else {
       window.open(file.url);
     }

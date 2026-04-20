@@ -61,12 +61,14 @@
   </a-list>
 </template>
 <script lang="ts">
-  import { computed, defineComponent, PropType, ref, watch, unref } from 'vue';
+  import { computed, defineComponent, PropType, ref, watch, unref, reactive } from 'vue';
   import { PriorityTypes, ListItem } from './data';
   import { useDesign } from '/@/hooks/web/useDesign';
   import { List, Avatar, Tag, Typography } from 'ant-design-vue';
   import { Time } from '/@/components/Time';
   import { isNumber } from '/@/utils/is';
+  import { isCseUrl } from '/@/utils/cse/cseUrl';
+  import { withImageCacheAsync } from '/@/utils/file/imageCache';
   export default defineComponent({
     components: {
       [Avatar.name]: Avatar,
@@ -106,11 +108,25 @@
     setup(props, { emit }) {
       const { prefixCls } = useDesign('header-notify-list');
       const current = ref(props.currentPage || 1);
+      // CSE: 异步解密的头像 URL（cse:// -> blob URL），按 item.id 索引
+      const resolvedAvatars = reactive<Record<string, string>>({});
       const getData = computed(() => {
         const { pageSize, list } = props;
         if (pageSize === false) return [];
         let size = isNumber(pageSize) ? pageSize : 5;
-        return list.slice(size * (unref(current) - 1), size * unref(current));
+        const slice = list.slice(size * (unref(current) - 1), size * unref(current));
+        slice.forEach((it: any) => {
+          if (it && isCseUrl(it.avatar) && !resolvedAvatars[it.id]) {
+            withImageCacheAsync(it.avatar)
+              .then((u) => { if (u) resolvedAvatars[it.id] = u; })
+              .catch(() => {});
+          }
+        });
+        // T2: 未解析的 cse:// 首帧用空串占位，避免浏览器尝试加载未注册协议
+        return slice.map((it: any) => ({
+          ...it,
+          avatar: resolvedAvatars[it.id] || (isCseUrl(it.avatar) ? '' : it.avatar),
+        }));
       });
       watch(
         () => props.currentPage,

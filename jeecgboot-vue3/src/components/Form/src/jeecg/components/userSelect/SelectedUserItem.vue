@@ -12,7 +12,7 @@
       "
     >
       <span style="width: 24px; height: 24px; line-height: 20px; margin-right: 3px; display: inline-block">
-        <a-avatar v-if="info.avatar" :src="getFileAccessHttpUrl(info.avatar)" :size="24"></a-avatar>
+        <a-avatar v-if="info.avatar" :src="avatarUrl(info.avatar)" :size="24"></a-avatar>
         
         <a-avatar v-else-if="info.avatarIcon" class="ant-btn-primary" :size="24" >
           <template #icon>
@@ -55,6 +55,14 @@
   import { UserOutlined, CloseOutlined, MinusCircleFilled, TagsOutlined, TeamOutlined } from '@ant-design/icons-vue';
   import {computed} from 'vue'
   import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
+  import { withImageCache } from '/@/utils/file/imageCache';
+  import { isCseUrl } from '/@/utils/cse/cseUrl';
+  function avatarUrl(raw) {
+    const u = getFileAccessHttpUrl(raw);
+    if (!u) return u;
+    if (isCseUrl(u) || u.startsWith('http') || u.startsWith('/')) return withImageCache(u);
+    return u;
+  }
   
   export default {
     name: 'SelectedUserItem',
@@ -95,7 +103,8 @@
       return {
         showClose,
         removeSelect,
-        getFileAccessHttpUrl
+        getFileAccessHttpUrl,
+        avatarUrl
       };
     },
   };

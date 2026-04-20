@@ -14,6 +14,7 @@ import org.jeecg.modules.system.storage.CosClientPool;
 import org.jeecg.modules.system.storage.OssClientPool;
 import org.jeecg.modules.system.storage.StorageCredentialCrypto;
 import org.jeecg.modules.system.storage.TencentCosUpload;
+import org.jeecg.modules.system.security.cse.service.CseUploader;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -52,6 +53,16 @@ public class StorageUploadServiceImpl implements IStorageUploadService, IStorage
 
     @Autowired
     private CosClientPool cosClientPool;
+
+    @Autowired(required = false)
+    private CseUploader cseUploader;
+
+    /**
+     * CSE 加密失败时是否回退到明文链路。默认 false（失败即失败，符合"声明加密就必须加密"的合规承诺）。
+     * 仅当紧急回滚或调试场景，可临时配置 true 跳过 throw、走明文。
+     */
+    @Value("${cse.fallback-on-failure:false}")
+    private boolean cseFallbackOnFailure;
 
     @Override
     public void invalidate() {
@@ -96,6 +107,21 @@ public class StorageUploadServiceImpl implements IStorageUploadService, IStorage
     public String upload(MultipartFile file, String bizPath) {
         Mode mode = resolveMode();
         String path = normalizeBizParam(bizPath, objectStorage(mode));
+        // CSE 加密分支：白名单命中则走加密链路，返回 cse://{fid}
+        if (cseUploader != null && cseUploader.shouldEncrypt(path)) {
+            try {
+                return cseUploader.uploadEncrypted(file, path);
+            } catch (JeecgBootException ex) {
+                throw ex;
+            } catch (Exception ex) {
+                log.error("[StorageUpload] CSE 加密上传失败 path={} fileName={}", path,
+                        file == null ? null : file.getOriginalFilename(), ex);
+                if (!cseFallbackOnFailure) {
+                    throw new JeecgBootException("CSE 加密上传失败，请稍后重试");
+                }
+                log.warn("[StorageUpload] cse.fallback-on-failure=true，已跳过加密走明文链路");
+            }
+        }
         try {
             switch (mode) {
                 case YML_LOCAL:
@@ -139,6 +165,20 @@ public class StorageUploadServiceImpl implements IStorageUploadService, IStorage
 
         String fileName = "image" + Math.round(Math.random() * 100000000000L);
         fileName += "." + PoiPublicUtil.getFileExtendName(data);
+        // CSE 加密分支
+        if (cseUploader != null && cseUploader.shouldEncrypt(path)) {
+            try {
+                return cseUploader.uploadEncryptedBytes(data, fileName, null, path);
+            } catch (JeecgBootException ex) {
+                throw ex;
+            } catch (Exception ex) {
+                log.error("[StorageUpload] CSE 加密在线图片上传失败 path={} fileName={}", path, fileName, ex);
+                if (!cseFallbackOnFailure) {
+                    throw new JeecgBootException("CSE 加密上传失败，请稍后重试");
+                }
+                log.warn("[StorageUpload] cse.fallback-on-failure=true，已跳过加密走明文链路");
+            }
+        }
         try {
             switch (mode) {
                 case YML_LOCAL:

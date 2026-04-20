@@ -1,17 +1,19 @@
 <template>
   <!-- <div v-html="getHtmlData" :class="$props.class" class="markdown-viewer markdown-body"></div> -->
   <div class="preview" :class="[{ preview_dark: isDarkTheme }]">
-    <div v-html="getHtmlData" :class="$props.class" class="markdown-viewer vditor-reset"></div>
+    <div ref="rootRef" v-html="getHtmlData" :class="$props.class" class="markdown-viewer vditor-reset"></div>
   </div>
 </template>
 
 <script lang="ts" setup>
-  import { computed, watch, ref } from 'vue';
+  import { computed, watch, ref, nextTick, onBeforeUnmount } from 'vue';
   import showdown from 'showdown';
   import 'vditor/dist/index.css';
   import { useRootSetting } from '/@/hooks/setting/useRootSetting';
   import { ThemeEnum } from '/@/enums/appEnum';
-  
+  import { replaceCseImgWithPlaceholder } from '/@/utils/cse/cseUrl';
+  import { withImageCacheAsync } from '/@/utils/file/imageCache';
+
   const converter = new showdown.Converter();
   converter.setOption('tables', true);
   converter.setOption('emoji', true);
@@ -19,7 +21,33 @@
     value: { type: String },
     class: { type: String },
   });
-  const getHtmlData = computed(() => converter.makeHtml(props.value || ''));
+  const rootRef = ref<HTMLDivElement>();
+  const getHtmlData = computed(() => replaceCseImgWithPlaceholder(converter.makeHtml(props.value || '')));
+
+  let observer: IntersectionObserver | null = null;
+  function observeCseImages() {
+    if (!rootRef.value) return;
+    const imgs = rootRef.value.querySelectorAll('img[data-fid]');
+    if (imgs.length === 0) return;
+    if (!observer) {
+      observer = new IntersectionObserver((entries) => {
+        for (const en of entries) {
+          if (en.isIntersecting) {
+            const img = en.target as HTMLImageElement;
+            const fid = img.dataset.fid;
+            if (!fid) continue;
+            withImageCacheAsync('cse://' + fid)
+              .then((u) => { img.src = u; })
+              .catch(() => {});
+            observer!.unobserve(img);
+          }
+        }
+      }, { rootMargin: '200px' });
+    }
+    imgs.forEach((img) => observer!.observe(img));
+  }
+  watch(getHtmlData, () => nextTick(() => observeCseImages()), { immediate: true });
+  onBeforeUnmount(() => { observer?.disconnect(); observer = null; });
 
   // 代码逻辑说明: 【issues/918】MarkdownViewer加上暗黑主题
   const isDarkTheme = ref(false);

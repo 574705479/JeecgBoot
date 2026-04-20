@@ -8,7 +8,7 @@
             <a-radio v-model:checked="checkStatus[item.id]" v-else />
           </div>
           <div>
-            <a-avatar v-if="item.avatar" :src="getFileAccessHttpUrl(item.avatar)"></a-avatar>
+            <a-avatar v-if="item.avatar" :src="avatarUrl(item.avatar)"></a-avatar>
             <a-avatar v-else-if="item.avatarIcon" class="ant-btn-primary">
               <template #icon>
                 <Icon :icon=" 'ant-design:'+item.avatarIcon " style="margin-top: 4px;font-size: 24px;"/>
@@ -35,6 +35,15 @@
   import { UserOutlined } from '@ant-design/icons-vue';
   import { computed, toRaw, reactive, watchEffect, ref } from 'vue';
   import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
+  import { withImageCache } from '/@/utils/file/imageCache';
+  import { isCseUrl } from '/@/utils/cse/cseUrl';
+  // 头像 cse:// 解密渲染包装
+  function avatarUrl(raw: string): string {
+    const u = getFileAccessHttpUrl(raw);
+    if (!u) return u;
+    if (isCseUrl(u) || u.startsWith('http') || u.startsWith('/')) return withImageCache(u);
+    return u;
+  }
   
   export default {
     name: 'UserList',
@@ -168,7 +177,8 @@
         onChangeChecked,
         checkStatus,
         showDataList,
-        getFileAccessHttpUrl
+        getFileAccessHttpUrl,
+        avatarUrl
       };
     },
   };

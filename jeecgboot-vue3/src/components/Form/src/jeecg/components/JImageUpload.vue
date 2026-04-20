@@ -38,6 +38,8 @@
   import { useAttrs } from '/@/hooks/core/useAttrs';
   import { useMessage } from '/@/hooks/web/useMessage';
   import { getFileAccessHttpUrl, getHeaders, getRandom } from '/@/utils/common/compUtils';
+  import { withImageCache, withImageCacheAsync } from '/@/utils/file/imageCache';
+  import { isCseUrl } from '/@/utils/cse/cseUrl';
   import { uploadUrl as systemUploadUrl } from '/@/api/common/api';
   import { getToken } from '/@/utils/auth';
 
@@ -157,7 +159,14 @@
         let arr = paths.split(',');
         arr.forEach((value) => {
           let url = getFileAccessHttpUrl(value);
-          files.push({
+          // CSE 加密图片：picture-card 直接用 cse:// 浏览器无法显示。
+          // 同步 thumbUrl 走 withImageCache（命中即 blob，未命中先占位），
+          // 解密完成后用 withImageCacheAsync 异步回写 thumbUrl 强制 antd Upload 重渲染。
+          let thumbUrl: string | undefined;
+          if (isCseUrl(url)) {
+            thumbUrl = withImageCache(url);
+          }
+          const fileItem: any = {
             uid: getRandom(10),
             name: getFileName(value),
             status: 'done',
@@ -166,7 +175,21 @@
               status: 'history',
               message: value,
             },
-          });
+          };
+          if (thumbUrl) fileItem.thumbUrl = thumbUrl;
+          files.push(fileItem);
+          // 异步等解密完成回写 thumbUrl（让 antd Upload 切换到真实 blob URL）
+          if (isCseUrl(url)) {
+            withImageCacheAsync(url).then((decrypted) => {
+              const idx = uploadFileList.value.findIndex((f: any) => f.uid === fileItem.uid);
+              if (idx >= 0) {
+                // 触发 antd Upload 重渲染：必须替换整个对象引用
+                const next = [...uploadFileList.value];
+                next[idx] = { ...next[idx], thumbUrl: decrypted };
+                uploadFileList.value = next;
+              }
+            }).catch(() => {});
+          }
         });
         uploadFileList.value = files;
       }

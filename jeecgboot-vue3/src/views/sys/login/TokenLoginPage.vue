@@ -20,13 +20,14 @@
   import { useUserStore } from '/@/store/modules/user';
   import { useI18n } from '/@/hooks/web/useI18n';
   import { getBrandSetting } from '/@/settings/brandSetting';
-  import { resolveBrandUrl } from '/@/utils/brand';
+  import { resolveBrandPublicUrl } from '/@/utils/brand';
 
   export default {
     name: "TokenLogin",
     setup(){
       const { appTitle, logoUrl: rawLogoUrl } = getBrandSetting();
-      const logoUrl = resolveBrandUrl(rawLogoUrl);
+      // cse:// 走匿名代理端点（无需 token）
+      const logoUrl = resolveBrandPublicUrl(rawLogoUrl);
       const route = useRoute();
       let router = useRouter();
       const {createMessage, notification} = useMessage()

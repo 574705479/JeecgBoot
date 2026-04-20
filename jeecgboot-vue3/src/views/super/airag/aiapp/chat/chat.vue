@@ -216,6 +216,7 @@
   import { defHttp } from '@/utils/http/axios';
   import { cloneDeep } from "lodash-es";
   import {getFileAccessHttpUrl, getHeaders} from "@/utils/common/compUtils";
+  import { withImageCache } from '/@/utils/file/imageCache';
   import { createImgPreview } from "@/components/Preview";
   import { useAppInject } from "@/hooks/web/useAppInject";
   import { useGlobSetting } from "@/hooks/setting";
@@ -767,7 +768,9 @@
    * @param url
    */
   function getImage(url) {
-    return getFileAccessHttpUrl(url);
+    // CSE: cse:// 图片需经 withImageCache 解密成 blob URL
+    const u = getFileAccessHttpUrl(url);
+    return u ? withImageCache(u) : u;
   }
 
   /**

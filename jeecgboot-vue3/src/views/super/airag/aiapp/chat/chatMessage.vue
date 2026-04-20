@@ -32,7 +32,7 @@
             <a-card class="ai-card" @click="aiCardHandleClick(item.linkUrl)">
                <div class="ai-card-title">{{item.productName}}</div>
                <div class="ai-card-img">
-                 <img :src="item.productImage">
+                 <img :src="wrapCse(item.productImage)">
                </div>
                <span class="ai-card-desc">{{item.descr}}</span>
             </a-card>
@@ -65,6 +65,8 @@
   import { ref } from 'vue';
   import { buildUUID } from '/@/utils/uuid';
   import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
+  import { withImageCache } from '/@/utils/file/imageCache';
+  import { isCseUrl } from '/@/utils/cse/cseUrl';
   import { createImgPreview } from "@/components/Preview";
   import { computed } from "vue";
 
@@ -88,19 +90,31 @@
     return false;
   });
 
+  // 包装 cse:// / http(s) URL 走 withImageCache 解密；其他直返
+  function wrapCse(u: string): string {
+    if (!u) return u;
+    if (isCseUrl(u) || u.startsWith('http') || u.startsWith('/')) {
+      return withImageCache(u);
+    }
+    return u;
+  }
+
   const { userInfo } = useUserStore();
   const avatar = () => {
-    return getFileAccessHttpUrl(userInfo?.avatar) || defaultAvatar;
+    const u = getFileAccessHttpUrl(userInfo?.avatar);
+    return u ? wrapCse(u) : defaultAvatar;
   };
   const emit = defineEmits(['send']);
   const getAiImg = () => {
-    return getFileAccessHttpUrl(props.appData?.icon) || defaultImg;
+    const u = getFileAccessHttpUrl(props.appData?.icon);
+    return u ? wrapCse(u) : defaultImg;
   };
   
   // 获取客服头像
   import agentDefaultAvatar from "@/assets/images/ai/avatar.jpg"; // 复用默认头像或可以换一个
   const getAgentAvatar = () => {
-    return getFileAccessHttpUrl(props.senderAvatar) || agentDefaultAvatar;
+    const u = getFileAccessHttpUrl(props.senderAvatar);
+    return u ? wrapCse(u) : agentDefaultAvatar;
   };
   
   // 获取聊天样式类
@@ -138,7 +152,8 @@
     if(item.hasOwnProperty('base64Data') && item.base64Data){
       return item.base64Data;
     }
-    return getFileAccessHttpUrl(url);
+    const resolved = getFileAccessHttpUrl(url);
+    return resolved ? wrapCse(resolved) : resolved;
   }
 
   /**

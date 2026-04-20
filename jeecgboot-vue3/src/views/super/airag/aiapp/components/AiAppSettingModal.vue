@@ -362,6 +362,13 @@
   import JImageUpload from '@/components/Form/src/jeecg/components/JImageUpload.vue';
   import defaultImg from '../img/ailogo.png';
   import {getFileAccessHttpUrl, randomString, simpleDebounce} from "@/utils/common/compUtils";
+  import { withImageCache } from '/@/utils/file/imageCache';
+  import { isCseUrl } from '/@/utils/cse/cseUrl';
+  function wrapCse(u: string): string {
+    if (!u) return u;
+    if (isCseUrl(u) || u.startsWith('http') || u.startsWith('/')) return withImageCache(u);
+    return u;
+  }
   import JSearchSelect from "@/components/Form/src/jeecg/components/JSearchSelect.vue";
   import JMarkdownEditor from "@/components/Form/src/jeecg/components/JMarkdownEditor.vue";
   import AiAppJson from './AiApp.json'
@@ -761,14 +768,14 @@
        * 获取图标
        */
       function getImage() {
-        return formState.icon ? getFileAccessHttpUrl(formState.icon): defaultImg;
+        return formState.icon ? wrapCse(getFileAccessHttpUrl(formState.icon)) : defaultImg;
       }
 
       /**
        * 获取流程图标
        */
       function getFlowImage(icon) {
-        return icon ? getFileAccessHttpUrl(icon) : defaultFlowImg;
+        return icon ? wrapCse(getFileAccessHttpUrl(icon)) : defaultFlowImg;
       }
 
       /**

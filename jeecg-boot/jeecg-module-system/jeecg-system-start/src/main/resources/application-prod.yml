@@ -202,6 +202,34 @@ jeecg:
       storage-iv: "T3yB6cF1hJ0kN5zX"
       transport-key: "Z4aS8dG2fH7jM1qW"
       transport-iv: "E5rT9vY3uI6oP0xC"
+  # CSE 端到端文件加密（生产）
+  # 注意：enabled / public-paths / encrypted-paths 已迁移到 sys_cse_config 表（动态配置 + 60s TTL 缓存）
+  # 此处保留作为 DB 缺失/异常时的回退兜底。修改请优先用「文件加密管理 → 基础配置」可视化页面。
+  # 字典与 CseBizDictionary.ALL / V1_1_6 种子完全对齐。
+  cse:
+    enabled: true
+    public-paths:
+      - public/
+      - captcha/
+      - appVersion/
+    encrypted-paths:
+      - avatar/
+      - cs-brand/
+      - cs-visitor/
+      - airag/
+      - comment/
+      - jeditor/
+      - markdown/
+      - import/
+      - temp/
+    thumb-width: 256
+    dek-cache-seconds: 10
+    # 用户自助迁移老 fid 到 avatar 业务的接口（POST /sys/user/migrateAvatar）配置
+    migrate-avatar:
+      scan-tables:
+        - cs_message.message_content
+        - cs_message_attachment.attachment_url
+      warn-after-days: 30
   # AIRag向量库
   ai-rag:
     embed-store:

@@ -78,6 +78,7 @@
   import { usePopBiz } from '/@/components/jeecg/OnLine/hooks/usePopBiz';
   import { useMessage } from '/@/hooks/web/useMessage';
   import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
+  import { withImageCache } from '/@/utils/file/imageCache';
   import { createImgPreview } from '/@/components/Preview/index';
 
   export default defineComponent({
@@ -257,7 +258,9 @@
         if (text && text.indexOf(',') > 0) {
           text = text.substring(0, text.indexOf(','));
         }
-        return getFileAccessHttpUrl(text);
+        // CSE: cse:// 图片需经 withImageCache 解密成 blob URL
+        const u = getFileAccessHttpUrl(text);
+        return u ? withImageCache(u) : u;
       }
       /**
        * 2024-07-24
@@ -273,7 +276,9 @@
           let arr = text.split(',');
           for (let str of arr) {
             if (str) {
-              imgList.push(getFileAccessHttpUrl(str));
+              // CSE: 预览也需 withImageCache 解密
+              const u = getFileAccessHttpUrl(str);
+              if (u) imgList.push(withImageCache(u));
             }
           }
           createImgPreview({ imageList: imgList });

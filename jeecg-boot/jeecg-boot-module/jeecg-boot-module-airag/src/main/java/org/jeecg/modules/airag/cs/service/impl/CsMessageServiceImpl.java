@@ -249,7 +249,8 @@ public class CsMessageServiceImpl implements ICsMessageService {
             userMessage.setMsgType(msgType);
         }
         if (oConvertUtils.isNotEmpty(extra)) {
-            userMessage.setExtra(extra);
+            // 【S-P0-8】保存前规范化 attachments[].type，避免历史/前端漏传导致前端 cse:// 兜底破图
+            userMessage.setExtra(normalizeAttachmentTypes(extra));
         }
 
         // 保存到MongoDB（一次性，包含附件信息）
@@ -426,7 +427,8 @@ public class CsMessageServiceImpl implements ICsMessageService {
             agentMessage.setMsgType(msgType);
         }
         if (oConvertUtils.isNotEmpty(extra)) {
-            agentMessage.setExtra(extra);
+            // 【S-P0-8】保存前规范化 attachments[].type
+            agentMessage.setExtra(normalizeAttachmentTypes(extra));
         }
         agentMessage.setSenderName(agentName); // 显示实际客服名称
         
@@ -1332,6 +1334,66 @@ public class CsMessageServiceImpl implements ICsMessageService {
             }
         }
         return "[消息]";
+    }
+
+    /**
+     * 【S-P0-8】保存消息前规范化 extra.attachments[].type。
+     *
+     * 历史/前端漏传场景：
+     *  - attachment.type 为 null/空 → 前端拿不到 cse:// 类型分支会破图（v-if 会兜底但不展示视频）
+     *
+     * 处理：按 url 后缀做兜底推断，覆盖到合法集合 {image, video, audio, file}。
+     * 完全无法识别的扩展名兜底为 "file"。
+     *
+     * @param extra 原始 extra JSON 字符串
+     * @return 规范化后的 extra JSON 字符串；解析异常时原样返回（不阻塞业务）
+     */
+    static String normalizeAttachmentTypes(String extra) {
+        if (oConvertUtils.isEmpty(extra)) return extra;
+        try {
+            JSONObject obj = JSONObject.parseObject(extra);
+            if (obj == null || !obj.containsKey("attachments")) return extra;
+            JSONArray list = obj.getJSONArray("attachments");
+            if (list == null || list.isEmpty()) return extra;
+            boolean changed = false;
+            for (int i = 0; i < list.size(); i++) {
+                JSONObject att = list.getJSONObject(i);
+                if (att == null) continue;
+                String type = att.getString("type");
+                if (oConvertUtils.isNotEmpty(type)) continue;
+                String url = att.getString("url");
+                String inferred = inferAttachmentTypeByUrl(url);
+                att.put("type", inferred);
+                changed = true;
+            }
+            if (!changed) return extra;
+            obj.put("attachments", list);
+            return obj.toJSONString();
+        } catch (Exception e) {
+            log.warn("[CS-Message] normalizeAttachmentTypes failed: {}", e.getMessage());
+            return extra;
+        }
+    }
+
+    /** 按 url 后缀推断 attachment.type，命中合法集合 {image, video, audio, file}（默认 file） */
+    static String inferAttachmentTypeByUrl(String url) {
+        if (oConvertUtils.isEmpty(url)) return "file";
+        // 去除 query
+        int q = url.indexOf('?');
+        String pure = q >= 0 ? url.substring(0, q) : url;
+        int dot = pure.lastIndexOf('.');
+        if (dot < 0 || dot == pure.length() - 1) return "file";
+        String ext = pure.substring(dot + 1).toLowerCase(Locale.ROOT);
+        switch (ext) {
+            case "jpg": case "jpeg": case "png": case "gif": case "webp": case "bmp": case "svg": case "ico":
+                return "image";
+            case "mp4": case "webm": case "mov": case "avi": case "mkv": case "m4v":
+                return "video";
+            case "mp3": case "wav": case "ogg": case "m4a": case "aac": case "flac":
+                return "audio";
+            default:
+                return "file";
+        }
     }
 
     private List<CsMessage> toCsMessages(List<ChatMessage> chatMessages, String conversationId) {

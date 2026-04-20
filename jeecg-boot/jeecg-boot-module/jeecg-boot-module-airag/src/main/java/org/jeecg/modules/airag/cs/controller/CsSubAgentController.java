@@ -45,6 +45,9 @@ public class CsSubAgentController {
     @Autowired
     private ISysBaseAPI sysBaseAPI;
 
+    @Autowired
+    private org.jeecg.modules.airag.cs.security.AvatarGuard avatarGuard;
+
     /** 子客服默认角色编码 */
     private static final String SUB_AGENT_ROLE_CODE = "cs_sub_agent";
 
@@ -183,6 +186,8 @@ public class CsSubAgentController {
         }
 
         // 4. 创建 cs_agent 记录
+        // CSE Phase2 Guard: 拒绝非 avatar/ 业务前缀的 cse:// fid 写入头像字段
+        avatarGuard.validateAvatar(form.getAvatar());
         CsAgent subAgent = new CsAgent();
         subAgent.setUserId(sysUserId);
         subAgent.setNickname(oConvertUtils.isNotEmpty(form.getNickname()) ? form.getNickname() : form.getUsername());
@@ -238,6 +243,8 @@ public class CsSubAgentController {
             subAgent.setMaxSessions(form.getMaxSessions());
         }
         if (form.getAvatar() != null) {
+            // CSE Phase2 Guard: 拒绝非 avatar/ 业务前缀的 cse:// fid 写入头像字段
+            avatarGuard.validateAvatar(form.getAvatar());
             subAgent.setAvatar(form.getAvatar());
         }
         if (form.getWelcomeMessage() != null) {

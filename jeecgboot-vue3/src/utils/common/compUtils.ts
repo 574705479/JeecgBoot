@@ -24,6 +24,10 @@ const baseApiUrl = globSetting.domainUrl;
 export const getFileAccessHttpUrl = (fileUrl, prefix = 'http') => {
   let result = fileUrl;
   try {
+    // CSE 端到端加密资源：原样返回，由 <img>/Avatar 上层通过 withImageCache(...) 解密
+    if (typeof fileUrl === 'string' && fileUrl.indexOf('cse://') === 0) {
+      return fileUrl;
+    }
     if (fileUrl && fileUrl.length > 0 && !fileUrl.startsWith(prefix)) {
       //判断是否是数组格式
       let isArray = fileUrl.indexOf('[') != -1;

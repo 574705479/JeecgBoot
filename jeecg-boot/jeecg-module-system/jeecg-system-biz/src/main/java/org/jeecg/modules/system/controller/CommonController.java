@@ -180,6 +180,13 @@ public class CommonController {
                 response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
                 return;
             }
+            // CSE 兼容：明文老入口禁止读取 .cse 加密文件，避免外泄密文
+            // 加密文件必须走 /sys/secure/file/{fid}（CSE 端到端加密链路）
+            if (decoded.endsWith(".cse") || decoded.contains(".cse/") || decoded.contains(".cse\\")) {
+                log.warn("[CSE] 拒绝通过明文入口读取加密文件: {}", decoded);
+                response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                return;
+            }
 
             SsrfFileTypeFilter.checkDownloadFileType(decoded);
 

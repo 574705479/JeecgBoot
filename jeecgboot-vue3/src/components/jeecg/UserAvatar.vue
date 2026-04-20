@@ -32,6 +32,7 @@
   import { ref, watchEffect, defineComponent } from 'vue';
   import { defHttp } from '/@/utils/http/axios';
   import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
+  import { withImageCacheAsync } from '/@/utils/file/imageCache';
   
   export default defineComponent({
     name: 'UserAvatar',
@@ -61,7 +62,8 @@
         let userInfo = props.detail;
         if(userInfo){
           if(userInfo.avatar){
-            userAvatar.value = getFileAccessHttpUrl(userInfo.avatar);
+            const raw = getFileAccessHttpUrl(userInfo.avatar);
+            try { userAvatar.value = await withImageCacheAsync(raw); } catch { userAvatar.value = raw; }
           }
           if(userInfo.realname){
             userLabel.value = userInfo.realname;
@@ -81,7 +83,8 @@
         if(data && data.length > 0){
           let temp = data[0].avatar;
           if (temp) {
-            userAvatar.value = getFileAccessHttpUrl(temp)
+            const raw = getFileAccessHttpUrl(temp);
+            try { userAvatar.value = await withImageCacheAsync(raw); } catch { userAvatar.value = raw; }
           }
           userLabel.value = data[0].realname;
           phone.value = data[0].phone;

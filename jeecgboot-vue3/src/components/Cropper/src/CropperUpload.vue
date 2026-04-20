@@ -36,6 +36,8 @@
   import { useModal } from '/@/components/Modal';
   import { useMessage } from '/@/hooks/web/useMessage';
   import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
+  import { withImageCache } from '/@/utils/file/imageCache';
+  import { isCseUrl } from '/@/utils/cse/cseUrl';
   import { DeleteOutlined } from '@ant-design/icons-vue';
 
   export default defineComponent({
@@ -65,10 +67,11 @@
         innerValue.value = props.value || '';
       });
 
-      /** 将相对路径转换为完整 URL 用于预览显示 */
+      /** 将相对路径转换为完整 URL 用于预览显示，cse:// 走 withImageCache 异步解密 */
       const displayUrl = computed(() => {
         const v = innerValue.value;
         if (!v) return '';
+        if (isCseUrl(v)) return withImageCache(v);
         if (v.startsWith('http://') || v.startsWith('https://') || v.startsWith('data:')) return v;
         return getFileAccessHttpUrl(v);
       });

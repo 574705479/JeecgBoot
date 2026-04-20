@@ -64,6 +64,13 @@
   // import {pageApi} from "@/views/super/airag/aiflow/pages/api";
   import { defHttp } from "@/utils/http/axios";
   import { getFileAccessHttpUrl } from "@/utils/common/compUtils";
+  import { withImageCache } from '/@/utils/file/imageCache';
+  import { isCseUrl } from '/@/utils/cse/cseUrl';
+  function wrapCse(u: string): string {
+    if (!u) return u;
+    if (isCseUrl(u) || u.startsWith('http') || u.startsWith('/')) return withImageCache(u);
+    return u;
+  }
   import defaultFlowImg from "@/assets/images/ai/aiflow.png";
 
   export default {
@@ -178,7 +185,7 @@
        * 获取图标
        */
       function getImage(icon) {
-        return icon ? getFileAccessHttpUrl(icon) : defaultFlowImg;
+        return icon ? wrapCse(getFileAccessHttpUrl(icon)) : defaultFlowImg;
       }
       
       /**

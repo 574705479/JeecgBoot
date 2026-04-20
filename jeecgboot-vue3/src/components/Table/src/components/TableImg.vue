@@ -9,7 +9,7 @@
               :style="{
                 display: index === 0 ? '' : 'none !important',
               }"
-              :src="srcPrefix + img"
+              :src="resolveSrc(img)"
             />
           </template>
         </PreviewGroup>
@@ -17,7 +17,7 @@
     </Badge>
     <PreviewGroup v-else>
       <template v-for="(img, index) in imgList" :key="img">
-        <Image :width="size" :style="{ marginLeft: index === 0 ? 0 : margin }" :src="srcPrefix + img" />
+        <Image :width="size" :style="{ marginLeft: index === 0 ? 0 : margin }" :src="resolveSrc(img)" />
       </template>
     </PreviewGroup>
   </div>
@@ -28,6 +28,8 @@
   import { useDesign } from '/@/hooks/web/useDesign';
   import { Image, Badge } from 'ant-design-vue';
   import { propTypes } from '/@/utils/propTypes';
+  import { withImageCache } from '/@/utils/file/imageCache';
+  import { isCseUrl } from '/@/utils/cse/cseUrl';
 
   export default defineComponent({
     name: 'TableImage',
@@ -52,7 +54,18 @@
       });
 
       const { prefixCls } = useDesign('basic-table-img');
-      return { prefixCls, getWrapStyle };
+
+      // cse:// 不能跟 srcPrefix 拼接，直接走 withImageCache 解密；其他保持原 srcPrefix + img 行为
+      function resolveSrc(img: string): string {
+        if (!img) return '';
+        if (isCseUrl(img)) return withImageCache(img);
+        const full = `${props.srcPrefix || ''}${img}`;
+        if (isCseUrl(full)) return withImageCache(full);
+        if (full.startsWith('http') || full.startsWith('/')) return withImageCache(full);
+        return full;
+      }
+
+      return { prefixCls, getWrapStyle, resolveSrc };
     },
   });
 </script>

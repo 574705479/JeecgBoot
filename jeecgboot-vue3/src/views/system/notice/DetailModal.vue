@@ -44,6 +44,9 @@
   import { encryptByBase64 } from '@/utils/cipher';
   import { useGlobSetting } from '@/hooks/setting';
   import { getToken } from "@/utils/auth";
+  import { downloadByUrl } from '/@/utils/file/downloadCse';
+  import { isCseUrl, parseCseFid } from '/@/utils/cse/cseUrl';
+  import { decryptFileToObjectUrl } from '/@/utils/cse/cseDecrypt';
   const glob = useGlobSetting();
   // 获取props
   defineProps({
@@ -89,19 +92,39 @@
    * 下载文件
    * @param filePath
    */
-  function handleDownloadFile(filePath) {
+  async function handleDownloadFile(filePath) {
+    // CSE 加密文件走解密 → blob 下载；普通文件保持原 window.open 行为
+    if (isCseUrl(filePath)) {
+      try {
+        const fid = parseCseFid(filePath);
+        await downloadByUrl(filePath, fid || undefined);
+      } catch (e) {
+        console.error('[CSE] 公告附件下载失败', e);
+      }
+      return;
+    }
     window.open(getFileAccessHttpUrl(filePath), '_blank');
   }
   /**
    * 预览文件
    * @param filePath
    */
-  function handleViewFile(filePath) {
-    if (filePath) {
-      let url = encodeURIComponent(encryptByBase64(filePath));
-      let previewUrl = `${glob.viewUrl}?url=` + url;
-      window.open(previewUrl, '_blank');
+  async function handleViewFile(filePath) {
+    if (!filePath) return;
+    if (isCseUrl(filePath)) {
+      const fid = parseCseFid(filePath);
+      if (!fid) return;
+      try {
+        const blobUrl = await decryptFileToObjectUrl(fid);
+        window.open(blobUrl, '_blank');
+      } catch (e) {
+        console.error('[CSE] 公告附件预览失败', e);
+      }
+      return;
     }
+    let url = encodeURIComponent(encryptByBase64(filePath));
+    let previewUrl = `${glob.viewUrl}?url=` + url;
+    window.open(previewUrl, '_blank');
   }
 </script>
 

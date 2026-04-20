@@ -4,6 +4,7 @@ import { filterMultiDictText } from '/@/utils/dict/JDictSelectUtil';
 import { computed, defineAsyncComponent, h, reactive, ref, toRaw, unref, watch, markRaw } from 'vue';
 import { useRouter } from 'vue-router';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
+import { withImageCache } from '/@/utils/file/imageCache';
 import { getAreaTextByCode } from '/@/components/Form/src/utils/Area';
 import { createImgPreview } from '/@/components/Preview/index';
 import { importViewsFile, _eval } from '/@/utils';
@@ -441,7 +442,9 @@ export function useTableColumns(onlineTableContext, extConfigJson: Ref<any | und
       text = split(text)[0];
       // update-end--author:liaozhiyang---date:20250325---for：【issues/7990】图片参数中包含逗号会错误的识别成多张图
     }
-    return getFileAccessHttpUrl(text);
+    // CSE: cse:// 图片需经 withImageCache 解密成 blob URL
+    const u = getFileAccessHttpUrl(text);
+    return u ? withImageCache(u) : u;
   }
 
   /**
@@ -502,7 +505,9 @@ export function useTableColumns(onlineTableContext, extConfigJson: Ref<any | und
       // update-end--author:liaozhiyang---date:20250325---for：【issues/7990】图片参数中包含逗号会错误的识别成多张图
       for (let str of arr) {
         if (str) {
-          imgList.push(getFileAccessHttpUrl(str));
+          // CSE: 预览也需 withImageCache 解密
+          const u = getFileAccessHttpUrl(str);
+          if (u) imgList.push(withImageCache(u));
         }
       }
       createImgPreview({ imageList: imgList });

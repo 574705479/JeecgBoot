@@ -14,6 +14,8 @@
   import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
   import { uploadFile } from '@/api/common/api';
   import {$electron} from "@/electron";
+  // t17: Vditor 渲染钩子内 cse:// 图解密替换 src（落库仍是 cse://，避免 blob URL 写进数据库）
+  import { rewriteCseImages } from '/@/directives/cseHtmlImg';
 
   type Lang = 'zh_CN' | 'en_US' | 'ja_JP' | 'ko_KR' | undefined;
 
@@ -202,6 +204,8 @@
             valueRef.value = v;
             emit('update:value', v);
             emit('change', v);
+            // 输入触发渲染重绘后，重新扫描 cse:// 图片
+            scheduleCseRewrite();
           },
           after: () => {
             nextTick(() => {
@@ -210,6 +214,10 @@
               vditorRef.value = insEditor;
               initedRef.value = true;
               emit('get', instance);
+              // 编辑器渲染完成 → 启动 MutationObserver 持续监听容器内 cse:// 图
+              startCseObserver(wrapEl);
+              // 首次扫描
+              rewriteCseImages(wrapEl);
             });
           },
           blur: () => {
@@ -234,6 +242,37 @@
         } catch (error) {}
         vditorRef.value = null;
         initedRef.value = false;
+        // 卸载 cse 图片扫描 observer + 防抖定时器
+        stopCseObserver();
+        if (cseRewriteTimer) {
+          clearTimeout(cseRewriteTimer);
+          cseRewriteTimer = null;
+        }
+      }
+
+      // ─── t17：cse:// 图渲染钩子辅助 ───────────────────────
+      let cseObserver: MutationObserver | null = null;
+      let cseRewriteTimer: ReturnType<typeof setTimeout> | null = null;
+      function startCseObserver(root: HTMLElement) {
+        try {
+          stopCseObserver();
+          cseObserver = new MutationObserver(() => scheduleCseRewrite());
+          cseObserver.observe(root, { childList: true, subtree: true });
+        } catch {}
+      }
+      function stopCseObserver() {
+        try {
+          cseObserver?.disconnect();
+        } catch {}
+        cseObserver = null;
+      }
+      /** 防抖：input/mutation 高频触发时合并扫描 */
+      function scheduleCseRewrite() {
+        if (cseRewriteTimer) clearTimeout(cseRewriteTimer);
+        cseRewriteTimer = setTimeout(() => {
+          const root = unref(wrapRef) as HTMLElement | null;
+          if (root) rewriteCseImages(root);
+        }, 100);
       }
 
       onMountedOrActivated(init);

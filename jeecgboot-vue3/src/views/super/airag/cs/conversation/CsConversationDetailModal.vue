@@ -84,11 +84,11 @@
                             <span class="sender-name">{{ msg.senderName || '访客' }}</span>
                             <span class="msg-time">{{ formatTime(msg.createTime) }}</span>
                           </div>
-                          <div class="msg-bubble user-bubble" v-html="renderMessage(msg.content)"></div>
+                          <div class="msg-bubble user-bubble" v-html="renderMessage(msg.content)" v-cse-html></div>
                           <div v-if="getMediaAttachments(msg).length" class="msg-media-grid" :class="`media-grid--${Math.min(getMediaGridData(msg).total, 4)}`">
                             <div class="media-item" v-for="(item, idx) in getMediaGridData(msg).items" :key="idx">
                               <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview(msg, item)" />
-                              <video v-else :src="getAttachmentUrl(item)" controls playsinline />
+                              <video v-else-if="getAttachmentUrl(item)" :src="getAttachmentUrl(item)" controls playsinline />
                               <div v-if="idx === getMediaGridData(msg).items.length - 1 && getMediaGridData(msg).extraCount > 0" class="media-more" @click.stop="openMediaViewer(msg)">+{{ getMediaGridData(msg).extraCount }}</div>
                             </div>
                           </div>
@@ -114,11 +114,11 @@
                             <a-tag v-else-if="!isAiMessage(msg)" color="green" size="small">客服</a-tag>
                             <a-tag v-if="msg.status === 3" color="red" size="small">已撤回</a-tag>
                           </div>
-                          <div class="msg-bubble agent-bubble" :class="{ 'ai-bubble': isAiMessage(msg), 'revoked-bubble': msg.status === 3 }" v-html="renderMessage(msg.content)"></div>
+                          <div class="msg-bubble agent-bubble" :class="{ 'ai-bubble': isAiMessage(msg), 'revoked-bubble': msg.status === 3 }" v-html="renderMessage(msg.content)" v-cse-html></div>
                           <div v-if="getMediaAttachments(msg).length" class="msg-media-grid" :class="`media-grid--${Math.min(getMediaGridData(msg).total, 4)}`">
                             <div class="media-item" v-for="(item, idx) in getMediaGridData(msg).items" :key="idx">
                               <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview(msg, item)" />
-                              <video v-else :src="getAttachmentUrl(item)" controls playsinline />
+                              <video v-else-if="getAttachmentUrl(item)" :src="getAttachmentUrl(item)" controls playsinline />
                               <div v-if="idx === getMediaGridData(msg).items.length - 1 && getMediaGridData(msg).extraCount > 0" class="media-more" @click.stop="openMediaViewer(msg)">+{{ getMediaGridData(msg).extraCount }}</div>
                             </div>
                           </div>
@@ -254,7 +254,7 @@
       <div class="media-viewer-grid">
         <div class="media-viewer-item" v-for="(item, index) in mediaViewerList" :key="`${item.url}_${index}`">
           <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreviewFromList(mediaViewerList, item)" />
-          <video v-else :src="getAttachmentUrl(item)" controls />
+          <video v-else-if="getAttachmentUrl(item)" :src="getAttachmentUrl(item)" controls />
         </div>
       </div>
     </a-modal>
@@ -269,8 +269,11 @@ import { MessageOutlined } from '@ant-design/icons-vue';
 import { Typography } from 'ant-design-vue';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
 import { getBrandSetting } from '/@/settings/brandSetting';
-import { resolveBrandUrl } from '/@/utils/brand';
+import { resolveBrandPublicUrl } from '/@/utils/brand';
 import { withImageCache, getCachedChatWindowConfig } from '../utils/csImageCache';
+import { withMediaCache } from '/@/utils/file/imageCache';
+import { isCseUrl } from '/@/utils/cse/cseUrl';
+import { vCseHtml } from '../utils/cseHtmlImg';
 import { createImgPreview } from '/@/components/Preview';
 import { useGlobSetting } from '/@/hooks/setting';
 import { decryptTransport, decryptMessage } from '../utils/csEncrypt';
@@ -302,7 +305,7 @@ async function loadChatWindowSettings() {
 function getAiAvatarUrl(): string {
   if (chatWindowLogo.value) return withImageCache(getFileAccessHttpUrl(chatWindowLogo.value));
   const brandLogo = getBrandSetting().logoUrl;
-  if (brandLogo) return withImageCache(resolveBrandUrl(brandLogo));
+  if (brandLogo) return resolveBrandPublicUrl(brandLogo);
   return '';
 }
 
@@ -395,7 +398,24 @@ function getMediaGridData(msg: any) {
 }
 
 function getAttachmentUrl(attachment: any) {
-  return getFileAccessHttpUrl(attachment?.url);
+  const url = attachment?.url;
+  if (!url) return '';
+  const type = String(attachment?.type || '').toLowerCase();
+  const resolved = getFileAccessHttpUrl(url);
+  if (type === 'image') {
+    return withImageCache(resolved);
+  }
+  if (type === 'video') {
+    if (isCseUrl(resolved)) {
+      const mime = String(attachment?.mime || attachment?.contentType || 'video/mp4');
+      return withMediaCache(resolved, mime);
+    }
+    return resolved;
+  }
+  // 【S-P0-8】未知/file/audio 等类型：cse:// 不能直接交给 <img>/<video>/window.open，兜底返回 ''；
+  // 业务侧用 v-if + 下载入口（downloadCse）处理。
+  if (isCseUrl(resolved)) return '';
+  return resolved;
 }
 
 function openImagePreview(msg: any, item: any) {

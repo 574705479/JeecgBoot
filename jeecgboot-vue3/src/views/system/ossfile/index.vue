@@ -26,6 +26,8 @@
   import { useGlobSetting } from '/@/hooks/setting';
   import { getToken } from '/@/utils/auth';
   import {encryptByBase64} from "@/utils/cipher";
+  import { isCseUrl, parseCseFid } from '/@/utils/cse/cseUrl';
+  import { decryptFileToObjectUrl } from '/@/utils/cse/cseDecrypt';
 
   const { createMessage } = useMessage();
   const glob = useGlobSetting();
@@ -66,17 +68,25 @@
   /**
    * 预览
    */
-  function handleView(record) {
+  async function handleView(record) {
     if (record && record.url) {
-      console.log('glob.onlineUrl', glob.viewUrl);
-      // let filePath = encodeURIComponent(record.url);
+      // CSE 加密文件：本地解密为 blob URL 后直接在新标签预览（在线预览服务无法访问加密对象）
+      if (isCseUrl(record.url)) {
+        const fid = parseCseFid(record.url);
+        if (!fid) {
+          createMessage.error('CSE URL 缺少 fid');
+          return;
+        }
+        try {
+          const blobUrl = await decryptFileToObjectUrl(fid, { mime: 'image/*' });
+          window.open(blobUrl, '_blank');
+        } catch (e: any) {
+          createMessage.error('解密失败：' + (e?.message || e));
+        }
+        return;
+      }
       let url = encodeURIComponent(encryptByBase64(record.url));
-      // //文档采用pdf预览高级模式
-      // if(filePath.endsWith(".pdf") || filePath.endsWith(".doc") || filePath.endsWith(".docx")){
-      //   filePath = filePath
-      // }
       let previewUrl = `${glob.viewUrl}?url=` + url;
-      
       window.open(previewUrl, '_blank');
     }
   }

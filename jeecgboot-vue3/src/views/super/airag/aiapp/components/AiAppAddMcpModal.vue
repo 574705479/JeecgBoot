@@ -62,6 +62,13 @@
   import { Pagination } from 'ant-design-vue';
   import { list as mcpList } from '@/views/super/airag/aimcp/AiragMcp.api';
   import { getFileAccessHttpUrl } from '@/utils/common/compUtils';
+  import { withImageCache } from '/@/utils/file/imageCache';
+  import { isCseUrl } from '/@/utils/cse/cseUrl';
+  function wrapCse(u: string): string {
+    if (!u) return u;
+    if (isCseUrl(u) || u.startsWith('http') || u.startsWith('/')) return withImageCache(u);
+    return u;
+  }
   import defaultLogo from '@/views/super/airag/aimcp/imgs/mcpLogo.png';
   import { Icon } from '/@/components/Icon';
 
@@ -94,7 +101,7 @@
       });
 
       function getIcon(icon){
-        return icon ? getFileAccessHttpUrl(icon) : defaultLogo;
+        return icon ? wrapCse(getFileAccessHttpUrl(icon)) : defaultLogo;
       }
 
       async function handleOk() {

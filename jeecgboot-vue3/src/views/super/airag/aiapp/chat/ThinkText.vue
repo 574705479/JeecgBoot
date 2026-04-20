@@ -1,13 +1,14 @@
 <template>
   <div v-if="text != ''" class="textWrap" :class="[inversion === 'user' ? 'self' : 'chatgpt']" ref="textRef">
     <div :style="{ width: getIsMobile ? screenWidth : 'auto' }">
-      <div class="markdown-body" :class="{ 'markdown-body-generate': loading }" :style="{ color: error ? '#FF4444 !important' : '' }" v-html="text" />
+      <div class="markdown-body" :class="{ 'markdown-body-generate': loading }" :style="{ color: error ? '#FF4444 !important' : '' }" v-html="text" v-cse-html />
     </div>
   </div>
+  <ImageViewer v-if="amplifyImage" :imageUrl="imageUrl" @hide="pictureHide"></ImageViewer>
 </template>
 
 <script setup lang="ts">
-  import { computed, onMounted, onUnmounted, onUpdated, ref } from 'vue';
+  import { computed, onMounted, onUnmounted, ref } from 'vue';
   import MarkdownIt from 'markdown-it';
   import './style/github-markdown.less';
   import './style/highlight.less';
@@ -17,6 +18,7 @@
   import mila from 'markdown-it-link-attributes';
   import mdKatex from '@traptitech/markdown-it-katex';
   import { useGlobSetting } from '@/hooks/setting';
+  import ImageViewer from '@/views/super/airag/aiapp/chat/components/ImageViewer.vue';
 
   /**
    * 屏幕宽度
@@ -89,58 +91,33 @@
   function highlightBlock(str: string, lang?: string) {
     return `<pre class="code-block-wrapper"><div class="code-block-header"><span class="code-block-header__lang">${lang}</span><span class="code-block-header__copy">复制代码</span></div><code class="hljs code-block-body ${lang}">${str}</code></pre>`;
   }
-  function addCopyEvents() {
-    if (textRef.value) {
-      const copyBtn = textRef.value.querySelectorAll('.code-block-header__copy');
-      copyBtn.forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const code = btn.parentElement?.nextElementSibling?.textContent;
-          if (code) {
-            copyToClip(code).then(() => {
-              btn.textContent = '复制成功';
-              setTimeout(() => {
-                btn.textContent = '复制代码';
-              }, 1e3);
-            });
-          }
-        });
-      });
-    }
-  }
-
-  function removeCopyEvents() {
-    if (textRef.value) {
-      const copyBtn = textRef.value.querySelectorAll('.code-block-header__copy');
-      copyBtn.forEach((btn) => {
-        btn.removeEventListener('click', () => {});
-      });
-    }
-  }
 
   /**
-   * 添加图片点击事件
+   * 【S-P0-7】事件委托：在 textRef 容器上一次绑定，
+   * 通过 e.target.closest 区分"复制按钮"与"图片"。
+   * 替代原来 onUpdated 反复 querySelector + addEventListener 的纯堆叠模式。
    */
-  function addImageClickEvent() {
-    if (textRef.value) {
-      const image = textRef.value.querySelectorAll('img');
-      image.forEach((img) => {
-        img.addEventListener('click', () => {
-          imageUrl.value = img.src;
-          amplifyImage.value = true;
+  function delegatedClickHandler(e: Event) {
+    const target = e.target as HTMLElement | null;
+    if (!target) return;
+    const copyBtn = target.closest('.code-block-header__copy') as HTMLElement | null;
+    if (copyBtn) {
+      const code = copyBtn.parentElement?.nextElementSibling?.textContent;
+      if (code) {
+        copyToClip(code).then(() => {
+          copyBtn.textContent = '复制成功';
+          setTimeout(() => {
+            copyBtn.textContent = '复制代码';
+          }, 1e3);
         });
-      });
+      }
+      return;
     }
-  }
-
-  /**
-   * 移出图片点击事件
-   */
-  function removeImageClickEvent() {
-    if (textRef.value) {
-      const image = textRef.value.querySelectorAll('img');
-      image.forEach((img) => {
-        img.removeEventListener('click', () => {});
-      });
+    // 图片放大：限定 markdown-body 内，避免后续模板新增小图标被误命中
+    if (target.tagName === 'IMG' && target.closest('.markdown-body')) {
+      const img = target as HTMLImageElement;
+      imageUrl.value = img.src;
+      amplifyImage.value = true;
     }
   }
 
@@ -167,20 +144,13 @@
   }
 
   onMounted(() => {
-    addCopyEvents();
-    addImageClickEvent();
+    textRef.value?.addEventListener('click', delegatedClickHandler);
     setMarkdownBodyWidth();
     window.addEventListener('resize', setMarkdownBodyWidth);
   });
 
-  onUpdated(() => {
-    addCopyEvents();
-    addImageClickEvent();
-  });
-
   onUnmounted(() => {
-    removeCopyEvents();
-    removeImageClickEvent();
+    textRef.value?.removeEventListener('click', delegatedClickHandler);
     window.removeEventListener('resize', setMarkdownBodyWidth);
   });
 

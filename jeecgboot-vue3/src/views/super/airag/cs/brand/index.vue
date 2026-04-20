@@ -86,7 +86,7 @@
                 <span class="dot dot-green"></span>
               </div>
               <div class="browser-tab">
-                <img :src="previewFaviconUrl" class="tab-favicon" />
+                <CseImage :src="formState.faviconUrl" :preview="false" img-class="tab-favicon" alt="favicon" fallback="/logo.svg" />
                 <span class="tab-title">登录 - {{ formState.appTitle || '客服系统' }}</span>
               </div>
             </div>
@@ -100,7 +100,7 @@
               <div class="lp-card">
                 <div class="lp-header">
                   <div class="lp-avatar-ring">
-                    <img :src="previewLogoUrl" alt="logo" class="lp-logo-img" />
+                    <CseImage :src="formState.logoUrl" :preview="false" img-class="lp-logo-img" alt="logo" fallback="/logo.svg" />
                   </div>
                   <div class="lp-title">{{ formState.appTitle || '客服系统' }}</div>
                   <div v-if="formState.appSubtitle" class="lp-subtitle">{{ formState.appSubtitle }}</div>
@@ -130,14 +130,16 @@
 </template>
 
 <script setup lang="ts" name="CsBrandConfigPage">
-import { computed, onMounted, onBeforeUnmount, reactive, ref, nextTick } from 'vue';
+import { computed, onMounted, onBeforeUnmount, reactive, ref, nextTick, watch } from 'vue';
 import { defHttp } from '/@/utils/http/axios';
 import { useMessage } from '/@/hooks/web/useMessage';
-import { loadBrandConfig, applyBrandToDom, resolveBrandUrl } from '/@/utils/brand';
+import { loadBrandConfig, applyBrandToDom } from '/@/utils/brand';
 import { decryptTransport } from '../utils/csEncrypt';
 import { BRAND_STORAGE_KEY, DEFAULT_BRAND } from '/@/settings/brandSetting';
-import { uploadImg } from '/@/api/sys/upload';
+import { uploadBrandImg as uploadImg } from '/@/api/sys/upload';
 import CropperUpload from '/@/components/Cropper/src/CropperUpload.vue';
+import CseImage from '/@/components/CseImage/index.vue';
+import { withImageCacheAsync } from '/@/utils/file/imageCache';
 
 defineOptions({ name: 'CsBrandConfigPage' });
 
@@ -155,21 +157,35 @@ const formState = reactive({
   loadingTitle: '',
 });
 
-const previewLogoUrl = computed(() => {
-  return resolveBrandUrl(formState.logoUrl || '/logo.svg');
-});
-
-const previewFaviconUrl = computed(() => {
-  return resolveBrandUrl(formState.faviconUrl || '/logo.svg');
-});
+// 预览面板（已登录管理员）：cse:// 走前端解密链路（withImageCacheAsync），不走匿名代理白名单。
+// 这样上传后无需点保存、无需 F5 即可立即看到新图，彻底脱离 CsBrandFidWhitelist 依赖。
+// CseImage 组件内部封装了 withImageCacheAsync，logo / favicon 直接传 formState 字段即可。
+//
+// 背景图是 CSS background-image，需要 URL 字符串而非 img 元素 → 用 ref + watch 异步拿 blob URL。
+// imageCache 内部自管 LRU + URL.revokeObjectURL，无需手动释放。
+const previewBgUrl = ref<string>('');
+watch(
+  () => formState.loginBgUrl,
+  async (v) => {
+    if (!v) {
+      previewBgUrl.value = '';
+      return;
+    }
+    try {
+      previewBgUrl.value = (await withImageCacheAsync(v)) || '';
+    } catch {
+      previewBgUrl.value = '';
+    }
+  },
+  { immediate: true },
+);
 
 const previewBgStyle = computed(() => {
   const base: any = {
     background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
   };
-  if (formState.loginBgUrl) {
-    const bgUrl = resolveBrandUrl(formState.loginBgUrl);
-    base.backgroundImage = `url(${bgUrl})`;
+  if (previewBgUrl.value) {
+    base.backgroundImage = `url(${previewBgUrl.value})`;
     base.backgroundSize = 'cover';
     base.backgroundPosition = 'center';
   }

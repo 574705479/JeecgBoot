@@ -92,6 +92,23 @@
 
     // 按钮内容：优先自定义图标，其次文字，最后默认
     var btnChildren = []
+    // 嵌入端 cse:// 自动转匿名代理 URL：
+    //  baseUrl 是站点根域名（如 https://kefu.com），后端 API 在 /jeecg-boot/ 上下文下，
+    //  所以默认拼 ${baseUrl}/jeecg-boot/cs/brand/file/{fid}（标准 jeecg 部署）。
+    //  自定义 server.servlet.context-path 部署可通过 options.apiBase 覆盖。
+    if (btnIcon && typeof btnIcon === 'string' && btnIcon.indexOf('cse://') === 0) {
+      var widgetBaseUrl = (opts.baseUrl || '').replace(/\/$/, '')
+      var widgetApiBase = opts.apiBase || (widgetBaseUrl ? widgetBaseUrl + '/jeecg-boot' : '')
+      var widgetFidMatch = btnIcon.substring('cse://'.length).match(/^[a-zA-Z0-9]{20,40}/)
+      if (widgetFidMatch && widgetApiBase) {
+        btnIcon = widgetApiBase + '/cs/brand/file/' + widgetFidMatch[0]
+      } else {
+        try {
+          console.warn('[cs-widget] cse:// 转匿名代理失败：缺少 baseUrl 或 fid 格式异常，回退默认按钮。')
+        } catch (_e) {}
+        btnIcon = ''
+      }
+    }
     if (btnIcon) {
       btnChildren.push(createEl('img', {
         style: {

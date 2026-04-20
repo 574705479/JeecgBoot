@@ -1,7 +1,7 @@
 <template>
   <div v-if="text != ''" class="textWrap" :class="[inversion === 'user' ? 'self' : 'chatgpt']" ref="textRef">
     <div v-if="inversion != 'user'" :style="{ width: getIsMobile? screenWidth : 'auto' }">
-      <div class="markdown-body" :class="{ 'markdown-body-generate': loading }" :style="{color:error?'#FF4444 !important':''}" v-html="text" />
+      <div class="markdown-body" :class="{ 'markdown-body-generate': loading }" :style="{color:error?'#FF4444 !important':''}" v-html="text" v-cse-html />
       <template v-if="showRefKnow">
         <a-divider orientation="left">引用</a-divider>
         <template v-for="(item, idx) in referenceKnowledge" :key="idx">
@@ -21,13 +21,13 @@
         </template>
       </template>
     </div>
-    <div v-else class="msg" v-html="text" />
+    <div v-else class="msg" v-html="text" v-cse-html />
   </div>
   <ImageViewer v-if="amplifyImage" :imageUrl="imageUrl" @hide="pictureHide"></ImageViewer>
 </template>
 
 <script setup lang="ts">
-  import { computed, onMounted, onUnmounted, onUpdated, ref } from 'vue';
+  import { computed, onMounted, onUnmounted, ref } from 'vue';
   import MarkdownIt from 'markdown-it';
   import mdKatex from '@traptitech/markdown-it-katex';
   import mila from 'markdown-it-link-attributes';
@@ -111,60 +111,42 @@
   function highlightBlock(str: string, lang?: string) {
     return `<pre class="code-block-wrapper"><div class="code-block-header"><span class="code-block-header__lang">${lang}</span><span class="code-block-header__copy">复制代码</span></div><code class="hljs code-block-body ${lang}">${str}</code></pre>`;
   }
-  function addCopyEvents() {
-    if (textRef.value) {
-      const copyBtn = textRef.value.querySelectorAll('.code-block-header__copy');
-      copyBtn.forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const code = btn.parentElement?.nextElementSibling?.textContent;
-          if (code) {
-            copyToClip(code).then(() => {
-              btn.textContent = '复制成功';
-              setTimeout(() => {
-                btn.textContent = '复制代码';
-              }, 1e3);
-            });
-          }
+
+  /**
+   * 【S-P0-7】事件委托：在 textRef 容器上一次性绑定 click 委托 handler，
+   * 通过 e.target.closest 判断是"复制按钮"还是"图片"。
+   *
+   * 修复前的问题：
+   *  - 旧实现 onUpdated 高频调用 addCopyEvents/addImageClickEvent，每次为每个 btn/img addEventListener，
+   *    流式打字 100 次更新 = 100 倍监听器堆叠；
+   *  - removeXxxEvents 用 `removeEventListener('click', () => {})` 传新匿名引用，无法卸载；
+   *  - 卸载时也清不掉，长会话页性能/内存双坍塌。
+   *
+   * 修复后：onMounted 绑定一次，onUnmounted 卸载一次；onUpdated 不再做事件相关操作。
+   */
+  function delegatedClickHandler(e: Event) {
+    const target = e.target as HTMLElement | null;
+    if (!target) return;
+    // 复制按钮
+    const copyBtn = target.closest('.code-block-header__copy') as HTMLElement | null;
+    if (copyBtn) {
+      const code = copyBtn.parentElement?.nextElementSibling?.textContent;
+      if (code) {
+        copyToClip(code).then(() => {
+          copyBtn.textContent = '复制成功';
+          setTimeout(() => {
+            copyBtn.textContent = '复制代码';
+          }, 1e3);
         });
-      });
+      }
+      return;
     }
-  }
-
-  function removeCopyEvents() {
-    if (textRef.value) {
-      const copyBtn = textRef.value.querySelectorAll('.code-block-header__copy');
-      copyBtn.forEach((btn) => {
-        btn.removeEventListener('click', () => {});
-      });
-    }
-  }
-
-
-  /**
-   * 添加图片点击事件
-   */
-  function addImageClickEvent() {
-    if (textRef.value) {
-      const image = textRef.value.querySelectorAll('img');
-      image.forEach((img) => {
-        img.addEventListener('click', () => {
-          imageUrl.value = img.src;
-          amplifyImage.value = true;
-        })
-      });
-    }
-  }
-
-
-  /**
-   * 移出图片点击事件
-   */
-  function removeImageClickEvent(){
-    if (textRef.value) {
-      const image = textRef.value.querySelectorAll('img');
-      image.forEach((img) => {
-        img.removeEventListener('click', () => { })
-      });
+    // 图片放大：仅限正文区域（AI 用 .markdown-body，用户用 .msg），
+    // 排除引用知识区的小图标（knowledgePng 在 <a-tag>/<a-space> 内，不会命中）。
+    if (target.tagName === 'IMG' && target.closest('.markdown-body, .msg')) {
+      const img = target as HTMLImageElement;
+      imageUrl.value = img.src;
+      amplifyImage.value = true;
     }
   }
 
@@ -192,20 +174,14 @@
   }
 
   onMounted(() => {
-    addCopyEvents();
-    addImageClickEvent();
+    // 【S-P0-7】容器节点上一次性事件委托，覆盖动态插入的 .code-block-header__copy / <img>
+    textRef.value?.addEventListener('click', delegatedClickHandler);
     setMarkdownBodyWidth();
     window.addEventListener('resize', setMarkdownBodyWidth);
   });
 
-  onUpdated(() => {
-    addCopyEvents();
-    addImageClickEvent();
-  });
-
   onUnmounted(() => {
-    removeCopyEvents();
-    removeImageClickEvent();
+    textRef.value?.removeEventListener('click', delegatedClickHandler);
     window.removeEventListener('resize', setMarkdownBodyWidth);
   });
 

@@ -88,6 +88,12 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     @Autowired
     private CsCryptoUtil csCryptoUtil;
 
+    @Autowired
+    private org.jeecg.modules.airag.cs.security.AvatarGuard avatarGuard;
+
+    @Autowired
+    private org.jeecg.modules.airag.cs.service.CsBrandFidWhitelist brandFidWhitelist;
+
     /**
      * 分页列表查询
      */
@@ -157,6 +163,8 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
         }
 
         // 4. 创建 cs_agent
+        // CSE Phase2 Guard: 拒绝非 avatar/ 业务前缀的 cse:// fid 写入头像字段
+        avatarGuard.validateAvatar(avatar);
         CsAgent csAgent = new CsAgent();
         csAgent.setUserId(sysUserId);
         csAgent.setNickname(nickname);
@@ -484,6 +492,13 @@ public class CsAgentController extends JeecgController<CsAgent, ICsAgentService>
     public Result<String> saveChatWindowSettings(@RequestBody String body) {
         saveGlobalConfigValue(CsRedisKeys.CONFIG_CHAT_WINDOW, body);
         redisTemplate.opsForValue().set(CsRedisKeys.REDIS_CHAT_WINDOW, body);
+        // 聊天窗 JSON 中可能包含 cse://fid（logo / 头部图标 / 背景 / 访客头像 / 广告图等），
+        // 必须刷新 CsBrandFidWhitelist，否则匿名代理 /cs/brand/file/{fid} 端点会返回 404
+        try {
+            brandFidWhitelist.refresh();
+        } catch (Exception e) {
+            log.warn("[CS-Agent] 聊天窗口设置保存后刷新 BrandFidWhitelist 失败：{}", e.getMessage());
+        }
         log.info("[CS-Agent] 聊天窗口设置已更新");
         return Result.OK("保存成功");
     }

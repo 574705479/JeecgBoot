@@ -28,6 +28,8 @@ import { defHttp } from '/@/utils/http/axios';
 import { useMessage } from '/@/hooks/web/useMessage';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
 import { withImageCache } from '../utils/csImageCache';
+// Phase 4.2 (M4)：管理员客服列表加载后批量预热头像（5 分钟去重），加快后续渲染命中
+import { warmupAvatars } from '/@/utils/file/imageCache';
 import CsAgentModal from './CsAgentModal.vue';
 
 const { createConfirm, createMessage } = useMessage();
@@ -49,6 +51,16 @@ const [registerTable, { reload }] = useTable({
   title: '客服管理',
   api: async (params) => {
     const res = await defHttp.get({ url: '/cs/agent/list', params: { ...params, role: 1 } });
+    try {
+      const records = (res?.records || res?.list || (Array.isArray(res) ? res : [])) as any[];
+      const urls = records
+        .map((r) => r?.avatar)
+        .filter((u) => !!u)
+        .map((u: string) => getFileAccessHttpUrl(u));
+      if (urls.length) warmupAvatars(urls);
+    } catch {
+      // 预热失败不阻塞业务
+    }
     return res;
   },
   columns,

@@ -125,6 +125,8 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
 	private ISysThirdAccountService sysThirdAccountService;
 	@Autowired
 	private RedisUtil redisUtil;
+	@Autowired
+	private org.jeecg.modules.system.security.cse.service.OssFileAvatarGuard avatarGuard;
     
     @Autowired
     private SysTenantPackUserMapper packUserMapper;
@@ -2319,6 +2321,8 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
                             if(null == sysUser.getStatus()){
                                 sysUser.setStatus(CommonConstant.STATUS_1_INT);
                             }
+                            // CSE Phase2 Guard: 拒绝非 avatar/ 业务前缀的 cse:// fid 写入头像字段
+                            avatarGuard.validateAvatar(sysUser.getAvatar());
                             this.save(sysUser);
                         }
                         //添加部门

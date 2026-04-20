@@ -93,6 +93,7 @@
   import HistoryFileList from './HistoryFileList.vue';
   import { Popconfirm } from 'ant-design-vue';
   import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
+  import { withImageCache } from '/@/utils/file/imageCache';
 
   export default defineComponent({
     name: 'CommentList',
@@ -129,13 +130,17 @@
       }
       
       function getMyAvatar(){
-        return getFileAccessHttpUrl(userInfo.avatar);
+        // CSE: cse:// 头像必须经 withImageCache 解密成 blob URL
+        const u = getFileAccessHttpUrl(userInfo.avatar);
+        return u ? withImageCache(u) : '';
       }
       
       // 获取头像
       function getAvatar(item) {
         if (item.fromUserAvatar) {
-          return getFileAccessHttpUrl(item.fromUserAvatar)
+          // CSE: cse:// 头像必须经 withImageCache 解密成 blob URL
+          const u = getFileAccessHttpUrl(item.fromUserAvatar);
+          return u ? withImageCache(u) : '';
         }
         return '';
       }

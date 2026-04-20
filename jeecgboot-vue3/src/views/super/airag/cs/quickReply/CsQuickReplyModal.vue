@@ -138,6 +138,8 @@ import { useMessage } from '/@/hooks/web/useMessage';
 import { UploadOutlined, CloseCircleOutlined } from '@ant-design/icons-vue';
 import JEditor from '/@/components/Form/src/jeecg/components/JEditor.vue';
 import { computeFileMd5 } from '../utils/fileHash';
+import { withImageCache } from '/@/utils/file/imageCache';
+import { isCseUrl } from '/@/utils/cse/cseUrl';
 
 const emit = defineEmits(['success', 'register']);
 const { createMessage } = useMessage();
@@ -202,6 +204,8 @@ function handleMsgTypeChange() {
 
 function resolvePreviewUrl(url: string) {
   if (!url) return '';
+  // CSE 加密图片：走 withImageCache 解密为 blob URL
+  if (isCseUrl(url)) return withImageCache(url);
   if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return url;
   return `${window.location.origin}/${url.replace(/^\//, '')}`;
 }

@@ -21,6 +21,9 @@ import { useSso } from '/@/hooks/web/useSso';
 import { isOAuth2AppEnv } from "/@/views/sys/login/useLogin";
 import { getUrlParam } from "@/utils";
 import { defHttp } from '/@/utils/http/axios';
+// Phase 4.1 (T5)：setToken 必须同步清掉旧 DEK 缓存，否则 token 续期/切换租户后下一次解密用旧 IKM → AuthError。
+// 必须使用顶层静态 import 而非 await import()，避免微任务窗口里被新一轮解密请求穿透。
+import { clearDekCache } from '/@/utils/cse/cseDecrypt';
 interface dictType {
   [key: string]: any;
 }
@@ -107,8 +110,15 @@ export const useUserStore = defineStore({
   },
   actions: {
     setToken(info: string | undefined) {
-      this.token = info ? info : ''; // for null or undefined value
+      // Phase 4.1 (T5)：判断 token 是否真的发生变化（包括清空、续期、切租户场景），
+      // 任意变化都同步丢弃 DEK 缓存与 inFlight，避免下一次 cse 解密用错 IKM。
+      const oldToken = this.token || '';
+      const newToken = info ? info : '';
+      this.token = newToken;
       setAuthCache(TOKEN_KEY, info);
+      if (oldToken !== newToken) {
+        try { clearDekCache(); } catch {}
+      }
     },
     setRoleList(roleList: RoleEnum[]) {
       this.roleList = roleList;
@@ -330,6 +340,11 @@ export const useUserStore = defineStore({
       this.setLoginInfo(null);
       this.setTenant(null);
       this.setCsAgentInfo(null);
+      // CSE: 退出登录时统一清理所有 cse 相关缓存（imageCache + csImageCache + cseHtmlImg + DEK）
+      try {
+        const m = await import('/@/utils/cse/clearAllCseCache');
+        await m.clearAllCseCache();
+      } catch {}
       (window as any)['_ELECTRON_PRELOAD_UTILS_']?.setTrayUser?.('');
       // 代码逻辑说明: 【TV360X-23】退出登录后会提示「Token时效，请重新登录」
       setTimeout(() => {

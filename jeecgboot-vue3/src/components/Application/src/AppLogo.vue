@@ -19,7 +19,7 @@
   import { PageEnum } from '/@/enums/pageEnum';
   import { useUserStore } from '/@/store/modules/user';
   import { getBrandSetting } from '/@/settings/brandSetting';
-  import { resolveBrandUrl } from '/@/utils/brand';
+  import { resolveBrandPublicUrl } from '/@/utils/brand';
 
   const props = defineProps({
     /**
@@ -41,7 +41,8 @@
   const userStore = useUserStore();
   const { shortTitle } = useGlobSetting();
   const { logoUrl } = getBrandSetting();
-  const logoDisplayUrl = computed(() => resolveBrandUrl(logoUrl));
+  // cse:// 走匿名代理端点 /cs/brand/file/{fid}，无 token 也能加载；http/相对路径原样
+  const logoDisplayUrl = computed(() => resolveBrandPublicUrl(logoUrl));
   
   const go = useGo();
 
