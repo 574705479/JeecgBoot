@@ -1,5 +1,5 @@
 <script lang="tsx">
-  import { defineComponent, ref, unref, computed, reactive, watchEffect } from 'vue';
+  import { defineComponent, ref, unref, computed, reactive, watch } from 'vue';
   import { CloseOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons-vue';
   import { isCseUrl, parseCseFid } from '/@/utils/cse/cseUrl';
   import { decryptFileToObjectUrl } from '/@/utils/cse/cseDecrypt';
@@ -339,14 +339,22 @@
         return imageList.length > 1;
       });
 
-      watchEffect(() => {
-        if (props.show) {
-          init();
-        }
-        if (props.imageList) {
-          initState();
-        }
-      });
+      // 注意：必须显式 watch props，避免使用 watchEffect 时把 init() → handleIChangeImage()
+      // → preheatNeighbor(imgState.currentIndex) 中读取的 imgState.currentIndex 误收为依赖。
+      // 否则点击左右箭头修改 currentIndex 会反向触发 init() 把下标重置回 props.index，
+      // 导致多图预览的左右切换看上去"失效"。
+      watch(
+        [() => props.show, () => props.imageList],
+        ([show, imageList]) => {
+          if (show) {
+            init();
+          }
+          if (imageList) {
+            initState();
+          }
+        },
+        { immediate: true },
+      );
 
       const handleMaskClick = (e: MouseEvent) => {
         if (props.maskClosable && e.target && (e.target as HTMLDivElement).classList.contains(`${prefixCls}-content`)) {
