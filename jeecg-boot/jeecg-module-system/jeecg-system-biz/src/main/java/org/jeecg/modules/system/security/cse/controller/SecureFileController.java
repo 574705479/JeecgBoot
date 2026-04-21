@@ -13,6 +13,7 @@ import org.jeecg.common.system.vo.LoginUser;
 import org.jeecg.common.util.RedisUtil;
 import org.jeecg.common.util.TokenUtils;
 import org.jeecg.config.shiro.IgnoreAuth;
+import org.jeecg.modules.airag.cs.service.ICsVisitorTokenService;
 import org.jeecg.modules.oss.entity.OssFile;
 import org.jeecg.modules.system.security.cse.service.CseFileStorage;
 import org.jeecg.modules.system.security.cse.service.FileEncryptionService;
@@ -69,6 +70,13 @@ public class SecureFileController {
 
     @Autowired
     private RedisUtil redisUtil;
+
+    /**
+     * Phase 3.2f：免 Token 模式下复用 CS 访客模块的 appKey 校验。
+     * 通过 setter 注入避免循环依赖（airag → system-local-api → system-biz）。
+     */
+    @Autowired(required = false)
+    private ICsVisitorTokenService csVisitorTokenService;
 
     private void incr(String name, String... tags) {
         try {
@@ -134,6 +142,26 @@ public class SecureFileController {
         String visitor = req.getHeader("X-Visitor-Token");
         if (visitor != null && !visitor.isEmpty()) {
             return new AccessCredential(visitor, visitor);
+        }
+        // Phase 3.2f：免 Token 模式访客通道（X-Device-Id + X-App-Secret）
+        // 触发条件（必须全部满足）：
+        //   1) 全局 tokenRequired=false（租户主动选择免 Token 模式）
+        //   2) X-Device-Id 非空（前端 SDK 持久化的访客设备码）
+        //   3) X-App-Secret / ?key= 与租户配置的 secretKey 一致（validateAppKey 自带校验）
+        // sealToken = deviceId（每访客不同，DEK 不会跨用户泄露）
+        // 与前端 cseAuthContext.getCseAuthToken() 在 device 模式下返回 deviceId 严格对齐。
+        if (csVisitorTokenService != null) {
+            try {
+                if (!csVisitorTokenService.isTokenRequired()) {
+                    String deviceId = csVisitorTokenService.extractDeviceId(req);
+                    if (deviceId != null && !deviceId.isEmpty()
+                            && csVisitorTokenService.validateAppKey(req)) {
+                        return new AccessCredential(deviceId, deviceId);
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("[CSE] device credential resolve failed: {}", e.getMessage());
+            }
         }
         return new AccessCredential(null, null);
     }

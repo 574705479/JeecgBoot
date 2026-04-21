@@ -100,6 +100,18 @@ public class OssFileMetaService {
             // TODO[F-1] 跟进项：盘点 bizPath 白名单 + 加配置项 cse.acl.default-deny（默认 false）灰度切默认拒绝
             return true;
         }
+        // 客服侧上传后随消息/HTML 推送给访客观看的资源，要求至少持有合法 visitor token：
+        //   jeditor   - TinyMCE 富文本嵌入图（autoMessage、FAQ、quickReply、chatWindowSettings）
+        //   airag     - 客服 workbench 直接发送的图/附件，以及 quickReply 文件附件、部分历史客服头像
+        //   markdown  - 智能体 / 知识库 Markdown 编辑里嵌入的图
+        // 这些 bizPath 的语义本就是"嵌入到面向终端用户的内容里"，访客可读才是产品本意。
+        // 防匿名爬虫由前面 visitorToken 必填闸把守，fid 是 24 位随机字符无法枚举。
+        if (file.getBizPath() != null) {
+            String bp = file.getBizPath();
+            if (bp.startsWith("jeditor") || bp.startsWith("airag") || bp.startsWith("markdown")) {
+                return true;
+            }
+        }
         // 访客 token：仅限客服访客上传的文件且 bizPath 命中 cs-visitor
         if (file.getBizPath() != null && file.getBizPath().startsWith("cs-visitor")) {
             return true;

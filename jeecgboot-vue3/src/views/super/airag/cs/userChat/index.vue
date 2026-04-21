@@ -553,7 +553,7 @@ import EmojiPicker from '../components/EmojiPicker.vue';
 import { computeFileMd5 } from '../utils/fileHash';
 import { encryptTransport, decryptTransport, decryptMessage, decryptStorage } from '../utils/csEncrypt';
 import { playCsNotificationSound } from '../utils/csNotificationSound';
-import { withImageCache, preloadImages, onImageError, getCachedChatWindowConfig, setCachedChatWindowConfig } from '../utils/csImageCache';
+import { withImageCache, withImageCacheAsync, preloadImages, onImageError, getCachedChatWindowConfig, setCachedChatWindowConfig } from '../utils/csImageCache';
 import { withMediaCache, releaseAllMedia, withImageThumbCache, isImageReady } from '/@/utils/file/imageCache';
 import { compressImage } from '/@/utils/file/compressImage';
 import FileChip from '../components/FileChip.vue';
@@ -561,7 +561,7 @@ import { isCseUrl } from '/@/utils/cse/cseUrl';
 import { resolveBrandPublicUrl } from '/@/utils/brand';
 // Phase 3.2e：把访客 sessionToken 同步到 cseAuthContext，
 // 让公共 CSE 解密管线（cseDecrypt.ts / imageCache）也能在访客模式下正确派生 IKM 与注入 X-Visitor-Session
-import { setVisitorCredential, clearVisitorCredential } from '/@/utils/cse/cseAuthContext';
+import { setVisitorCredential, clearVisitorCredential, setDeviceCredential, clearDeviceCredential } from '/@/utils/cse/cseAuthContext';
 import { clearDekCache } from '/@/utils/cse/cseDecrypt';
 import { vCseHtml } from '../utils/cseHtmlImg';
 import { getBrandSetting, DEFAULT_BRAND } from '/@/settings/brandSetting';
@@ -1486,6 +1486,12 @@ onMounted(async () => {
     if (fatalError.value) {
       return;
     }
+    // Phase 3.2f：免 Token 模式下让 cse 解密链路也能鉴权。
+    // cseDecrypt 走的是独立 cseAuthContext 通道，不会自动带 buildAuthHeaders 的 X-Device-Id+X-App-Secret，
+    // 这里显式注入，使 /sys/secure/file/{fid} 请求带访客头并被后端 SecureFileController 第 4 优先级识别。
+    if (userId.value && appKey.value) {
+      setDeviceCredential(userId.value, appKey.value);
+    }
   } else {
     // ========= Token模式：原有流程 =========
     loadSessionToken();
@@ -1595,6 +1601,7 @@ onUnmounted(() => {
   if (audioCtx) { audioCtx.close(); audioCtx = null; }
   // Phase 3.2e：离开访客页时清空 cseAuthContext，避免下一次进入「登录态页面」时还残留访客凭证
   clearVisitorCredential();
+  clearDeviceCredential();
   try { clearDekCache(); } catch {}
 });
 
@@ -1777,6 +1784,7 @@ function blockForInvalidToken(messageText?: string) {
   stopFallbackPoll();
   // Phase 3.2e：失效时一并清空访客凭证与 DEK 缓存，避免后续 CSE 解密读取过期 token 报 AuthError
   clearVisitorCredential();
+  clearDeviceCredential();
   try { clearDekCache(); } catch {}
 }
 
@@ -3354,15 +3362,23 @@ function openFilePreview(item: any) {
   }
 }
 
-function openImagePreview(msg: any, item: any) {
+async function openImagePreview(msg: any, item: any) {
   const images = getMessageAttachments(msg).filter(att => att.type === 'image');
-  const imageList = images.map(att => getAttachmentUrl(att));
-  if (!imageList.length) return;
-  const targetUrl = getAttachmentUrl(item);
-  const index = imageList.findIndex(url => url === targetUrl);
+  if (!images.length) return;
+  const targetKey = String(item?.url || '');
+  const resolved = await Promise.all(
+    images.map(async (att) => {
+      const u = att?.url;
+      const blobUrl = u ? await withImageCacheAsync(getFileAccessHttpUrl(u)) : '';
+      return { cseUrl: String(u || ''), blobUrl };
+    }),
+  );
+  const usable = resolved.filter(r => r.blobUrl && !r.blobUrl.startsWith('data:'));
+  if (!usable.length) return;
+  const idx = Math.max(0, usable.findIndex(r => r.cseUrl === targetKey));
   createImgPreview({
-    imageList,
-    index: index >= 0 ? index : 0,
+    imageList: usable.map(r => r.blobUrl),
+    index: Math.min(idx, usable.length - 1),
     defaultWidth: 700,
     rememberState: true,
   });

@@ -270,7 +270,7 @@ import { Typography } from 'ant-design-vue';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
 import { getBrandSetting } from '/@/settings/brandSetting';
 import { resolveBrandPublicUrl } from '/@/utils/brand';
-import { withImageCache, getCachedChatWindowConfig } from '../utils/csImageCache';
+import { withImageCache, withImageCacheAsync, getCachedChatWindowConfig } from '../utils/csImageCache';
 import { withMediaCache } from '/@/utils/file/imageCache';
 import { isCseUrl } from '/@/utils/cse/cseUrl';
 import { vCseHtml } from '../utils/cseHtmlImg';
@@ -418,13 +418,26 @@ function getAttachmentUrl(attachment: any) {
   return resolved;
 }
 
-function openImagePreview(msg: any, item: any) {
+async function openImagePreview(msg: any, item: any) {
   const images = getMessageAttachments(msg).filter(att => att.type === 'image');
-  const imageList = images.map(att => getAttachmentUrl(att));
-  if (!imageList.length) return;
-  const targetUrl = getAttachmentUrl(item);
-  const index = imageList.findIndex(url => url === targetUrl);
-  createImgPreview({ imageList, index: index >= 0 ? index : 0, defaultWidth: 700, rememberState: true });
+  if (!images.length) return;
+  const targetKey = String(item?.url || '');
+  const resolved = await Promise.all(
+    images.map(async (att) => {
+      const u = att?.url;
+      const blobUrl = u ? await withImageCacheAsync(getFileAccessHttpUrl(u)) : '';
+      return { cseUrl: String(u || ''), blobUrl };
+    }),
+  );
+  const usable = resolved.filter(r => r.blobUrl && !r.blobUrl.startsWith('data:'));
+  if (!usable.length) return;
+  const idx = Math.max(0, usable.findIndex(r => r.cseUrl === targetKey));
+  createImgPreview({
+    imageList: usable.map(r => r.blobUrl),
+    index: Math.min(idx, usable.length - 1),
+    defaultWidth: 700,
+    rememberState: true,
+  });
 }
 
 function openFilePreview(item: any) {
@@ -440,13 +453,26 @@ function openMediaViewer(msg: any) {
   mediaViewerVisible.value = true;
 }
 
-function openImagePreviewFromList(list: any[], item: any) {
-  const images = (list || []).filter(att => att.type === 'image');
-  const imageList = images.map(att => getAttachmentUrl(att));
-  if (!imageList.length) return;
-  const targetUrl = getAttachmentUrl(item);
-  const index = imageList.findIndex(url => url === targetUrl);
-  createImgPreview({ imageList, index: index >= 0 ? index : 0, defaultWidth: 700, rememberState: true });
+async function openImagePreviewFromList(list: any[], item: any) {
+  const images = (list || []).filter(att => att?.type === 'image');
+  if (!images.length) return;
+  const targetKey = String(item?.url || '');
+  const resolved = await Promise.all(
+    images.map(async (att) => {
+      const u = att?.url;
+      const blobUrl = u ? await withImageCacheAsync(getFileAccessHttpUrl(u)) : '';
+      return { cseUrl: String(u || ''), blobUrl };
+    }),
+  );
+  const usable = resolved.filter(r => r.blobUrl && !r.blobUrl.startsWith('data:'));
+  if (!usable.length) return;
+  const idx = Math.max(0, usable.findIndex(r => r.cseUrl === targetKey));
+  createImgPreview({
+    imageList: usable.map(r => r.blobUrl),
+    index: Math.min(idx, usable.length - 1),
+    defaultWidth: 700,
+    rememberState: true,
+  });
 }
 
 const record = ref<any>(null);
