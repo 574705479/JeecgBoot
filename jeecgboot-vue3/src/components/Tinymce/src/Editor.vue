@@ -176,6 +176,10 @@
           menubar: false,
           plugins,
           convert_urls: false,
+          // 关掉 TinyMCE 的自动 blob 上传链路：解密后的 cse blob 会被 uploadImagesAuto
+          // 当作待上传图触发 images_upload_handler → uploadFile → 后端 .dat 校验失败 → 弹"图片上传失败"
+          // 关掉后由我们自己控制；不写 images_replace_blob_uris（仅作用于 uploadImagesAuto 内部，关掉 automatic_uploads 后无意义）
+          automatic_uploads: false,
           // 添加以下粘贴相关配置
           paste_data_images: true, // 允许粘贴图片
           paste_as_text: false, // 不以纯文本粘贴
@@ -211,12 +215,20 @@
           skin_url: publicPath + 'resource/tinymce/skins/ui/' + skinName.value,
           images_upload_handler: (blobInfo, process) =>
             new Promise(async (resolve, reject) => {
-            // CSE 占位 PNG（1×1 透明）短路：BeforeSetContent 注入的占位被 TinyMCE 当作粘贴图触发自动上传，
-            // 一定要拒绝/原样返回，否则会出现 "图片上传失败" 提示且占位被错误的服务器图替换。
+            // 1) 已被 cseBlobToFid 登记的 blob：原样返回，杜绝重复上传/解密
+            try {
+              const blobUri = typeof blobInfo.blobUri === 'function' ? blobInfo.blobUri() : '';
+              if (blobUri && cseBlobToFid.has(blobUri)) {
+                resolve(blobUri);
+                return;
+              }
+            } catch (_) {}
+            // 2) 占位安全网：1×1 透明 PNG (~70B) 走到这里时直接吞掉，绝不上传
             try {
               const b = blobInfo.blob();
               if (b && b.size < 200) {
-                resolve(CSE_TRANSPARENT_PNG);
+                const blobUri = typeof blobInfo.blobUri === 'function' ? blobInfo.blobUri() : '';
+                resolve(blobUri || CSE_TRANSPARENT_PNG);
                 return;
               }
             } catch (_) {}
@@ -231,13 +243,14 @@
                   const img = 'data:image/jpeg;base64,' + blobInfo.base64();
                       resolve(img);
                 } else if (isCseUrl(res.message)) {
-                  // CSE 加密图：解密为 blob URL 临时显示，GetContent 时再还原 cse://
+                  // CSE 加密图：解密为 blob URL 临时显示，src 末尾追加 #cse={fid}
+                  // 这样即便 cseBlobToFid 映射丢失（组件销毁/页面切换），GetContent 也能凭 hash 还原回 cse://
                   try {
                     const fid = parseCseFid(res.message)!;
-                    const blobUrl = await decryptFileToObjectUrl(fid, { mime: blobInfo.blob().type || 'image/png' });
+                    const blobUrl = await decryptFileToObjectUrl(fid, { mime: 'image/png' });
                     cseBlobToFid.set(blobUrl, fid);
                     cseFidToBlob.set(fid, blobUrl);
-                    resolve(blobUrl);
+                    resolve(blobUrl + '#cse=' + fid);
                   } catch (e) {
                     reject('加密图解密失败');
                   }
@@ -270,43 +283,66 @@
                     if (!fid) return _m;
                     const cached = cseFidToBlob.get(fid);
                     if (cached) {
-                      // 已经解密过：直接用 blob URL，且仍写 data-fid 以便 GetContent 还原
-                      return `<img${before}data-fid="${fid}" src="${cached}"${after}>`;
+                      // 已经解密过：直接用 blob URL + data-fid + data-mce-placeholder
+                      // data-mce-placeholder="1" 让 ImageScanner.findAll 早退、registerBase64ImageFilter 跳过，
+                      // 避免外部 blob 进入 blobCache（否则 GetContent 会被替换成 data:base64 嵌入）。
+                      // htmlSerializer 落库时会自动剥离 data-mce-placeholder。
+                      return `<img${before}data-fid="${fid}" data-mce-placeholder="1" src="${cached}"${after}>`;
                     }
-                    decryptFileToObjectUrl(fid, { mime: 'image/*' })
+                    decryptFileToObjectUrl(fid, { mime: 'image/png' })
                       .then((u) => {
                         cseBlobToFid.set(u, fid);
                         cseFidToBlob.set(fid, u);
                         try {
                           const imgs = editor.getBody().querySelectorAll('img[data-fid="' + fid + '"]');
-                          imgs.forEach((im: HTMLImageElement) => { im.src = u; });
+                          imgs.forEach((im: HTMLImageElement) => {
+                            im.src = u;
+                            // 解密回写时再次确保 placeholder 标记仍在（防止其他流程清除）
+                            if (!im.hasAttribute('data-mce-placeholder')) {
+                              im.setAttribute('data-mce-placeholder', '1');
+                            }
+                          });
                         } catch (_) {}
                       })
                       .catch((err) => {
                         console.warn('[Tinymce] cse decrypt fail', fid, err?.message || err);
                       });
-                    return `<img${before}data-fid="${fid}" src="${CSE_TRANSPARENT_PNG}"${after}>`;
+                    return `<img${before}data-fid="${fid}" data-mce-placeholder="1" src="${CSE_TRANSPARENT_PNG}"${after}>`;
                   });
               } catch (_) {}
             });
             // CSE: GetContent 时把 blob: URL 还原回 cse://{fid}
+            // 还原优先级：
+            //   1) src="blob:...#cse={fid}"  ← 最稳，hash 持久化，不依赖运行时 Map
+            //   2) cseBlobToFid Map 反查
+            //   3) data-fid 兜底（占位/未解密）
             editor.on('GetContent', (e: any) => {
               try {
                 let html = e.content as string;
                 if (!html) return;
+                // 1) hash 持久化解析（含 #cse=fid 的 blob src）
+                html = html.replace(
+                  /<img\b([^>]*?)\bsrc=["']blob:[^"']*#cse=([^"']+)["']([^>]*)>/gi,
+                  (_m, before, fid, after) => {
+                    const cleaned = (before + ' ' + after)
+                      .replace(/\bdata-mce-(src|placeholder)=["'][^"']*["']/gi, '')
+                      .replace(/\bdata-fid=["'][^"']*["']/gi, '');
+                    return `<img${cleaned} src="cse://${fid}">`;
+                  },
+                );
+                // 2) Map 反查（针对未带 hash 的 blob URL）
                 if (html.indexOf('blob:') >= 0) {
                   cseBlobToFid.forEach((fid, blobUrl) => {
                     const re = new RegExp(blobUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
                     html = html.replace(re, 'cse://' + fid);
                   });
                 }
-                // data-fid 占位也还原（保留 width/height/alt 等其他属性）
+                // 3) data-fid 兜底（占位/未解密的 img）
                 html = html.replace(/<img\b([^>]*?)\bdata-fid=["']([^"']+)["']([^>]*)>/gi,
                   (_m, before, fid, after) => {
-                    // 同时去掉残留的 src/data-mce-src 占位，避免重复 src
                     const cleaned = (before + ' ' + after)
                       .replace(/\bsrc=["'][^"']*["']/gi, '')
-                      .replace(/\bdata-mce-src=["'][^"']*["']/gi, '');
+                      .replace(/\bdata-mce-(src|placeholder)=["'][^"']*["']/gi, '');
                     return `<img${cleaned} src="cse://${fid}">`;
                   });
                 e.content = html;
@@ -344,7 +380,7 @@
                           filename: file.name || 'pasted-image.png',
                           data: { biz: 'jeditor', jeditor: '1' },
                         };
-                        const uploadSuccess = (res: any) => {
+                        const uploadSuccess = async (res: any) => {
                           try {
                             if (res && res.success) {
                               if (res.message === 'local') {
@@ -356,8 +392,8 @@
                                 };
                                 reader.readAsDataURL(file);
                               } else {
-                                const imgUrl = getFileAccessHttpUrl(res.message);
-                                editor.selection.setContent(`<img src="${imgUrl}"/>`);
+                                // 走 helper：cse:// 会先解密成 blob URL + #cse=fid，避免裂图
+                                await insertImageWithCseDecode(editor, getFileAccessHttpUrl(res.message));
                                 resolve();
                               }
                             } else {
@@ -513,8 +549,84 @@
           return;
         }
         editor.execCommand('mceInsertContent', false, getUploadingImgName(name));
-        const content = editor?.getContent() ?? '';
-        setValue(editor, content);
+      }
+
+      /**
+       * 把图片插入编辑器；如果 url 是 cse://{fid} 则先解密为 blob URL（src 末尾带 #cse=fid 持久化），
+       * 再用 undoManager.transact 保 undo / selection / v-model 同步。
+       *
+       * 触发场景：
+       *  - handleDone：替换 [uploading:xxx] 占位文本
+       *  - paste 钩子：在当前 selection 处插入
+       */
+      async function insertImageWithCseDecode(
+        editor: any,
+        url: string,
+        placeholderText?: string,
+      ): Promise<void> {
+        let displaySrc = url;
+        let cseFid: string | null = null;
+        if (isCseUrl(url)) {
+          cseFid = parseCseFid(url);
+          if (cseFid) {
+            let blobUrl = cseFidToBlob.get(cseFid);
+            if (!blobUrl) {
+              try {
+                blobUrl = await decryptFileToObjectUrl(cseFid, { mime: 'image/png' });
+                cseBlobToFid.set(blobUrl, cseFid);
+                cseFidToBlob.set(cseFid, blobUrl);
+              } catch (e: any) {
+                console.warn('[Tinymce] cse decrypt fail on insert', cseFid, e?.message || e);
+              }
+            }
+            if (blobUrl) {
+              displaySrc = blobUrl + '#cse=' + cseFid;
+            }
+          }
+        }
+
+        editor.undoManager.transact(() => {
+          const body = editor.getBody();
+          const doc = body.ownerDocument as Document;
+          const buildImg = () => {
+            const img = doc.createElement('img');
+            img.setAttribute('src', displaySrc);
+            // 仅 cse 资源加 placeholder + data-fid：
+            //   data-mce-placeholder="1" 让 ImageScanner 跳过、阻止外部 blob 进 blobCache
+            //   data-fid 作为 GetContent 还原的兜底锚点
+            if (cseFid) {
+              img.setAttribute('data-mce-placeholder', '1');
+              img.setAttribute('data-fid', cseFid);
+            }
+            return img;
+          };
+
+          if (placeholderText) {
+            const walker = doc.createTreeWalker(body, NodeFilter.SHOW_TEXT, null);
+            const targets: Text[] = [];
+            let n: Node | null;
+            while ((n = walker.nextNode())) {
+              if (n.nodeValue && n.nodeValue.indexOf(placeholderText) >= 0) {
+                targets.push(n as Text);
+              }
+            }
+            if (targets.length === 0) {
+              // 占位丢失（极端情况）：兜底插到末尾，避免图片彻底丢失
+              body.appendChild(buildImg());
+              return;
+            }
+            targets.forEach((tn) => {
+              const idx = tn.nodeValue!.indexOf(placeholderText);
+              if (idx < 0) return;
+              const after = tn.splitText(idx);
+              after.nodeValue = after.nodeValue!.slice(placeholderText.length);
+              tn.parentNode!.insertBefore(buildImg(), after);
+            });
+          } else {
+            // paste 路径：当前 selection 处插入
+            editor.selection.setNode(buildImg());
+          }
+        });
       }
 
       async function handleDone(name: string, url: string) {
@@ -522,10 +634,11 @@
         if (!editor) {
           return;
         }
-        await handleImageUploading(name);
-        const content = editor?.getContent() ?? '';
-        const val = content?.replace(getUploadingImgName(name), `<img src="${url}"/>`) ?? '';
-        setValue(editor, val);
+        await insertImageWithCseDecode(editor, url, getUploadingImgName(name));
+        // 直接 DOM 修改不会触发 SetContent，需手动同步 v-model / change
+        const content = editor.getContent({ format: attrs.outputFormat });
+        emit('update:modelValue', content);
+        emit('change', content);
       }
 
       /**

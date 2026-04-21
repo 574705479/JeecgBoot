@@ -208,8 +208,14 @@
                   v-for="(item, index) in getMediaGridData(msg).items"
                   :key="`${item.url}_${index}`"
                 >
-                  <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview(msg, item)" />
-                  <video v-else-if="getAttachmentUrl(item)" :src="getAttachmentUrl(item)" controls @click="openFilePreview(item)" />
+                  <template v-if="item.type === 'image'">
+                    <img :src="getAttachmentThumbUrl(item)" @error="onAttachmentImageError($event, item)" @click="openImagePreview(msg, item)" />
+                    <div v-if="!isAttachmentImageReady(item)" class="img-skeleton-overlay"><a-spin size="small" /></div>
+                  </template>
+                  <template v-else-if="item.type === 'video'">
+                    <video v-if="getAttachmentUrl(item)" :src="getAttachmentUrl(item)" preload="metadata" controls @click="openFilePreview(item)" />
+                    <div v-else class="video-skeleton"><span>🎬</span><span class="skeleton-text">视频加载中...</span></div>
+                  </template>
                   <div
                     v-if="index === getMediaGridData(msg).items.length - 1 && getMediaGridData(msg).extraCount > 0"
                     class="media-more"
@@ -220,14 +226,26 @@
                 </div>
               </div>
               <div v-if="getFileAttachments(msg).length" class="message-file-list">
-                <div
-                  class="file-item"
-                  v-for="(item, index) in getFileAttachments(msg)"
-                  :key="`${item.url}_${index}`"
-                  @click="openFilePreview(item)"
-                >
-                  {{ item.name || item.url }}
-                </div>
+                <template v-for="(item, index) in getFileAttachments(msg)">
+                  <audio
+                    v-if="isAudioAttachment(item)"
+                    :key="`audio_${item.url}_${index}`"
+                    :src="getAttachmentUrl(item)"
+                    controls
+                    preload="metadata"
+                    style="max-width: 100%; margin-top: 4px;"
+                  />
+                  <FileChip
+                    v-else
+                    :key="`chip_${item.url}_${index}`"
+                    :name="item.name || item.url"
+                    :size="item.size"
+                    :type="item.type"
+                    :url="item.url"
+                    :uploading="false"
+                    @click="openFilePreview(item)"
+                  />
+                </template>
               </div>
               <div class="message-time">{{ formatTime(msg.createTime) }}</div>
             </div>
@@ -252,8 +270,14 @@
                   v-for="(item, index) in getMediaGridData(msg).items"
                   :key="`${item.url}_${index}`"
                 >
-                  <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview(msg, item)" />
-                  <video v-else-if="getAttachmentUrl(item)" :src="getAttachmentUrl(item)" controls @click="openFilePreview(item)" />
+                  <template v-if="item.type === 'image'">
+                    <img :src="getAttachmentThumbUrl(item)" @error="onAttachmentImageError($event, item)" @click="openImagePreview(msg, item)" />
+                    <div v-if="!isAttachmentImageReady(item)" class="img-skeleton-overlay"><a-spin size="small" /></div>
+                  </template>
+                  <template v-else-if="item.type === 'video'">
+                    <video v-if="getAttachmentUrl(item)" :src="getAttachmentUrl(item)" preload="metadata" controls @click="openFilePreview(item)" />
+                    <div v-else class="video-skeleton"><span>🎬</span><span class="skeleton-text">视频加载中...</span></div>
+                  </template>
                   <div
                     v-if="index === getMediaGridData(msg).items.length - 1 && getMediaGridData(msg).extraCount > 0"
                     class="media-more"
@@ -264,14 +288,26 @@
                 </div>
               </div>
               <div v-if="getFileAttachments(msg).length" class="message-file-list">
-                <div
-                  class="file-item"
-                  v-for="(item, index) in getFileAttachments(msg)"
-                  :key="`${item.url}_${index}`"
-                  @click="openFilePreview(item)"
-                >
-                  {{ item.name || item.url }}
-                </div>
+                <template v-for="(item, index) in getFileAttachments(msg)">
+                  <audio
+                    v-if="isAudioAttachment(item)"
+                    :key="`audio_${item.url}_${index}`"
+                    :src="getAttachmentUrl(item)"
+                    controls
+                    preload="metadata"
+                    style="max-width: 100%; margin-top: 4px;"
+                  />
+                  <FileChip
+                    v-else
+                    :key="`chip_${item.url}_${index}`"
+                    :name="item.name || item.url"
+                    :size="item.size"
+                    :type="item.type"
+                    :url="item.url"
+                    :uploading="false"
+                    @click="openFilePreview(item)"
+                  />
+                </template>
               </div>
               <div class="message-time">{{ formatTime(msg.createTime) }}</div>
             </div>
@@ -312,15 +348,33 @@
     <div class="chat-input" v-if="!conversationClosed">
       <!-- 附件预览 -->
       <div v-if="attachmentList.length > 0" class="attachment-preview-bar">
-        <div v-for="(att, idx) in attachmentList" :key="idx" class="attachment-thumb">
+        <div
+          v-for="(att, idx) in attachmentList"
+          :key="idx"
+          class="attachment-thumb"
+          :class="{ 'is-chip': att.type !== 'image' && att.type !== 'video' }"
+        >
           <img v-if="att.type === 'image'" :src="resolveAttachmentThumb(att)" class="att-img" />
-          <div v-else class="att-file">
-            <span v-if="att.type === 'video'">🎬</span>
-            <span v-else>📄</span>
+          <div v-else-if="att.type === 'video'" class="att-file">
+            <span>🎬</span>
             <span class="att-name">{{ att.name }}</span>
           </div>
+          <FileChip
+            v-else
+            :name="att.name"
+            :size="att.size"
+            :type="att.type"
+            :url="att.url"
+            :uploading="att.uploading"
+            :progress="att.progress"
+            :downloadable="false"
+            click-action="none"
+          />
           <span class="att-remove" @click="removeAttachment(idx)">×</span>
-          <div v-if="att.uploading" class="att-uploading"><a-spin size="small" /></div>
+          <div v-if="att.uploading && att.type !== 'file' && att.type !== 'audio'" class="att-uploading">
+            <a-spin size="small" />
+            <span v-if="att.progress != null" class="att-progress-text">{{ att.progress }}%</span>
+          </div>
         </div>
       </div>
       <!-- 表情面板 -->
@@ -500,7 +554,9 @@ import { computeFileMd5 } from '../utils/fileHash';
 import { encryptTransport, decryptTransport, decryptMessage, decryptStorage } from '../utils/csEncrypt';
 import { playCsNotificationSound } from '../utils/csNotificationSound';
 import { withImageCache, preloadImages, onImageError, getCachedChatWindowConfig, setCachedChatWindowConfig } from '../utils/csImageCache';
-import { withMediaCache, releaseAllMedia } from '/@/utils/file/imageCache';
+import { withMediaCache, releaseAllMedia, withImageThumbCache, isImageReady } from '/@/utils/file/imageCache';
+import { compressImage } from '/@/utils/file/compressImage';
+import FileChip from '../components/FileChip.vue';
 import { isCseUrl } from '/@/utils/cse/cseUrl';
 import { resolveBrandPublicUrl } from '/@/utils/brand';
 // Phase 3.2e：把访客 sessionToken 同步到 cseAuthContext，
@@ -882,8 +938,10 @@ interface AttachmentItem {
   url: string;
   previewUrl?: string;
   size: number;
-  type: 'image' | 'video' | 'file';
+  type: 'image' | 'video' | 'file' | 'audio';
   uploading?: boolean;
+  /** 上传进度 0~100 */
+  progress?: number;
 }
 const attachmentList = ref<AttachmentItem[]>([]);
 
@@ -933,28 +991,55 @@ function validateFile(file: File, fileType: 'image' | 'video' | 'pdf'): string |
 
 async function handleFileSelected(e: Event, fileType: 'image' | 'video' | 'pdf') {
   const input = e.target as HTMLInputElement;
-  const file = input.files?.[0];
-  if (!file) return;
+  const originalFile = input.files?.[0];
+  if (!originalFile) return;
   input.value = '';
 
-  const validationError = validateFile(file, fileType);
+  const validationError = validateFile(originalFile, fileType);
   if (validationError) {
     message.warning(validationError);
     return;
   }
 
+  // R6: 客户端图片压缩（仅图片；GIF/HEIC/HEIF 自动跳过；失败 fallback 原文件）
+  let file: File = originalFile;
+  if (fileType === 'image') {
+    try {
+      file = await compressImage(originalFile);
+    } catch {
+      file = originalFile;
+    }
+  }
+
   const attType: 'image' | 'video' | 'file' = fileType === 'pdf' ? 'file' : fileType;
   const previewUrl = fileType === 'image' ? URL.createObjectURL(file) : undefined;
-  const att: AttachmentItem = {
-    name: file.name,
+  // Vue3 响应式陷阱：直接保存 push 进去的原始对象引用 → 写它属性不经 Proxy → 不触发响应式。
+  // 用 Symbol __uid 标记占位条，所有写操作都走 findCurrent() 拿 Proxy 元素。
+  // Symbol 属性不会被 JSON.stringify 序列化，不会泄漏到 sendMessage 的 extra。
+  const uid = Symbol('attUid');
+  const att: any = {
+    __uid: uid,
+    name: originalFile.name,
     url: '',
     previewUrl,
     size: file.size,
     type: attType,
     uploading: true,
+    progress: 0,
   };
   attachmentList.value.push(att);
-  const idx = attachmentList.value.length - 1;
+  const findCurrent = () => attachmentList.value.find((a: any) => a.__uid === uid);
+  const removeAtt = () => {
+    const i = attachmentList.value.findIndex((a: any) => a.__uid === uid);
+    if (i > -1) {
+      const cur: any = attachmentList.value[i];
+      const pv = cur?.previewUrl;
+      attachmentList.value.splice(i, 1);
+      if (pv) {
+        try { URL.revokeObjectURL(pv); } catch {}
+      }
+    }
+  };
 
   const hideLoading = file.size > 5 * 1024 * 1024
     ? message.loading('正在校验文件...', 0)
@@ -976,32 +1061,56 @@ async function handleFileSelected(e: Event, fileType: 'image' | 'video' | 'pdf')
 
     if (checkRes.data?.result?.exists) {
       message.success('文件秒传成功');
-      attachmentList.value[idx].url = checkRes.data.result.url;
-      attachmentList.value[idx].uploading = false;
+      const cur: any = findCurrent();
+      if (cur) {
+        cur.url = checkRes.data.result.url;
+        cur.uploading = false;
+        cur.progress = 100;
+      }
       return;
     }
 
-    // 正常上传，FormData 追加 md5
+    // 正常上传，FormData 追加 md5；
+    // R6: 显式声明 X-No-Strip-Metadata=1（客户端 Canvas 已剥离 EXIF），让后端跳过二次重写
+    // R7: onUploadProgress 实时回写进度，附件预览条显示百分比
     const formData = new FormData();
     formData.append('file', file);
     formData.append('md5', md5);
     const uploadApiUrl = `${apiUrl}${urlPrefix || ''}/cs/message/visitor/upload`;
+    const headers: Record<string, string> = { ...authHeaders };
+    if (file !== originalFile) {
+      headers['X-No-Strip-Metadata'] = '1';
+    }
     const { data: res } = await axios.post(uploadApiUrl, formData, {
-      headers: authHeaders,
+      headers,
+      onUploadProgress: (e: any) => {
+        try {
+          const total = e.total || (e.lengthComputable ? e.loaded : 0);
+          if (total > 0) {
+            const percent = Math.min(100, Math.round((e.loaded / total) * 100));
+            const cur: any = findCurrent();
+            if (cur) cur.progress = percent;
+          }
+        } catch {}
+      },
     });
     if (!res?.success) {
       message.error(res?.message || '上传失败');
-      attachmentList.value.splice(idx, 1);
+      removeAtt();
       return;
     }
     const uploadedUrl = res?.message || res?.result?.url || res?.result?.message || '';
     if (!uploadedUrl) {
       message.error('上传失败：未获取到文件地址');
-      attachmentList.value.splice(idx, 1);
+      removeAtt();
       return;
     }
-    attachmentList.value[idx].url = uploadedUrl;
-    attachmentList.value[idx].uploading = false;
+    const cur: any = findCurrent();
+    if (cur) {
+      cur.url = uploadedUrl;
+      cur.uploading = false;
+      cur.progress = 100;
+    }
   } catch (err: any) {
     hideLoading?.();
     console.error('文件上传失败', err);
@@ -1013,7 +1122,7 @@ async function handleFileSelected(e: Event, fileType: 'image' | 'video' | 'pdf')
     } else {
       message.error('文件上传失败，请稍后重试');
     }
-    attachmentList.value.splice(idx, 1);
+    removeAtt();
   }
 }
 
@@ -3139,7 +3248,52 @@ function getMediaAttachments(msg: any): any[] {
 }
 
 function getFileAttachments(msg: any): any[] {
-  return getMessageAttachments(msg).filter(item => item.type === 'file');
+  // 非图片/视频统一走 file 列表（含 audio、pdf、未知类型），由 FileChip / audio 标签分别渲染
+  return getMessageAttachments(msg).filter(item => item.type !== 'image' && item.type !== 'video');
+}
+
+function isAudioAttachment(att: any): boolean {
+  const t = String(att?.type || '').toLowerCase();
+  if (t === 'audio') return true;
+  const name = String(att?.name || att?.url || '').toLowerCase();
+  return /\.(mp3|m4a|wav|ogg|opus|aac|flac)$/.test(name);
+}
+
+/**
+ * 列表 / 气泡缩略图：图片走 ?thumb=1 通道（withImageThumbCache），
+ * 解密失败自动回退原图；非图片复用 getAttachmentUrl 行为。
+ */
+function getAttachmentThumbUrl(attachment: any): string {
+  if (!attachment) return '';
+  const type = String(attachment?.type || '').toLowerCase();
+  if (type === 'image') {
+    if (attachment.previewUrl) return attachment.previewUrl;
+    const url = attachment?.url;
+    if (!url) return '';
+    return withImageThumbCache(getFileAccessHttpUrl(url));
+  }
+  return getAttachmentUrl(attachment);
+}
+
+/**
+ * <img @error> 兜底：缩略图 (WEBP) 在老浏览器或 thumb 失败时，
+ * 回退到 withImageCache(原图) 重试一次，避免破图。
+ */
+function onAttachmentImageError(e: Event, attachment: any) {
+  const img = e?.target as HTMLImageElement | null;
+  if (!img || !attachment?.url) return;
+  const fallback = withImageCache(getFileAccessHttpUrl(attachment.url));
+  if (fallback && img.src !== fallback) {
+    img.src = fallback;
+  }
+}
+
+/** 模板骨架屏判断：是否已经有可显示的图片源（本地预览或解密完成）。 */
+function isAttachmentImageReady(attachment: any): boolean {
+  if (!attachment) return false;
+  if (attachment.previewUrl) return true;
+  if (!attachment.url) return false;
+  return isImageReady(getFileAccessHttpUrl(attachment.url));
 }
 
 function getMediaGridData(msg: any) {
@@ -3163,6 +3317,14 @@ function getAttachmentUrl(attachment: any) {
   if (type === 'video') {
     if (isCseUrl(resolved)) {
       const mime = String(attachment?.mime || attachment?.contentType || 'video/mp4');
+      return withMediaCache(resolved, mime);
+    }
+    return resolved;
+  }
+  // 音频：cse:// 同样需走 blob 通道
+  if (type === 'audio' || isAudioAttachment(attachment)) {
+    if (isCseUrl(resolved)) {
+      const mime = String(attachment?.mime || attachment?.contentType || 'audio/mpeg');
       return withMediaCache(resolved, mime);
     }
     return resolved;
@@ -3962,6 +4124,38 @@ watch(() => messages.value.length, () => {
       object-fit: cover;
     }
 
+    .img-skeleton,
+    .video-skeleton {
+      width: 100%;
+      height: 100%;
+      min-height: 80px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #efefef 0%, #f7f7f7 100%);
+      color: #aaa;
+      font-size: 22px;
+      gap: 4px;
+
+      .skeleton-text {
+        font-size: 12px;
+      }
+    }
+
+    .img-skeleton-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #efefef 0%, #f7f7f7 100%);
+      color: #aaa;
+      font-size: 22px;
+      pointer-events: auto;
+      cursor: progress;
+    }
+
     .media-more {
       position: absolute;
       inset: 0;
@@ -4256,9 +4450,31 @@ watch(() => messages.value.length, () => {
       position: absolute;
       inset: 0;
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
       background: rgba(255,255,255,0.7);
+      gap: 2px;
+
+      .att-progress-text {
+        font-size: 10px;
+        color: #555;
+      }
+    }
+  }
+
+  // 当承载 FileChip 时让 attachment-thumb 自适应宽度
+  .attachment-thumb.is-chip {
+    width: auto;
+    height: auto;
+    border: none;
+    border-radius: 0;
+    overflow: visible;
+
+    .att-remove {
+      top: -6px;
+      right: -6px;
+      border-radius: 9px;
     }
   }
 

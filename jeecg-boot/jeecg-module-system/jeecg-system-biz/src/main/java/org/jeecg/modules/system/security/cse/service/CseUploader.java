@@ -14,7 +14,10 @@ import org.jeecg.modules.system.mapper.SysStorageConfigMapper;
 import org.jeecg.modules.system.security.cse.config.CseProperties;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.web.multipart.MultipartFile;
+import jakarta.servlet.http.HttpServletRequest;
 
 import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;
@@ -107,8 +110,11 @@ public class CseUploader {
             String originalName = file.getOriginalFilename();
             // 安全策略：禁止 SVG 类（XSS 风险高，且加密后 <img> 仍可执行内嵌脚本）
             rejectIfSvg(mime, originalName);
-            // 安全策略：图片去除 EXIF / GPS / 缩略图等敏感元数据
-            byte[] sanitized = stripImageMetadata(raw, mime, originalName);
+            // 安全策略：图片去除 EXIF / GPS / 缩略图等敏感元数据。
+            // R6 优化：客户端已用 Canvas 重新编码（天然剥离 EXIF/GPS），可显式声明
+            // X-No-Strip-Metadata: 1 让后端跳过这一步重新编码，避免双重压缩画质雪崩。
+            // 单纯减少一次 ImageIO 读写，安全语义不变（前端 canvas.toBlob 输出本身不含 EXIF）。
+            byte[] sanitized = clientAlreadyStripped() ? raw : stripImageMetadata(raw, mime, originalName);
             return uploadEncryptedBytes(sanitized, originalName, mime, bizPath);
         } catch (JeecgBootException e) {
             recordEncryptFail("upload");
@@ -116,6 +122,24 @@ public class CseUploader {
         } catch (Exception e) {
             recordEncryptFail("upload");
             throw new JeecgBootException("[CSE] 加密上传失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * R6: 客户端是否已声明本次上传的图片已剥离 EXIF / 已经过 Canvas 重新编码。
+     * 通过 HTTP 头 X-No-Strip-Metadata: 1 表达意图。
+     * 取不到 RequestContext（非 web 上下文 / 后台任务调用）时安全返回 false。
+     */
+    private boolean clientAlreadyStripped() {
+        try {
+            ServletRequestAttributes attrs = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+            if (attrs == null) return false;
+            HttpServletRequest req = attrs.getRequest();
+            if (req == null) return false;
+            String v = req.getHeader("X-No-Strip-Metadata");
+            return "1".equals(v) || "true".equalsIgnoreCase(v);
+        } catch (Exception e) {
+            return false;
         }
     }
 

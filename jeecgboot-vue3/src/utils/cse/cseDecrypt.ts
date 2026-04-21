@@ -143,9 +143,11 @@ async function fetchKeyMeta(fid: string, extraHeaders?: Record<string, string>):
 async function fetchCipher(fid: string, thumb: boolean, extraHeaders?: Record<string, string>): Promise<ArrayBuffer> {
   const url = `${SECURE_BASE}/${fid}${thumb ? '?thumb=1' : ''}`;
   const headers = { ...(extraHeaders || {}) };
+  // F1: 只对密文 GET 关闭 _t= 时间戳，让浏览器 disk cache + 后端 Cache-Control 真正生效。
+  // 注意：fetchKeyMeta 必须保留 _t=，sealedDek 一旦被浏览器缓存，token 撤销后存在泄密窗口。
   const res: any = await defHttp.get(
     { url, responseType: 'arraybuffer', headers },
-    { isReturnNativeResponse: true, errorMessageMode: 'none' },
+    { isReturnNativeResponse: true, errorMessageMode: 'none', joinTime: false },
   );
   return res.data as ArrayBuffer;
 }
@@ -206,7 +208,7 @@ export async function decryptFileToObjectUrl(
   fid: string,
   opts: { thumb?: boolean; mime?: string } = {},
 ): Promise<string> {
-  const blob = await decryptFileById(fid, { mime: opts.mime || 'image/*', thumb: opts.thumb });
+  const blob = await decryptFileById(fid, { mime: opts.mime || 'image/png', thumb: opts.thumb });
   return URL.createObjectURL(blob);
 }
 

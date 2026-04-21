@@ -36,8 +36,28 @@ const pendingRequests = new Map<string, Promise<string>>();
  * 响应式 cse:// blob URL 映射：key 为缓存 key，value 为 blob URL。
  * 同步函数 withImageCache 在未命中时会在此 map 上读取（让 Vue 收集依赖），
  * 异步解密成功后写入 → 触发组件自动重渲染。
+ *
+ * 【sentinel 协议】
+ *  - value 为 blob URL（非空字符串）→ 命中，模板正常渲染
+ *  - value 为 ''（空串）→ "已尝试且失败" sentinel，让骨架消失但不锁定重试
+ *    → withImageCache / withImageThumbCache 的 `if (reactiveHit)` truthy 检查
+ *      把空串视为未命中，仍走 pendingRequests 重新解密
+ *    → isImageReady 用 .get() !== undefined 检查，空串命中 true 让骨架消失
+ *  - 60s TTL 后自动 delete，下次访问会触发新一轮解密
  */
 const cseReactiveMap = shallowReactive(new Map<string, string>());
+
+/**
+ * 解密失败 sentinel TTL：60s 后自动清除空串占位，允许后续重试。
+ * 设计目的：避免"骨架永久转圈"，同时不会因为永久写入 sentinel 而锁死重试。
+ */
+const FAILED_TTL_MS = 60 * 1000;
+function markDecryptFailed(key: string): void {
+  cseReactiveMap.set(key, '');
+  setTimeout(() => {
+    if (cseReactiveMap.get(key) === '') cseReactiveMap.delete(key);
+  }, FAILED_TTL_MS);
+}
 
 /** 【t0b】长驻图标 key 集合，标记后永不被 LRU 淘汰 */
 const persistentKeys = new Set<string>();
@@ -219,6 +239,10 @@ function buildKey(originalUrl: string): string {
   return `cache:${currentUserId()}:${originalUrl}`;
 }
 
+function buildThumbKey(originalUrl: string): string {
+  return `cache:thumb:${currentUserId()}:${originalUrl}`;
+}
+
 function isCacheableUrl(url: string): boolean {
   if (!url) return false;
   if (url.startsWith('data:') || url.startsWith('blob:')) return false;
@@ -285,6 +309,58 @@ export async function withImageCacheAsync(url: string, opts?: WithImageCacheOpti
   } catch {
     return isCseUrl(url) ? TRANSPARENT_PNG : url;
   }
+}
+
+/**
+ * 同步取缓存图片 URL（缩略图通道，仅用于 cse:// 图片附件）：
+ *  - 只对 image 类型有意义；非图片调用方必须自己判断后再调用
+ *  - 命中返回 blob URL；未命中返回 TRANSPARENT_PNG 占位，触发后台解密
+ *  - 解密走 decryptFileById(fid, { thumb: true })，命中后端 ?thumb=1 通道
+ *  - 任何 thumb 解密错误（AAD 不匹配 / 网络 / 后端无 thumbObjectKey 静默回退原图导致 tag 校验失败）
+ *    自动一次性重试原图（thumb=false），原图也失败才返回 TRANSPARENT_PNG
+ *  - 与 withImageCache 共用 LRU + IDB + cacheGeneration，只是 cache key 加 `thumb:` 前缀避免互相覆盖
+ *  - 非 cse:// URL 透传到 withImageCache
+ */
+export function withImageThumbCache(url: string, opts?: WithImageCacheOptions): string {
+  if (!isCacheableUrl(url)) return url;
+  if (!isCseUrl(url)) return withImageCache(url, opts);
+
+  const key = buildThumbKey(url);
+  if (opts?.persistent) persistentKeys.add(key);
+  const cached = memoryCache.get(key);
+  if (cached) {
+    touchMemory(key);
+    return cached;
+  }
+  const reactiveHit = cseReactiveMap.get(key);
+  if (reactiveHit) return reactiveHit;
+  if (!pendingRequests.has(key)) {
+    pendingRequests.set(
+      key,
+      loadAndCache(url, key, { thumb: true }).finally(() => pendingRequests.delete(key)),
+    );
+  }
+  return TRANSPARENT_PNG;
+}
+
+/**
+ * F3 修正：判定指定 URL 的缓存是否就绪（用于模板骨架屏判定）。
+ *
+ * 关键点：必须用 `cseReactiveMap.get()` 而不是 `.has()`。
+ *  - shallowReactive(Map) 在 Vue 3 reactivity 里 `.has()` 的 track 行为版本间不稳定
+ *  - 只有 `.get()` 是 collection handler 里明确 track 的操作
+ * 模板调用时会自动建立响应式订阅，cseReactiveMap.set 后 Vue 会自动重渲染。
+ *
+ * 普通 http(s) URL 直接返回 true（本来就不需要解密，<img> 直接拿原 URL 渲染）。
+ */
+export function isImageReady(url: string): boolean {
+  if (!url) return false;
+  if (!isCseUrl(url)) return true;
+  const thumbKey = buildThumbKey(url);
+  if (cseReactiveMap.get(thumbKey) !== undefined) return true;
+  const origKey = buildKey(url);
+  if (cseReactiveMap.get(origKey) !== undefined) return true;
+  return false;
 }
 
 const TRANSPARENT_PNG =
@@ -391,9 +467,10 @@ export function clearImageCache(): void {
   clearDekCache();
 }
 
-async function loadAndCache(url: string, key: string): Promise<string> {
+async function loadAndCache(url: string, key: string, opts: { thumb?: boolean } = {}): Promise<string> {
   // 【S-P0-4】记录启动时的 generation，完成后校验，防止清理期间的写回竞态
   const myGen = cacheGeneration;
+  const isThumb = !!opts.thumb;
   // 内存先 try IDB
   try {
     const e = await idbGet(key);
@@ -411,12 +488,32 @@ async function loadAndCache(url: string, key: string): Promise<string> {
   let blob: Blob | null = null;
   if (isCseUrl(url)) {
     const fid = parseCseFid(url);
-    if (!fid) return TRANSPARENT_PNG;
-    try {
-      blob = await decryptFileById(fid, { mime: 'image/*' });
-    } catch (e) {
-      console.warn('[CSE] decrypt fail', fid, e);
+    if (!fid) {
+      // F2: fid 解析失败属真实失败 → 写 sentinel 让骨架消失
+      markDecryptFailed(key);
       return TRANSPARENT_PNG;
+    }
+    try {
+      blob = await decryptFileById(fid, { mime: 'image/*', thumb: isThumb });
+    } catch (e) {
+      // F2: thumb 解密任何错误（AAD 不匹配 / 网络 / 后端无 thumbObjectKey 静默回退原图导致 tag 校验失败）
+      // 都自动一次性重试原图（thumb=false）。结果会写入当前 thumb key，让 isImageReady 正常感知。
+      if (isThumb) {
+        console.warn('[CSE] thumb decrypt fail, fallback to original', fid, e);
+        try {
+          blob = await decryptFileById(fid, { mime: 'image/*', thumb: false });
+        } catch (e2) {
+          console.warn('[CSE] original decrypt also fail', fid, e2);
+          // F2: thumb + 原图都失败（核心场景）→ 写 sentinel + 60s TTL
+          markDecryptFailed(key);
+          return TRANSPARENT_PNG;
+        }
+      } else {
+        console.warn('[CSE] decrypt fail', fid, e);
+        // F2: 非 thumb 路径解密失败 → 写 sentinel
+        markDecryptFailed(key);
+        return TRANSPARENT_PNG;
+      }
     }
   } else {
     try {
@@ -429,7 +526,12 @@ async function loadAndCache(url: string, key: string): Promise<string> {
   }
 
   if (!blob || blob.size === 0 || blob.size > MAX_SINGLE_SIZE) {
-    return isCseUrl(url) ? TRANSPARENT_PNG : url;
+    // F2: blob 大小异常 / 空 blob，仅 cse:// 分支写 sentinel；普通 URL 直接 return 原 url
+    if (isCseUrl(url)) {
+      markDecryptFailed(key);
+      return TRANSPARENT_PNG;
+    }
+    return url;
   }
   const blobUrl = URL.createObjectURL(blob);
   // 【S-P0-4】完成后校验 generation：清理期间的解密结果直接丢弃，避免写回幽灵 blob

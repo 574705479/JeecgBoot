@@ -575,8 +575,29 @@
                       v-for="(item, index) in getMediaGridData(msg).items"
                       :key="`${item.url}_${index}`"
                     >
-                      <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview(msg, item)" />
-                      <video v-else-if="getAttachmentUrl(item)" :src="getAttachmentUrl(item)" controls playsinline />
+                      <template v-if="item.type === 'image'">
+                        <img
+                          :src="getAttachmentThumbUrl(item)"
+                          @click="openImagePreview(msg, item)"
+                          @error="onAttachmentImageError($event, item)"
+                        />
+                        <div v-if="!isAttachmentImageReady(item)" class="media-skeleton-overlay">
+                          <LoadingOutlined spin />
+                        </div>
+                      </template>
+                      <template v-else-if="item.type === 'video'">
+                        <video
+                          v-if="getAttachmentUrl(item)"
+                          :src="getAttachmentUrl(item)"
+                          controls
+                          playsinline
+                          preload="metadata"
+                        />
+                        <div v-else class="video-skeleton" @click="openVideoPreview(item)">
+                          <PlayCircleOutlined />
+                          <span>视频加载中…</span>
+                        </div>
+                      </template>
                       <div
                         v-if="index === getMediaGridData(msg).items.length - 1 && getMediaGridData(msg).extraCount > 0"
                         class="media-more"
@@ -587,14 +608,24 @@
                     </div>
                   </div>
                   <div v-if="getFileAttachments(msg).length" class="msg-file-list">
-                    <div
-                      class="file-item"
-                      v-for="(item, index) in getFileAttachments(msg)"
-                      :key="`${item.url}_${index}`"
-                      @click="openFilePreview(item)"
-                    >
-                      <span class="file-name">{{ item.name || item.url }}</span>
-                    </div>
+                    <template v-for="(item, index) in getFileAttachments(msg)">
+                      <audio
+                        v-if="item.type === 'audio'"
+                        :key="`audio_${item.url}_${index}`"
+                        :src="getAttachmentUrl(item)"
+                        controls
+                        preload="metadata"
+                        class="msg-audio"
+                      />
+                      <FileChip
+                        v-else
+                        :key="`file_${item.url}_${index}`"
+                        :name="item.name || item.url"
+                        :size="item.size"
+                        :type="item.type"
+                        :url="getFileAccessHttpUrl(item.url)"
+                      />
+                    </template>
                   </div>
                 </div>
                 <div class="msg-meta">
@@ -637,8 +668,29 @@
                       v-for="(item, index) in getMediaGridData(msg).items"
                       :key="`${item.url}_${index}`"
                     >
-                      <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview(msg, item)" />
-                      <video v-else-if="getAttachmentUrl(item)" :src="getAttachmentUrl(item)" controls playsinline />
+                      <template v-if="item.type === 'image'">
+                        <img
+                          :src="getAttachmentThumbUrl(item)"
+                          @click="openImagePreview(msg, item)"
+                          @error="onAttachmentImageError($event, item)"
+                        />
+                        <div v-if="!isAttachmentImageReady(item)" class="media-skeleton-overlay">
+                          <LoadingOutlined spin />
+                        </div>
+                      </template>
+                      <template v-else-if="item.type === 'video'">
+                        <video
+                          v-if="getAttachmentUrl(item)"
+                          :src="getAttachmentUrl(item)"
+                          controls
+                          playsinline
+                          preload="metadata"
+                        />
+                        <div v-else class="video-skeleton" @click="openVideoPreview(item)">
+                          <PlayCircleOutlined />
+                          <span>视频加载中…</span>
+                        </div>
+                      </template>
                       <div
                         v-if="index === getMediaGridData(msg).items.length - 1 && getMediaGridData(msg).extraCount > 0"
                         class="media-more"
@@ -649,14 +701,24 @@
                     </div>
                   </div>
                   <div v-if="getFileAttachments(msg).length" class="msg-file-list">
-                    <div
-                      class="file-item"
-                      v-for="(item, index) in getFileAttachments(msg)"
-                      :key="`${item.url}_${index}`"
-                      @click="openFilePreview(item)"
-                    >
-                      <span class="file-name">{{ item.name || item.url }}</span>
-                    </div>
+                    <template v-for="(item, index) in getFileAttachments(msg)">
+                      <audio
+                        v-if="item.type === 'audio'"
+                        :key="`audio_${item.url}_${index}`"
+                        :src="getAttachmentUrl(item)"
+                        controls
+                        preload="metadata"
+                        class="msg-audio"
+                      />
+                      <FileChip
+                        v-else
+                        :key="`file_${item.url}_${index}`"
+                        :name="item.name || item.url"
+                        :size="item.size"
+                        :type="item.type"
+                        :url="getFileAccessHttpUrl(item.url)"
+                      />
+                    </template>
                   </div>
                 </div>
                 <div class="msg-meta">
@@ -751,7 +813,7 @@
                     <img :src="withImageCache(getFileAccessHttpUrl(item.content))" style="max-width: 360px; max-height: 300px; border-radius: 6px; display: block" @error="onImageError" />
                   </template>
                   <div class="quick-reply-content">
-                    <img :src="withImageCache(getFileAccessHttpUrl(item.content))" class="quick-reply-img" @error="onImageError" />
+                    <img :src="withImageThumbCache(getFileAccessHttpUrl(item.content))" class="quick-reply-img" @error="onImageError" />
                   </div>
                 </a-popover>
                 <a-popover v-else-if="item.msgType === 5" placement="topLeft" trigger="hover" :overlayStyle="{ maxWidth: '450px' }">
@@ -772,14 +834,38 @@
         <div class="attachment-preview" v-if="attachmentList.length">
           <div
             class="attachment-item"
+            :class="{ 'is-uploading': item.uploading }"
             v-for="(item, index) in attachmentList"
-            :key="`${item.url}_${index}`"
+            :key="`${item.url || item.previewUrl || ''}_${index}`"
           >
-            <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreviewFromList(attachmentList, item)" />
-            <video v-else-if="item.type === 'video' && getAttachmentUrl(item)" :src="getAttachmentUrl(item)" @click="openVideoPreview(item)" />
-            <div v-else class="attachment-file">
-              <span class="file-name" @click="openFilePreview(item)">{{ item.name }}</span>
-            </div>
+            <template v-if="item.type === 'image'">
+              <img :src="getAttachmentThumbUrl(item)" @click="!item.uploading && openImagePreviewFromList(attachmentList, item)" @error="onAttachmentImageError($event, item)" />
+              <div v-if="item.uploading" class="upload-mask">
+                <LoadingOutlined spin />
+                <span class="upload-percent">{{ item.progress || 0 }}%</span>
+              </div>
+            </template>
+            <template v-else-if="item.type === 'video'">
+              <video v-if="getAttachmentUrl(item)" :src="getAttachmentUrl(item)" @click="!item.uploading && openVideoPreview(item)" />
+              <div v-else class="video-skeleton small">
+                <PlayCircleOutlined />
+              </div>
+              <div v-if="item.uploading" class="upload-mask">
+                <LoadingOutlined spin />
+                <span class="upload-percent">{{ item.progress || 0 }}%</span>
+              </div>
+            </template>
+            <FileChip
+              v-else
+              :name="item.name"
+              :size="item.size"
+              :type="item.type"
+              :url="item.url ? getFileAccessHttpUrl(item.url) : ''"
+              :uploading="item.uploading"
+              :progress="item.progress"
+              :downloadable="false"
+              click-action="none"
+            />
             <CloseOutlined class="remove-attachment" @click="removeAttachment(index)" />
           </div>
         </div>
@@ -818,8 +904,13 @@
             v-for="(item, index) in mediaViewerList"
             :key="`${item.url}_${index}`"
           >
-            <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreviewFromList(mediaViewerList, item)" />
-            <video v-else-if="getAttachmentUrl(item)" :src="getAttachmentUrl(item)" controls @click="openVideoPreview(item)" />
+            <img
+              v-if="item.type === 'image'"
+              :src="getAttachmentThumbUrl(item)"
+              @click="openImagePreviewFromList(mediaViewerList, item)"
+              @error="onAttachmentImageError($event, item)"
+            />
+            <video v-else-if="getAttachmentUrl(item)" :src="getAttachmentUrl(item)" controls preload="metadata" @click="openVideoPreview(item)" />
           </div>
         </div>
       </a-modal>
@@ -1141,7 +1232,7 @@ import {
   MoreOutlined, DeleteOutlined, PaperClipOutlined, EnvironmentOutlined, GlobalOutlined,
   TeamOutlined, CaretRightOutlined, CaretDownOutlined, DownOutlined, SearchOutlined,
   CheckCircleOutlined, BgColorsOutlined, UndoOutlined,
-  LoadingOutlined, ExclamationCircleOutlined
+  LoadingOutlined, ExclamationCircleOutlined, PlayCircleOutlined
 } from '@ant-design/icons-vue';
 import { useRoute, useRouter } from 'vue-router';
 import { defHttp } from '/@/utils/http/axios';
@@ -1157,8 +1248,10 @@ import { computeFileMd5 } from '../utils/fileHash';
 import { encryptTransport, decryptTransport, decryptMessage } from '../utils/csEncrypt';
 import { playCsNotificationSound, CS_NOTIFY_MAX_GAIN } from '../utils/csNotificationSound';
 import { withImageCache, preloadImages, onImageError, getCachedChatWindowConfig, setCachedChatWindowConfig } from '../utils/csImageCache';
-import { withMediaCache, releaseAllMedia, warmupAvatars } from '/@/utils/file/imageCache';
+import { withMediaCache, releaseAllMedia, warmupAvatars, withImageThumbCache, isImageReady } from '/@/utils/file/imageCache';
 import { isCseUrl } from '/@/utils/cse/cseUrl';
+import { compressImage } from '/@/utils/file/compressImage';
+import FileChip from '../components/FileChip.vue';
 import { vCseHtml } from '../utils/cseHtmlImg';
 // ★ 为回复建议保留Markdown渲染能力
 import MarkdownIt from 'markdown-it';
@@ -1418,8 +1511,20 @@ const agentStatus = ref(0);
 const isOnline = ref(false);
 const agentRole = ref(0); // 0-普通客服, 1-管理者
 const isSupervisor = computed(() => agentRole.value === 1);
-/** 同事会话模式下非管理者 -> 只读（禁止结束/转接/拉黑IP） */
-const isColleagueReadonly = computed(() => filter.value === 'monitor' && !isSupervisor.value);
+/**
+ * 越权防护：非管理者客服仅能操作自己拥有的会话。
+ *  - 管理者(role=1)始终可写；
+ *  - 无 currentConversation 时返回 false，不影响默认 UI；
+ *  - 当前会话 ownerAgentId 与本人 agentId 不一致时只读，
+ *    覆盖 monitor tab 残留、tab 切换、转接前后等所有场景。
+ */
+const isColleagueReadonly = computed(() => {
+  if (isSupervisor.value) return false;
+  const conv = currentConversation.value;
+  if (!conv) return false;
+  const owner = conv.ownerAgentId;
+  return !!owner && owner !== agentId.value;
+});
 const keepConnectionOnDeactivate = true;
 
 // AI应用选择
@@ -2195,7 +2300,15 @@ function getConversationsCacheKey() {
 }
 
 const canSendMessage = computed(() => {
-  return inputMessage.value.trim().length > 0 || attachmentList.value.length > 0;
+  // 兜底：万一某次响应式回写漏触发，只要有 1 个已上传完成的附件就放行；
+  // sendMessage 内部仍会用 filter(a => !a.uploading && a.url) 二次过滤脏数据。
+  const hasReadyAttachment = attachmentList.value.some((a: any) => !a.uploading && a.url);
+  const hasUploading = attachmentList.value.some((a: any) => a.uploading);
+  const hasText = inputMessage.value.trim().length > 0;
+  // 纯发文件：只要有 1 个上传完成即可（不强制 noUploading，允许多附件混合时其中 1 个 OK 就发）。
+  if (!hasText) return hasReadyAttachment;
+  // 有文字：禁止有上传中的附件，避免发出去 url 为空的占位条。
+  return !hasUploading;
 });
 
 function getAttachmentType(file: any) {
@@ -2207,7 +2320,19 @@ function getAttachmentType(file: any) {
   if (type.startsWith('video/') || name.match(/\.(mp4|webm|ogg|mov|avi|mkv)$/)) {
     return 'video';
   }
+  // M3: audio 单独识别，模板可走 <audio controls> 渲染，否则会落到通用 file
+  if (type.startsWith('audio/') || name.match(/\.(mp3|m4a|wav|ogg|opus|aac|flac)$/)) {
+    return 'audio';
+  }
   return 'file';
+}
+
+// 文件大小格式化（与访客端一致）
+function formatFileSize(bytes: number): string {
+  if (!bytes || bytes < 0) return '';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
 const ALLOWED_UPLOAD_EXTS = [
@@ -2239,7 +2364,54 @@ function handleCustomUpload(options: any) {
   uploadAttachmentFile(file);
 }
 
-async function uploadAttachmentFile(file: File) {
+async function uploadAttachmentFile(originalFile: File) {
+  // R6: 仅图片走客户端压缩；非图片 / GIF / HEIC 等会自动 fallback 原文件。
+  // 压缩 + 上传共享同一个原 file 名（compressImage 内部对 PNG 含 alpha 时仍输出 PNG）。
+  let file: File = originalFile;
+  try {
+    file = await compressImage(originalFile);
+  } catch {
+    file = originalFile;
+  }
+  const attType = getAttachmentType(file);
+
+  // M1: 立即 push 上传占位条目（字段命名严格对齐访客端 AttachmentItem）。
+  // 图片/视频可显本地原图预览，避免按下「发送」前出现"裸 fid / 空气泡"的窘境。
+  let previewUrl: string | undefined = undefined;
+  try {
+    if (attType === 'image' || attType === 'video' || attType === 'audio') {
+      previewUrl = URL.createObjectURL(file);
+    }
+  } catch {}
+  // Vue3 响应式陷阱：直接保存 push 进去的原始对象引用 → 写它属性不经 Proxy → 不触发响应式。
+  // 这里用 Symbol __uid 给占位条打唯一标记，后续所有写操作都通过 findCurrent() 从
+  // attachmentList.value 里拿到 Proxy 元素再改。Symbol 属性不会被 JSON.stringify 序列化，
+  // 不会泄漏到 sendMessage 的 extra 入库 / WS 推送 payload 里。
+  const uid = Symbol('attUid');
+  const placeholder: any = {
+    __uid: uid,
+    name: originalFile.name || file.name || 'file',
+    url: '',
+    previewUrl,
+    size: file.size,
+    type: attType,
+    uploading: true,
+    progress: 0,
+  };
+  attachmentList.value.push(placeholder);
+  const findCurrent = () => attachmentList.value.find((a: any) => a.__uid === uid);
+  const removePlaceholder = () => {
+    const i = attachmentList.value.findIndex((a: any) => a.__uid === uid);
+    if (i > -1) {
+      const cur: any = attachmentList.value[i];
+      const pv = cur?.previewUrl;
+      attachmentList.value.splice(i, 1);
+      if (pv) {
+        try { URL.revokeObjectURL(pv); } catch {}
+      }
+    }
+  };
+
   const hideLoading = file.size > 5 * 1024 * 1024
     ? message.loading('正在校验文件...', 0)
     : null;
@@ -2255,39 +2427,66 @@ async function uploadAttachmentFile(file: File) {
 
     if (checkRes?.exists) {
       message.success('文件秒传成功');
-      attachmentList.value.push({
-        name: file.name || 'image',
-        url: checkRes.url,
-        size: file.size,
-        type: getAttachmentType(file),
-      });
+      const cur: any = findCurrent();
+      if (cur) {
+        cur.url = checkRes.url;
+        cur.uploading = false;
+        cur.progress = 100;
+      }
+      // previewUrl 留到 sendMessage 时统一回收，避免气泡内本地预览突变成 cse 占位短暂闪烁
+      uploadFileList.value.push(file);
       return;
     }
 
+    let succeeded = false;
     const isReturn = (fileInfo: any) => {
       try {
         if (fileInfo.code === 0) {
           const url = fileInfo.message;
-          if (!url) return;
-          attachmentList.value.push({
-            name: file.name || 'image',
-            url,
-            size: file.size,
-            type: getAttachmentType(file),
-          });
+          if (!url) {
+            removePlaceholder();
+            return;
+          }
+          const cur: any = findCurrent();
+          if (cur) {
+            cur.url = url;
+            cur.uploading = false;
+            cur.progress = 100;
+          }
           uploadFileList.value.push(file);
+          succeeded = true;
         } else {
+          removePlaceholder();
           message.error(fileInfo.message || `${file.name} 上传失败`);
         }
       } catch (error) {
         console.error('上传处理失败', error);
+        removePlaceholder();
         message.error(`${file.name} 上传失败`);
       }
     };
-    await defHttp.uploadFile({ url: '/airag/chat/upload' }, { file, data: { md5 } }, { success: isReturn });
+    await defHttp.uploadFile(
+      { url: '/airag/chat/upload' },
+      { file, data: { md5 } },
+      {
+        success: isReturn,
+        onProgress: (p) => {
+          // R7: 实时进度回写到占位条 → 模板 a-progress 自动响应
+          const cur: any = findCurrent();
+          if (cur) cur.progress = p;
+        },
+        // R6: 通知后端跳过 stripImageMetadata，避免和客户端 Canvas 重新编码形成双重压缩
+        headers: file === originalFile ? {} : { 'X-No-Strip-Metadata': '1' },
+      },
+    );
+    if (!succeeded) {
+      // 网络层报 200 但回调未走 success 分支的兜底（极端情况）
+      removePlaceholder();
+    }
   } catch (e) {
     hideLoading?.();
     console.error('上传失败', e);
+    removePlaceholder();
     message.error(`${file.name} 上传失败`);
   }
 }
@@ -2324,16 +2523,28 @@ function appendEmoji(emoji: string) {
 }
 
 function removeAttachment(index: number) {
+  const att: any = attachmentList.value[index];
+  if (att?.previewUrl) {
+    try { URL.revokeObjectURL(att.previewUrl); } catch {}
+  }
   attachmentList.value.splice(index, 1);
-  uploadFileList.value.splice(index, 1);
+  // uploadFileList 仅在上传成功后才 push，索引未必和 attachmentList 一致；
+  // 这里只删完成态，避免 uploading 项删错位。
+  if (att && !att.uploading) {
+    uploadFileList.value.splice(index, 1);
+  }
 }
 
 function getAttachmentUrl(attachment: any) {
   const url = attachment?.url;
-  if (!url) return '';
+  // 上传中显本地原图预览（图片/视频/音频）
+  if (!url) {
+    return attachment?.previewUrl || '';
+  }
   const type = String(attachment?.type || '').toLowerCase();
   const resolved = getFileAccessHttpUrl(url);
-  // 图片走 withImageCache（同步占位 + reactive 触发刷新）
+  // 图片走 withImageCache（同步占位 + reactive 触发刷新）。
+  // 注意：列表 / 缩略场景请用 getAttachmentThumbUrl，本函数返回原图（用于预览大图、open 等）。
   if (type === 'image') {
     return withImageCache(resolved);
   }
@@ -2345,11 +2556,57 @@ function getAttachmentUrl(attachment: any) {
     }
     return resolved;
   }
-  // 【S-P0-8】未知/file/audio 等类型：cse:// 不能直接交给 <img>/<video>/window.open，兜底返回 ''；
+  // M3: audio 走 withMediaCache（同视频通道，<audio> / <video> 都能直接拿 blob URL）
+  if (type === 'audio') {
+    if (isCseUrl(resolved)) {
+      const mime = String(attachment?.mime || attachment?.contentType || 'audio/mpeg');
+      return withMediaCache(resolved, mime);
+    }
+    return resolved;
+  }
+  // 【S-P0-8】未知/file 等类型：cse:// 不能直接交给 <img>/<video>/window.open，兜底返回 ''；
   // 业务侧用 v-if + 下载入口（downloadCse）处理。
-  // 后端正在通过 Flyway 回填 + NOT NULL 收紧 type 字段；前端兜底是双保险。
   if (isCseUrl(resolved)) return '';
   return resolved;
+}
+
+/**
+ * 列表 / 缩略图场景专用：图片走后端 ?thumb=1 通道，体积从 MB 降到几十 KB。
+ * 上传中（无 url）继续返回本地 previewUrl 占位。
+ * 非图片自动透传到 getAttachmentUrl。
+ */
+function getAttachmentThumbUrl(attachment: any): string {
+  const url = attachment?.url;
+  if (!url) return attachment?.previewUrl || '';
+  const type = String(attachment?.type || '').toLowerCase();
+  if (type !== 'image') return getAttachmentUrl(attachment);
+  return withImageThumbCache(getFileAccessHttpUrl(url));
+}
+
+/**
+ * 图片缩略图加载失败时的兜底：先尝试切原图（webp 兼容性 / 老数据无 thumbObjectKey），
+ * 再失败才显示 1x1 透明 PNG。
+ */
+function onAttachmentImageError(e: Event, attachment: any) {
+  const img = e.target as HTMLImageElement;
+  if (!img || img.dataset.fallbackApplied) return;
+  img.dataset.fallbackApplied = 'true';
+  const url = attachment?.url;
+  if (url) {
+    img.src = withImageCache(getFileAccessHttpUrl(url));
+  }
+}
+
+/**
+ * F3: 图片是否就绪（解密完成 / 本地预览可用），用于模板骨架屏判定。
+ * 上传中本地有 previewUrl → 直接当 ready。
+ */
+function isAttachmentImageReady(attachment: any): boolean {
+  if (!attachment) return false;
+  if (attachment.previewUrl) return true;
+  const url = attachment?.url;
+  if (!url) return false;
+  return isImageReady(getFileAccessHttpUrl(url));
 }
 
 function isSmartAssistant(msg: any): boolean {
@@ -2428,7 +2685,8 @@ function getMediaAttachments(msg: any): any[] {
 }
 
 function getFileAttachments(msg: any): any[] {
-  return getMessageAttachments(msg).filter(item => item.type === 'file');
+  // 含 audio：模板里 audio 走 <audio controls> 单独渲染（M3），其余统一走 FileChip
+  return getMessageAttachments(msg).filter(item => item.type === 'file' || item.type === 'audio');
 }
 
 function getMediaGridData(msg: any) {
@@ -3524,7 +3782,24 @@ function handleInputKeydown(e: KeyboardEvent) {
 async function sendMessage() {
   const content = inputMessage.value.trim();
   if (!currentConversation.value) return;
-  const attachments = attachmentList.value.slice();
+  // R8: 必须深拷贝 + strip 内部字段。
+  // attachmentList 内含 _ 前缀字段、previewUrl: 'blob:...'、uploading 这些纯前端状态，
+  // 直接 slice() 会让 JSON.stringify 把它们写进 extra → 落库 → WS 推送给对方，
+  // 导致 DB 污染、对方端尝试加载 blob: URL 报跨源错误、blob 内存延迟回收等连锁问题。
+  // 同时排除 uploading=true 的占位条目，避免发出 url 为空的脏数据。
+  const attachments = attachmentList.value
+    .filter((a: any) => !a.uploading && a.url)
+    .map((a: any) => {
+      const out: any = {
+        name: a.name,
+        url: a.url,
+        size: a.size,
+        type: a.type,
+      };
+      if (a.mime) out.mime = a.mime;
+      if (a.contentType) out.contentType = a.contentType;
+      return out;
+    });
   if (!content && attachments.length === 0) return;
   
   const wasUnassigned = currentConversation.value.status === 0; // 记录是否是待接入状态
@@ -3605,6 +3880,12 @@ async function sendMessage() {
     }
 
     inputMessage.value = '';
+    // R8: 清空前先回收所有本地 blob: previewUrl，避免内存泄漏
+    for (const a of attachmentList.value) {
+      if ((a as any)?.previewUrl) {
+        try { URL.revokeObjectURL((a as any).previewUrl); } catch {}
+      }
+    }
     attachmentList.value = [];
     uploadFileList.value = [];
     
@@ -6558,6 +6839,19 @@ function restoreMessageScroll() {
     }
 
     &:hover { transform: scale(1.02); }
+
+    .media-skeleton-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--cs-bg-code);
+      color: var(--cs-text-secondary, #aaa);
+      font-size: 22px;
+      pointer-events: auto;
+      cursor: progress;
+    }
 
     .media-more {
       position: absolute;

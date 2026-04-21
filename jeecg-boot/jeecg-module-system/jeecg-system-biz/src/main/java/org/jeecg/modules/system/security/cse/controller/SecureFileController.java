@@ -184,8 +184,26 @@ public class SecureFileController {
             response.setStatus(HttpServletResponse.SC_NOT_FOUND);
             return;
         }
+        // 304 短路：密文按 fid（thumb 加后缀）做强 ETag。客户端命中即可省掉密文体传输。
+        String etag = "\"" + fid + (isThumb ? "-t" : "") + "\"";
+        String ifNoneMatch = request.getHeader("If-None-Match");
+        if (etag.equals(ifNoneMatch)) {
+            response.setStatus(HttpServletResponse.SC_NOT_MODIFIED);
+            response.setHeader("ETag", etag);
+            response.setHeader("Cache-Control", "private, max-age=300, must-revalidate");
+            response.setHeader("Vary", "Authorization, X-Visitor-Session");
+            return;
+        }
         response.setContentType(MediaType.APPLICATION_OCTET_STREAM_VALUE);
-        response.setHeader("Cache-Control", "private, max-age=86400");
+        // 关键安全调整：
+        // 1. max-age 从 86400 收紧到 300，避免 token 撤销 / 会话切换的 24h 窗口里旧密文从 disk cache 直出
+        // 2. must-revalidate 强制过期后回源校验权限
+        // 3. ETag 让回源时走 304 不重传密文体
+        // 4. Vary: Authorization, X-Visitor-Session 防止同一浏览器多账号缓存交叉污染
+        // 5. 不用 immutable，与 must-revalidate 矛盾、且 token 撤销窗口有泄密风险
+        response.setHeader("Cache-Control", "private, max-age=300, must-revalidate");
+        response.setHeader("ETag", etag);
+        response.setHeader("Vary", "Authorization, X-Visitor-Session");
         try (InputStream in = cseFileStorage.openCipher(file.getStorageType(), file.getBucket(), objectKey);
              OutputStream out = response.getOutputStream()) {
             byte[] buf = new byte[8192];
@@ -204,7 +222,11 @@ public class SecureFileController {
 
     @IgnoreAuth
     @GetMapping("/{fid}/key")
-    public Result<JSONObject> getKey(@PathVariable("fid") String fid, HttpServletRequest request) {
+    public Result<JSONObject> getKey(@PathVariable("fid") String fid, HttpServletRequest request, HttpServletResponse response) {
+        // F1 安全兜底：sealedDek 用一次性 sealToken 签出，绝不可被任何缓存层留存。
+        // 即使前端将来误传 joinTime: false 关闭 _t=，这里也要拒绝缓存。
+        response.setHeader("Cache-Control", "no-store");
+        response.setHeader("Pragma", "no-cache");
         OssFile file = metaService.getByFileId(fid);
         if (file == null) {
             return Result.error(404, "文件不存在");

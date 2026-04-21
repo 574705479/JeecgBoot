@@ -52,4 +52,9 @@ export interface UploadFileCallBack {
   success?: any;
   // 是否返回响应头,需要获取响应头时使用此属性
   isReturnResponse?: boolean;
+  // 上传进度回调（百分比 0~100，整数）。R7：原 uploadFile 没透传 onUploadProgress，
+  // 业务侧（如客服上传占位条）无法显示进度条，因此在回调对象里追加 onProgress 入口。
+  onProgress?: (percent: number) => void;
+  // 自定义请求 header（如 X-No-Strip-Metadata: 1，用于让后端跳过二次重写图片 EXIF）
+  headers?: Record<string, string>;
 }

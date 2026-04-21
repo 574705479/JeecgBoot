@@ -140,6 +140,10 @@ export class VAxios {
       });
     }
 
+    // R7: 把 callback 里的 onProgress 映射到 axios 的 onUploadProgress；
+    //     callback.headers 合并进请求头（用于 X-No-Strip-Metadata 等定制场景）。
+    const onProgress = callback?.onProgress;
+    const extraHeaders = callback?.headers || {};
     return this.axiosInstance
       .request<T>({
         ...config,
@@ -148,7 +152,19 @@ export class VAxios {
         headers: {
           'Content-type': ContentTypeEnum.FORM_DATA,
           ignoreCancelToken: true,
+          ...extraHeaders,
         },
+        onUploadProgress: onProgress
+          ? (e: any) => {
+              try {
+                const total = e.total || (e.lengthComputable ? e.loaded : 0);
+                if (total > 0) {
+                  const percent = Math.min(100, Math.round((e.loaded / total) * 100));
+                  onProgress(percent);
+                }
+              } catch {}
+            }
+          : undefined,
       })
       .then((res: any) => {
         //--@updateBy-begin----author:liusq---date:20210914------for:上传判断是否包含回调方法------
