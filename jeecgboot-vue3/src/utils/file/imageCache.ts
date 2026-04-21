@@ -48,15 +48,104 @@ const pendingRequests = new Map<string, Promise<string>>();
 const cseReactiveMap = shallowReactive(new Map<string, string>());
 
 /**
- * 解密失败 sentinel TTL：60s 后自动清除空串占位，允许后续重试。
- * 设计目的：避免"骨架永久转圈"，同时不会因为永久写入 sentinel 而锁死重试。
+ * 【retry-storm-fix】解密失败 sentinel：写入空串让骨架消失，长期化由 failureRegistry 接管节流。
+ * 历史版本曾用 60s setTimeout 自动清除，但与 failureRegistry 双重计时混乱，已删除。
+ *  - sentinel 长期残留 → isImageReady 已修订为「空串不视为 ready」，由模板「点击重试」UI 接管展示
+ *  - 退避 / 锁死语义统一走 failureRegistry，retryImage / clearImageCache 时一起清
  */
-const FAILED_TTL_MS = 60 * 1000;
 function markDecryptFailed(key: string): void {
   cseReactiveMap.set(key, '');
-  setTimeout(() => {
-    if (cseReactiveMap.get(key) === '') cseReactiveMap.delete(key);
-  }, FAILED_TTL_MS);
+}
+
+// ─── 【retry-storm-fix】统一失败注册表 ──────────────────────────────
+//
+// 防止「服务器稳定 500 + 前端响应式重渲染」造成的请求雪崩（单页 800+ 请求）。
+//
+// 退避策略（auto_retry_capped）：
+//   - 第 1 次失败 → 30s 内不再自动发请求
+//   - 30s 后再访问 → 重试一次 → 失败则 120s 内不再发
+//   - 120s 后再失败 → 永久锁死，仅手动 retryImage / retryMedia 可解
+//
+// 错误分类：
+//   - HTTP 401/403：权限/凭证问题，重试无意义 → 直接 permanent
+//   - DOMException（WebCrypto AAD/GCM 校验失败）：密文/密钥已损坏 → 直接 permanent
+//   - 5xx / 超时 / 其它：transient，走 30s/120s 退避
+//
+// key 域规则（两通道共用一个 Map，前缀互不冲突）：
+//   - image 通道：buildKey(url) / buildThumbKey(url) 的产物（带 `cache:userId:` 前缀）
+//   - media 通道：raw url（与 mediaReactive 的 key 一致）
+//
+interface FailureEntry {
+  attempts: number; // 已尝试次数（不含正在进行的）
+  nextRetryAt: number; // epoch ms，到点才允许下一次自动重试
+  permanent: boolean; // 401/403/DOMException 等，禁止自动重试
+  lastError?: string; // 调试用
+}
+const failureRegistry = new Map<string, FailureEntry>();
+const RETRY_BACKOFF_MS = [30_000, 120_000];
+const MAX_AUTO_RETRY = RETRY_BACKOFF_MS.length;
+
+function classifyError(err: any): 'transient' | 'permanent' {
+  const status = err?.response?.status;
+  if (status === 401 || status === 403) return 'permanent';
+  if (typeof DOMException !== 'undefined' && err instanceof DOMException) return 'permanent';
+  return 'transient';
+}
+
+function recordFailure(key: string, err: any): void {
+  const prev = failureRegistry.get(key);
+  const kind = classifyError(err);
+  const lastError = (err && (err.message || String(err))) || 'unknown';
+  if (kind === 'permanent') {
+    failureRegistry.set(key, {
+      attempts: MAX_AUTO_RETRY,
+      nextRetryAt: Number.MAX_SAFE_INTEGER,
+      permanent: true,
+      lastError,
+    });
+    return;
+  }
+  const attempts = (prev?.attempts || 0) + 1;
+  if (attempts >= MAX_AUTO_RETRY) {
+    failureRegistry.set(key, {
+      attempts,
+      nextRetryAt: Number.MAX_SAFE_INTEGER,
+      permanent: false,
+      lastError,
+    });
+    return;
+  }
+  // attempts == 1 → backoff 30s；attempts == 2 走前一档（仅 MAX_AUTO_RETRY > 2 时才到这里）
+  const backoff = RETRY_BACKOFF_MS[Math.min(attempts - 1, RETRY_BACKOFF_MS.length - 1)];
+  failureRegistry.set(key, {
+    attempts,
+    nextRetryAt: Date.now() + backoff,
+    permanent: false,
+    lastError,
+  });
+}
+
+function canAttempt(key: string): boolean {
+  const e = failureRegistry.get(key);
+  if (!e) return true;
+  if (e.permanent) return false;
+  return Date.now() >= e.nextRetryAt;
+}
+
+function clearFailure(key: string): void {
+  failureRegistry.delete(key);
+}
+
+/**
+ * 模板侧只读探针：仅看 attempts 字段，不做 Date.now 比较。
+ * 用于 v-for + 流式 RAF 场景每帧调用，必须 O(1) 且无副作用。
+ *  - failed: 至少失败过 1 次 → UI 展示「点击重试」
+ *  - exhausted: 已锁死，自动重试不会再发起，必须手动 retry
+ */
+function getFailureState(key: string): { failed: boolean; exhausted: boolean } {
+  const e = failureRegistry.get(key);
+  if (!e) return { failed: false, exhausted: false };
+  return { failed: e.attempts > 0, exhausted: e.attempts >= MAX_AUTO_RETRY };
 }
 
 /** 【t0b】长驻图标 key 集合，标记后永不被 LRU 淘汰 */
@@ -279,6 +368,10 @@ export function withImageCache(url: string, opts?: WithImageCacheOptions): strin
   if (reactiveHit) {
     return reactiveHit;
   }
+  // 【retry-storm-fix】失败 sentinel 且仍在退避/锁死窗口 → 不再触发请求
+  if (reactiveHit === '' && !canAttempt(key)) {
+    return TRANSPARENT_PNG;
+  }
   if (!pendingRequests.has(key)) {
     pendingRequests.set(
       key,
@@ -298,6 +391,11 @@ export async function withImageCacheAsync(url: string, opts?: WithImageCacheOpti
   if (cached) {
     touchMemory(key);
     return cached;
+  }
+  // 【retry-storm-fix】与 sync 版一致：失败 sentinel 且仍在退避/锁死窗口 → 不再触发请求
+  const reactiveHit = cseReactiveMap.get(key);
+  if (reactiveHit === '' && !canAttempt(key)) {
+    return isCseUrl(url) ? TRANSPARENT_PNG : url;
   }
   let pending = pendingRequests.get(key);
   if (!pending) {
@@ -334,6 +432,10 @@ export function withImageThumbCache(url: string, opts?: WithImageCacheOptions): 
   }
   const reactiveHit = cseReactiveMap.get(key);
   if (reactiveHit) return reactiveHit;
+  // 【retry-storm-fix】失败 sentinel 且仍在退避/锁死窗口 → 不再触发请求
+  if (reactiveHit === '' && !canAttempt(key)) {
+    return TRANSPARENT_PNG;
+  }
   if (!pendingRequests.has(key)) {
     pendingRequests.set(
       key,
@@ -352,14 +454,20 @@ export function withImageThumbCache(url: string, opts?: WithImageCacheOptions): 
  * 模板调用时会自动建立响应式订阅，cseReactiveMap.set 后 Vue 会自动重渲染。
  *
  * 普通 http(s) URL 直接返回 true（本来就不需要解密，<img> 直接拿原 URL 渲染）。
+ *
+ * 【retry-storm-fix】只有真值（blob URL）才视为 ready，空串失败 sentinel 不算。
+ *  - 旧实现把空串也算 ready 是为了配合 60s TTL 让骨架短暂消失
+ *  - 现在 sentinel 长期化，必须由「点击重试」UI 接管展示，否则会永久破图
  */
 export function isImageReady(url: string): boolean {
   if (!url) return false;
   if (!isCseUrl(url)) return true;
   const thumbKey = buildThumbKey(url);
-  if (cseReactiveMap.get(thumbKey) !== undefined) return true;
+  const tv = cseReactiveMap.get(thumbKey);
+  if (tv) return true;
   const origKey = buildKey(url);
-  if (cseReactiveMap.get(origKey) !== undefined) return true;
+  const ov = cseReactiveMap.get(origKey);
+  if (ov) return true;
   return false;
 }
 
@@ -398,6 +506,42 @@ export function onImageError(e: Event, fallback?: string) {
   if (!img || img.dataset.fallbackApplied) return;
   img.dataset.fallbackApplied = 'true';
   img.src = fallback || '/logo.svg';
+}
+
+/**
+ * 【retry-storm-fix】手动重试解密 cse:// 图片：清掉失败登记 + sentinel + pending，
+ * 让下一次 withImageCache / withImageThumbCache 调用能重新发请求。
+ *
+ * 内部同时处理 thumb key 与 orig key（loadAndCache 在两个 key 上都可能写失败状态）。
+ *
+ * @param canonicalUrl 必须是 `getFileAccessHttpUrl(item.url)` 的返回值（与 withImageCache 内部 key 一致）
+ */
+export function retryImage(canonicalUrl: string): void {
+  if (!canonicalUrl) return;
+  const tk = buildThumbKey(canonicalUrl);
+  const ok = buildKey(canonicalUrl);
+  for (const k of [tk, ok]) {
+    failureRegistry.delete(k);
+    if (cseReactiveMap.get(k) === '') cseReactiveMap.delete(k);
+    pendingRequests.delete(k);
+  }
+}
+
+/**
+ * 【retry-storm-fix】模板探针：cse:// 图片是否处于失败态。
+ * 任一通道（thumb / orig）失败即视为失败；exhausted 表示已锁死无自动重试。
+ *
+ * 注意：只读 attempts 字段，不做 Date.now 比较 —— 流式 RAF 场景每帧调用安全。
+ *
+ * @param canonicalUrl 同 retryImage 的 key 约束
+ */
+export function getImageFailureState(canonicalUrl: string): { failed: boolean; exhausted: boolean } {
+  if (!canonicalUrl) return { failed: false, exhausted: false };
+  const tk = buildThumbKey(canonicalUrl);
+  const ok = buildKey(canonicalUrl);
+  const t = getFailureState(tk);
+  const o = getFailureState(ok);
+  return { failed: t.failed || o.failed, exhausted: t.exhausted || o.exhausted };
 }
 
 export async function initImageCache(): Promise<void> {
@@ -464,6 +608,8 @@ export function clearImageCache(): void {
   mediaReactive.clear();
   mediaRefCount.clear();
   pendingMedia.clear();
+  // 【retry-storm-fix】清空失败登记，避免 logout/切租户后旧 url 仍被锁死
+  failureRegistry.clear();
   clearDekCache();
 }
 
@@ -490,7 +636,11 @@ async function loadAndCache(url: string, key: string, opts: { thumb?: boolean } 
     const fid = parseCseFid(url);
     if (!fid) {
       // F2: fid 解析失败属真实失败 → 写 sentinel 让骨架消失
-      markDecryptFailed(key);
+      // 【retry-storm-fix】fid 解析失败不可恢复，按 transient 默认走（attempts++ 至上限锁死）
+      if (myGen === cacheGeneration) {
+        recordFailure(key, new Error('parse-fail'));
+        markDecryptFailed(key);
+      }
       return TRANSPARENT_PNG;
     }
     try {
@@ -504,14 +654,21 @@ async function loadAndCache(url: string, key: string, opts: { thumb?: boolean } 
           blob = await decryptFileById(fid, { mime: 'image/*', thumb: false });
         } catch (e2) {
           console.warn('[CSE] original decrypt also fail', fid, e2);
-          // F2: thumb + 原图都失败（核心场景）→ 写 sentinel + 60s TTL
-          markDecryptFailed(key);
+          // F2: thumb + 原图都失败（核心场景）→ 写 sentinel
+          // 【retry-storm-fix】只在最终失败处 recordFailure 一次（thumb fallback 是内部行为）
+          if (myGen === cacheGeneration) {
+            recordFailure(key, e2);
+            markDecryptFailed(key);
+          }
           return TRANSPARENT_PNG;
         }
       } else {
         console.warn('[CSE] decrypt fail', fid, e);
         // F2: 非 thumb 路径解密失败 → 写 sentinel
-        markDecryptFailed(key);
+        if (myGen === cacheGeneration) {
+          recordFailure(key, e);
+          markDecryptFailed(key);
+        }
         return TRANSPARENT_PNG;
       }
     }
@@ -528,7 +685,11 @@ async function loadAndCache(url: string, key: string, opts: { thumb?: boolean } 
   if (!blob || blob.size === 0 || blob.size > MAX_SINGLE_SIZE) {
     // F2: blob 大小异常 / 空 blob，仅 cse:// 分支写 sentinel；普通 URL 直接 return 原 url
     if (isCseUrl(url)) {
-      markDecryptFailed(key);
+      // 【retry-storm-fix】blob 大小异常属数据问题，按 transient 走攀升至锁死
+      if (myGen === cacheGeneration) {
+        recordFailure(key, new Error('blob-size-invalid'));
+        markDecryptFailed(key);
+      }
       return TRANSPARENT_PNG;
     }
     return url;
@@ -539,6 +700,8 @@ async function loadAndCache(url: string, key: string, opts: { thumb?: boolean } 
     try { URL.revokeObjectURL(blobUrl); } catch {}
     return isCseUrl(url) ? TRANSPARENT_PNG : url;
   }
+  // 【retry-storm-fix】成功路径清空失败状态
+  clearFailure(key);
   setMemoryCache(key, blobUrl);
   idbPut({ key, blob, timestamp: Date.now() }).then(() => evictIdbIfNeeded()).catch(() => {});
   return blobUrl;
@@ -601,9 +764,13 @@ export function withMediaCache(url: string, mime?: string): string {
   const hit = mediaReactive.get(url);
   if (hit) return hit;
 
-  if (!pendingMedia.has(url)) {
+  // 【retry-storm-fix】发请求前用 canAttempt 闸住失败 url 的重试雪崩
+  if (!pendingMedia.has(url) && canAttempt(url)) {
     const fid = parseCseFid(url);
-    if (!fid) return '';
+    if (!fid) {
+      recordFailure(url, new Error('parse-fail'));
+      return '';
+    }
     // 【S-P0-4】记录启动时的 generation，完成后校验
     const myGen = cacheGeneration;
     const p = decryptFileByIdToBlobUrl(fid, mime || 'application/octet-stream')
@@ -612,11 +779,16 @@ export function withMediaCache(url: string, mime?: string): string {
           try { URL.revokeObjectURL(blobUrl); } catch {}
           return '';
         }
+        clearFailure(url);
         mediaReactive.set(url, blobUrl); // 写入 reactive map → 触发模板重渲染
         return blobUrl;
       })
       .catch((e) => {
         console.warn('[withMediaCache] decrypt fail', fid, e?.message || e);
+        // 【retry-storm-fix】logout / 切租户期间已 failureRegistry.clear()，
+        // 这里若仍 recordFailure 会写脏数据，跳过
+        if (myGen !== cacheGeneration) return '';
+        recordFailure(url, e);
         return '';
       })
       .finally(() => {
@@ -626,6 +798,34 @@ export function withMediaCache(url: string, mime?: string): string {
   }
 
   return ''; // 未命中：业务侧 v-if 保护
+}
+
+/**
+ * 【retry-storm-fix】手动重试解密 cse:// 视频/音频：清掉失败登记 + pending + reactive 缓存。
+ *
+ * @param canonicalUrl 必须是 `getFileAccessHttpUrl(item.url)` 的返回值（与 withMediaCache 内部 key 一致）
+ */
+export function retryMedia(canonicalUrl: string): void {
+  if (!canonicalUrl) return;
+  failureRegistry.delete(canonicalUrl);
+  pendingMedia.delete(canonicalUrl);
+  // 失败时 mediaReactive 本就没条目，但若手动重试时之前曾成功过又被外部 set，一并删掉强制重发
+  const old = mediaReactive.get(canonicalUrl);
+  if (old) {
+    try { URL.revokeObjectURL(old); } catch {}
+  }
+  mediaReactive.delete(canonicalUrl);
+}
+
+/**
+ * 【retry-storm-fix】模板探针：cse:// 视频/音频是否处于失败态。
+ * 只读 attempts 字段，不做 Date.now 比较 —— 流式 RAF 场景每帧调用安全。
+ *
+ * @param canonicalUrl 同 retryMedia 的 key 约束
+ */
+export function getMediaFailureState(canonicalUrl: string): { failed: boolean; exhausted: boolean } {
+  if (!canonicalUrl) return { failed: false, exhausted: false };
+  return getFailureState(canonicalUrl);
 }
 
 /**
@@ -662,6 +862,8 @@ export function releaseAllMedia(): void {
   mediaReactive.clear();
   mediaRefCount.clear();
   pendingMedia.clear();
+  // 【retry-storm-fix】会话级清理同步清空失败登记，避免上一会话的失败状态污染新会话
+  failureRegistry.clear();
 }
 
 /** 内部：解密为 blob URL（不复用 cseDecrypt 的 decryptFileToObjectUrl 是为了能传自定义 mime） */

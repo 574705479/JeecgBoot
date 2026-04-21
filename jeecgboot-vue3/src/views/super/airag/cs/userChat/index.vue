@@ -210,11 +210,29 @@
                 >
                   <template v-if="item.type === 'image'">
                     <img :src="getAttachmentThumbUrl(item)" @error="onAttachmentImageError($event, item)" @click="openImagePreview(msg, item)" />
-                    <div v-if="!isAttachmentImageReady(item)" class="img-skeleton-overlay"><a-spin size="small" /></div>
+                    <div
+                      v-if="!isAttachmentImageReady(item)"
+                      class="img-skeleton-overlay"
+                      :class="{ 'is-failed': isImageFailed(item) }"
+                      @click.stop="isImageFailed(item) ? onAttachmentImageRetry(item) : null"
+                    >
+                      <ReloadOutlined v-if="isImageFailed(item)" />
+                      <a-spin v-else size="small" />
+                      <span v-if="isImageFailed(item)" class="overlay-text">点击重试</span>
+                    </div>
                   </template>
                   <template v-else-if="item.type === 'video'">
                     <video v-if="getAttachmentUrl(item)" :src="getAttachmentUrl(item)" preload="metadata" controls @click="openFilePreview(item)" />
-                    <div v-else class="video-skeleton"><span>🎬</span><span class="skeleton-text">视频加载中...</span></div>
+                    <div
+                      v-else
+                      class="video-skeleton"
+                      :class="{ 'is-failed': isVideoFailed(item) }"
+                      @click="onVideoSkeletonClick(item)"
+                    >
+                      <PlayCircleOutlined v-if="!isVideoFailed(item)" />
+                      <ReloadOutlined v-else />
+                      <span class="skeleton-text">{{ isVideoFailed(item) ? '加载失败，点击重试' : '视频加载中...' }}</span>
+                    </div>
                   </template>
                   <div
                     v-if="index === getMediaGridData(msg).items.length - 1 && getMediaGridData(msg).extraCount > 0"
@@ -227,14 +245,26 @@
               </div>
               <div v-if="getFileAttachments(msg).length" class="message-file-list">
                 <template v-for="(item, index) in getFileAttachments(msg)">
-                  <audio
-                    v-if="isAudioAttachment(item)"
-                    :key="`audio_${item.url}_${index}`"
-                    :src="getAttachmentUrl(item)"
-                    controls
-                    preload="metadata"
-                    style="max-width: 100%; margin-top: 4px;"
-                  />
+                  <template v-if="isAudioAttachment(item)">
+                    <audio
+                      v-if="getAttachmentUrl(item)"
+                      :key="`audio_${item.url}_${index}`"
+                      :src="getAttachmentUrl(item)"
+                      controls
+                      preload="metadata"
+                      style="max-width: 100%; margin-top: 4px;"
+                    />
+                    <div
+                      v-else
+                      :key="`audio_skeleton_${item.url}_${index}`"
+                      class="audio-skeleton"
+                      :class="{ 'is-failed': isAudioFailed(item) }"
+                      @click="onAudioSkeletonClick(item)"
+                    >
+                      <CustomerServiceOutlined />
+                      <span>{{ isAudioFailed(item) ? '音频加载失败，点击重试' : '音频加载中…' }}</span>
+                    </div>
+                  </template>
                   <FileChip
                     v-else
                     :key="`chip_${item.url}_${index}`"
@@ -272,11 +302,29 @@
                 >
                   <template v-if="item.type === 'image'">
                     <img :src="getAttachmentThumbUrl(item)" @error="onAttachmentImageError($event, item)" @click="openImagePreview(msg, item)" />
-                    <div v-if="!isAttachmentImageReady(item)" class="img-skeleton-overlay"><a-spin size="small" /></div>
+                    <div
+                      v-if="!isAttachmentImageReady(item)"
+                      class="img-skeleton-overlay"
+                      :class="{ 'is-failed': isImageFailed(item) }"
+                      @click.stop="isImageFailed(item) ? onAttachmentImageRetry(item) : null"
+                    >
+                      <ReloadOutlined v-if="isImageFailed(item)" />
+                      <a-spin v-else size="small" />
+                      <span v-if="isImageFailed(item)" class="overlay-text">点击重试</span>
+                    </div>
                   </template>
                   <template v-else-if="item.type === 'video'">
                     <video v-if="getAttachmentUrl(item)" :src="getAttachmentUrl(item)" preload="metadata" controls @click="openFilePreview(item)" />
-                    <div v-else class="video-skeleton"><span>🎬</span><span class="skeleton-text">视频加载中...</span></div>
+                    <div
+                      v-else
+                      class="video-skeleton"
+                      :class="{ 'is-failed': isVideoFailed(item) }"
+                      @click="onVideoSkeletonClick(item)"
+                    >
+                      <PlayCircleOutlined v-if="!isVideoFailed(item)" />
+                      <ReloadOutlined v-else />
+                      <span class="skeleton-text">{{ isVideoFailed(item) ? '加载失败，点击重试' : '视频加载中...' }}</span>
+                    </div>
                   </template>
                   <div
                     v-if="index === getMediaGridData(msg).items.length - 1 && getMediaGridData(msg).extraCount > 0"
@@ -289,14 +337,26 @@
               </div>
               <div v-if="getFileAttachments(msg).length" class="message-file-list">
                 <template v-for="(item, index) in getFileAttachments(msg)">
-                  <audio
-                    v-if="isAudioAttachment(item)"
-                    :key="`audio_${item.url}_${index}`"
-                    :src="getAttachmentUrl(item)"
-                    controls
-                    preload="metadata"
-                    style="max-width: 100%; margin-top: 4px;"
-                  />
+                  <template v-if="isAudioAttachment(item)">
+                    <audio
+                      v-if="getAttachmentUrl(item)"
+                      :key="`audio_${item.url}_${index}`"
+                      :src="getAttachmentUrl(item)"
+                      controls
+                      preload="metadata"
+                      style="max-width: 100%; margin-top: 4px;"
+                    />
+                    <div
+                      v-else
+                      :key="`audio_skeleton_${item.url}_${index}`"
+                      class="audio-skeleton"
+                      :class="{ 'is-failed': isAudioFailed(item) }"
+                      @click="onAudioSkeletonClick(item)"
+                    >
+                      <CustomerServiceOutlined />
+                      <span>{{ isAudioFailed(item) ? '音频加载失败，点击重试' : '音频加载中…' }}</span>
+                    </div>
+                  </template>
                   <FileChip
                     v-else
                     :key="`chip_${item.url}_${index}`"
@@ -427,8 +487,34 @@
             v-for="(item, index) in mediaViewerList"
             :key="`${item.url}_${index}`"
           >
-            <img v-if="item.type === 'image'" :src="getAttachmentUrl(item)" @click="openImagePreview({ extra: { attachments: mediaViewerList } }, item)" />
-            <video v-else-if="getAttachmentUrl(item)" :src="getAttachmentUrl(item)" controls @click="openFilePreview(item)" />
+            <template v-if="item.type === 'image'">
+              <img
+                :src="getAttachmentUrl(item)"
+                @error="onAttachmentImageError($event, item)"
+                @click="openImagePreview({ extra: { attachments: mediaViewerList } }, item)"
+              />
+              <div
+                v-if="isImageFailed(item)"
+                class="img-skeleton-overlay is-failed"
+                @click.stop="onAttachmentImageRetry(item)"
+              >
+                <ReloadOutlined />
+                <span class="overlay-text">点击重试</span>
+              </div>
+            </template>
+            <template v-else-if="item.type === 'video'">
+              <video v-if="getAttachmentUrl(item)" :src="getAttachmentUrl(item)" controls @click="openFilePreview(item)" />
+              <div
+                v-else
+                class="video-skeleton"
+                :class="{ 'is-failed': isVideoFailed(item) }"
+                @click="onVideoSkeletonClick(item)"
+              >
+                <PlayCircleOutlined v-if="!isVideoFailed(item)" />
+                <ReloadOutlined v-else />
+                <span class="skeleton-text">{{ isVideoFailed(item) ? '加载失败，点击重试' : '视频加载中...' }}</span>
+              </div>
+            </template>
           </div>
         </div>
       </a-modal>
@@ -542,7 +628,7 @@ import {
   MessageOutlined, SendOutlined, BulbOutlined, CheckCircleOutlined,
   SmileOutlined, PictureOutlined, VideoCameraOutlined, FilePdfOutlined, QuestionCircleOutlined,
   PauseCircleOutlined, LeftOutlined, CustomerServiceOutlined, LoadingOutlined,
-  SoundOutlined,
+  SoundOutlined, PlayCircleOutlined, ReloadOutlined,
 } from '@ant-design/icons-vue';
 import { defHttp } from '/@/utils/http/axios';
 import axios from 'axios';
@@ -554,7 +640,16 @@ import { computeFileMd5 } from '../utils/fileHash';
 import { encryptTransport, decryptTransport, decryptMessage, decryptStorage } from '../utils/csEncrypt';
 import { playCsNotificationSound } from '../utils/csNotificationSound';
 import { withImageCache, withImageCacheAsync, preloadImages, onImageError, getCachedChatWindowConfig, setCachedChatWindowConfig } from '../utils/csImageCache';
-import { withMediaCache, releaseAllMedia, withImageThumbCache, isImageReady } from '/@/utils/file/imageCache';
+import {
+  withMediaCache,
+  releaseAllMedia,
+  withImageThumbCache,
+  isImageReady,
+  retryMedia,
+  getMediaFailureState,
+  retryImage,
+  getImageFailureState,
+} from '/@/utils/file/imageCache';
 import { compressImage } from '/@/utils/file/compressImage';
 import FileChip from '../components/FileChip.vue';
 import { isCseUrl } from '/@/utils/cse/cseUrl';
@@ -3304,6 +3399,46 @@ function isAttachmentImageReady(attachment: any): boolean {
   return isImageReady(getFileAccessHttpUrl(attachment.url));
 }
 
+// ─── 【retry-storm-fix】cse:// 媒体/图片失败重试统一入口（与 workbench 同构）─────
+function _resolvedUrlOf(attachment: any): string {
+  const url = attachment?.url;
+  if (!url) return '';
+  return getFileAccessHttpUrl(url);
+}
+function isVideoFailed(attachment: any): boolean {
+  const u = _resolvedUrlOf(attachment);
+  if (!u || !isCseUrl(u)) return false;
+  return getMediaFailureState(u).failed;
+}
+function isAudioFailed(attachment: any): boolean {
+  return isVideoFailed(attachment);
+}
+function isImageFailed(attachment: any): boolean {
+  const u = _resolvedUrlOf(attachment);
+  if (!u || !isCseUrl(u)) return false;
+  return getImageFailureState(u).failed;
+}
+function onVideoSkeletonClick(attachment: any) {
+  const u = _resolvedUrlOf(attachment);
+  if (u && isCseUrl(u) && getMediaFailureState(u).failed) {
+    retryMedia(u);
+    return;
+  }
+  openFilePreview(attachment);
+}
+function onAudioSkeletonClick(attachment: any) {
+  const u = _resolvedUrlOf(attachment);
+  if (u && isCseUrl(u) && getMediaFailureState(u).failed) {
+    retryMedia(u);
+  }
+}
+function onAttachmentImageRetry(attachment: any) {
+  const u = _resolvedUrlOf(attachment);
+  if (u && isCseUrl(u)) {
+    retryImage(u);
+  }
+}
+
 function getMediaGridData(msg: any) {
   const media = getMediaAttachments(msg);
   const maxItems = 4;
@@ -4153,9 +4288,18 @@ watch(() => messages.value.length, () => {
       color: #aaa;
       font-size: 22px;
       gap: 4px;
+      cursor: pointer;
 
       .skeleton-text {
         font-size: 12px;
+      }
+
+      // 【retry-storm-fix】视频骨架失败态
+      &.is-failed {
+        background: rgba(255, 77, 79, 0.06);
+        color: #cf1322;
+        border: 1px dashed rgba(255, 77, 79, 0.5);
+        .anticon { color: #cf1322; }
       }
     }
 
@@ -4163,14 +4307,28 @@ watch(() => messages.value.length, () => {
       position: absolute;
       inset: 0;
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
+      gap: 4px;
       background: linear-gradient(135deg, #efefef 0%, #f7f7f7 100%);
       color: #aaa;
       font-size: 22px;
       pointer-events: auto;
       cursor: progress;
+
+      // 【retry-storm-fix】图片骨架失败态
+      &.is-failed {
+        background: rgba(255, 77, 79, 0.06);
+        color: #cf1322;
+        cursor: pointer;
+        .overlay-text {
+          font-size: 12px;
+          line-height: 1;
+        }
+      }
     }
+
 
     .media-more {
       position: absolute;
@@ -4232,6 +4390,28 @@ watch(() => messages.value.length, () => {
     border-radius: 6px;
     font-size: 12px;
     cursor: pointer;
+  }
+
+  // 【retry-storm-fix】音频骨架屏（裸 <audio> v-if 拒绝渲染时占位）
+  .audio-skeleton {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    margin-top: 4px;
+    background: linear-gradient(135deg, #efefef 0%, #f7f7f7 100%);
+    color: #888;
+    border-radius: 8px;
+    font-size: 13px;
+    cursor: pointer;
+    .anticon { font-size: 18px; }
+
+    &.is-failed {
+      background: rgba(255, 77, 79, 0.06);
+      color: #cf1322;
+      border: 1px dashed rgba(255, 77, 79, 0.5);
+      .anticon { color: #cf1322; }
+    }
   }
 }
 

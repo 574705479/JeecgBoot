@@ -1,0 +1,29 @@
+# Docker build only needs dist/ (see Dockerfile: ADD dist/ /var/www/html/)
+# Exclude everything else to keep the build context small and fast.
+node_modules
+dist-electron
+electron
+build
+public
+src
+test
+mock
+types
+**/*.log
+.git
+.gitignore
+.vscode
+.idea
+.husky
+.cache
+*.md
+*.iml
+*.zip
+pnpm-lock.yaml
+yarn.lock
+package-lock.json
+tsconfig*.json
+vite.config.ts
+postcss.config.js
+.env*
+Dockerfile.cloud

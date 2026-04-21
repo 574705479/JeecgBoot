@@ -581,8 +581,15 @@
                           @click="openImagePreview(msg, item)"
                           @error="onAttachmentImageError($event, item)"
                         />
-                        <div v-if="!isAttachmentImageReady(item)" class="media-skeleton-overlay">
-                          <LoadingOutlined spin />
+                        <div
+                          v-if="!isAttachmentImageReady(item)"
+                          class="media-skeleton-overlay"
+                          :class="{ 'is-failed': isImageFailed(item) }"
+                          @click.stop="isImageFailed(item) ? onAttachmentImageRetry(item) : null"
+                        >
+                          <ReloadOutlined v-if="isImageFailed(item)" />
+                          <LoadingOutlined v-else spin />
+                          <span v-if="isImageFailed(item)" class="overlay-text">点击重试</span>
                         </div>
                       </template>
                       <template v-else-if="item.type === 'video'">
@@ -593,9 +600,14 @@
                           playsinline
                           preload="metadata"
                         />
-                        <div v-else class="video-skeleton" @click="openVideoPreview(item)">
+                        <div
+                          v-else
+                          class="video-skeleton"
+                          :class="{ 'is-failed': isVideoFailed(item) }"
+                          @click="onVideoSkeletonClick(item)"
+                        >
                           <PlayCircleOutlined />
-                          <span>视频加载中…</span>
+                          <span>{{ isVideoFailed(item) ? '加载失败，点击重试' : '视频加载中…' }}</span>
                         </div>
                       </template>
                       <div
@@ -609,14 +621,26 @@
                   </div>
                   <div v-if="getFileAttachments(msg).length" class="msg-file-list">
                     <template v-for="(item, index) in getFileAttachments(msg)">
-                      <audio
-                        v-if="item.type === 'audio'"
-                        :key="`audio_${item.url}_${index}`"
-                        :src="getAttachmentUrl(item)"
-                        controls
-                        preload="metadata"
-                        class="msg-audio"
-                      />
+                      <template v-if="item.type === 'audio'">
+                        <audio
+                          v-if="getAttachmentUrl(item)"
+                          :key="`audio_${item.url}_${index}`"
+                          :src="getAttachmentUrl(item)"
+                          controls
+                          preload="metadata"
+                          class="msg-audio"
+                        />
+                        <div
+                          v-else
+                          :key="`audio_skeleton_${item.url}_${index}`"
+                          class="audio-skeleton"
+                          :class="{ 'is-failed': isAudioFailed(item) }"
+                          @click="onAudioSkeletonClick(item)"
+                        >
+                          <CustomerServiceOutlined />
+                          <span>{{ isAudioFailed(item) ? '音频加载失败，点击重试' : '音频加载中…' }}</span>
+                        </div>
+                      </template>
                       <FileChip
                         v-else
                         :key="`file_${item.url}_${index}`"
@@ -674,8 +698,15 @@
                           @click="openImagePreview(msg, item)"
                           @error="onAttachmentImageError($event, item)"
                         />
-                        <div v-if="!isAttachmentImageReady(item)" class="media-skeleton-overlay">
-                          <LoadingOutlined spin />
+                        <div
+                          v-if="!isAttachmentImageReady(item)"
+                          class="media-skeleton-overlay"
+                          :class="{ 'is-failed': isImageFailed(item) }"
+                          @click.stop="isImageFailed(item) ? onAttachmentImageRetry(item) : null"
+                        >
+                          <ReloadOutlined v-if="isImageFailed(item)" />
+                          <LoadingOutlined v-else spin />
+                          <span v-if="isImageFailed(item)" class="overlay-text">点击重试</span>
                         </div>
                       </template>
                       <template v-else-if="item.type === 'video'">
@@ -686,9 +717,14 @@
                           playsinline
                           preload="metadata"
                         />
-                        <div v-else class="video-skeleton" @click="openVideoPreview(item)">
+                        <div
+                          v-else
+                          class="video-skeleton"
+                          :class="{ 'is-failed': isVideoFailed(item) }"
+                          @click="onVideoSkeletonClick(item)"
+                        >
                           <PlayCircleOutlined />
-                          <span>视频加载中…</span>
+                          <span>{{ isVideoFailed(item) ? '加载失败，点击重试' : '视频加载中…' }}</span>
                         </div>
                       </template>
                       <div
@@ -702,14 +738,26 @@
                   </div>
                   <div v-if="getFileAttachments(msg).length" class="msg-file-list">
                     <template v-for="(item, index) in getFileAttachments(msg)">
-                      <audio
-                        v-if="item.type === 'audio'"
-                        :key="`audio_${item.url}_${index}`"
-                        :src="getAttachmentUrl(item)"
-                        controls
-                        preload="metadata"
-                        class="msg-audio"
-                      />
+                      <template v-if="item.type === 'audio'">
+                        <audio
+                          v-if="getAttachmentUrl(item)"
+                          :key="`audio_${item.url}_${index}`"
+                          :src="getAttachmentUrl(item)"
+                          controls
+                          preload="metadata"
+                          class="msg-audio"
+                        />
+                        <div
+                          v-else
+                          :key="`audio_skeleton_${item.url}_${index}`"
+                          class="audio-skeleton"
+                          :class="{ 'is-failed': isAudioFailed(item) }"
+                          @click="onAudioSkeletonClick(item)"
+                        >
+                          <CustomerServiceOutlined />
+                          <span>{{ isAudioFailed(item) ? '音频加载失败，点击重试' : '音频加载中…' }}</span>
+                        </div>
+                      </template>
                       <FileChip
                         v-else
                         :key="`file_${item.url}_${index}`"
@@ -844,11 +892,26 @@
                 <LoadingOutlined spin />
                 <span class="upload-percent">{{ item.progress || 0 }}%</span>
               </div>
+              <div
+                v-else-if="!item.uploading && isImageFailed(item)"
+                class="upload-mask is-failed"
+                @click.stop="onAttachmentImageRetry(item)"
+                title="点击重试"
+              >
+                <ReloadOutlined />
+                <span class="upload-percent">加载失败</span>
+              </div>
             </template>
             <template v-else-if="item.type === 'video'">
               <video v-if="getAttachmentUrl(item)" :src="getAttachmentUrl(item)" @click="!item.uploading && openVideoPreview(item)" />
-              <div v-else class="video-skeleton small">
-                <PlayCircleOutlined />
+              <div
+                v-else
+                class="video-skeleton small"
+                :class="{ 'is-failed': isVideoFailed(item) }"
+                @click.stop="!item.uploading && onVideoSkeletonClick(item)"
+              >
+                <PlayCircleOutlined v-if="!isVideoFailed(item)" />
+                <ReloadOutlined v-else />
               </div>
               <div v-if="item.uploading" class="upload-mask">
                 <LoadingOutlined spin />
@@ -1232,7 +1295,8 @@ import {
   MoreOutlined, DeleteOutlined, PaperClipOutlined, EnvironmentOutlined, GlobalOutlined,
   TeamOutlined, CaretRightOutlined, CaretDownOutlined, DownOutlined, SearchOutlined,
   CheckCircleOutlined, BgColorsOutlined, UndoOutlined,
-  LoadingOutlined, ExclamationCircleOutlined, PlayCircleOutlined
+  LoadingOutlined, ExclamationCircleOutlined, PlayCircleOutlined,
+  CustomerServiceOutlined, ReloadOutlined
 } from '@ant-design/icons-vue';
 import { useRoute, useRouter } from 'vue-router';
 import { defHttp } from '/@/utils/http/axios';
@@ -1248,7 +1312,17 @@ import { computeFileMd5 } from '../utils/fileHash';
 import { encryptTransport, decryptTransport, decryptMessage } from '../utils/csEncrypt';
 import { playCsNotificationSound, CS_NOTIFY_MAX_GAIN } from '../utils/csNotificationSound';
 import { withImageCache, withImageCacheAsync, preloadImages, onImageError, getCachedChatWindowConfig, setCachedChatWindowConfig } from '../utils/csImageCache';
-import { withMediaCache, releaseAllMedia, warmupAvatars, withImageThumbCache, isImageReady } from '/@/utils/file/imageCache';
+import {
+  withMediaCache,
+  releaseAllMedia,
+  warmupAvatars,
+  withImageThumbCache,
+  isImageReady,
+  retryMedia,
+  getMediaFailureState,
+  retryImage,
+  getImageFailureState,
+} from '/@/utils/file/imageCache';
 import { isCseUrl } from '/@/utils/cse/cseUrl';
 import { compressImage } from '/@/utils/file/compressImage';
 import FileChip from '../components/FileChip.vue';
@@ -2594,6 +2668,54 @@ function onAttachmentImageError(e: Event, attachment: any) {
   const url = attachment?.url;
   if (url) {
     img.src = withImageCache(getFileAccessHttpUrl(url));
+  }
+}
+
+// ─── 【retry-storm-fix】cse:// 媒体/图片失败重试统一入口 ───────────
+//
+// 模板 v-for 内会被高频调用（流式 RAF + 1s 等待计时器叠加），
+// 所有 helper 内部都走 imageCache 的 getMediaFailureState / getImageFailureState，
+// 这两个探针只读 attempts 字段，不做 Date.now 比较，O(1) 安全。
+
+function resolvedUrlOf(attachment: any): string {
+  const url = attachment?.url;
+  if (!url) return '';
+  return getFileAccessHttpUrl(url);
+}
+
+function isVideoFailed(attachment: any): boolean {
+  const u = resolvedUrlOf(attachment);
+  if (!u || !isCseUrl(u)) return false;
+  return getMediaFailureState(u).failed;
+}
+function isAudioFailed(attachment: any): boolean {
+  return isVideoFailed(attachment); // 同走 withMediaCache 通道
+}
+function isImageFailed(attachment: any): boolean {
+  const u = resolvedUrlOf(attachment);
+  if (!u || !isCseUrl(u)) return false;
+  return getImageFailureState(u).failed;
+}
+
+function onVideoSkeletonClick(attachment: any) {
+  const u = resolvedUrlOf(attachment);
+  if (u && isCseUrl(u) && getMediaFailureState(u).failed) {
+    retryMedia(u);
+    return;
+  }
+  // 正常态保留原打开预览行为
+  openVideoPreview(attachment);
+}
+function onAudioSkeletonClick(attachment: any) {
+  const u = resolvedUrlOf(attachment);
+  if (u && isCseUrl(u) && getMediaFailureState(u).failed) {
+    retryMedia(u);
+  }
+}
+function onAttachmentImageRetry(attachment: any) {
+  const u = resolvedUrlOf(attachment);
+  if (u && isCseUrl(u)) {
+    retryImage(u);
   }
 }
 
@@ -6814,6 +6936,53 @@ function restoreMessageScroll() {
       }
 
       &:hover .remove-attachment { opacity: 1; }
+
+      // 【retry-storm-fix】上传中遮罩 + 失败态遮罩，绝对定位铺满 72×72 居中显示
+      .upload-mask {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        background: rgba(255, 255, 255, 0.72);
+        color: #555;
+        font-size: 16px;
+        backdrop-filter: blur(1px);
+        cursor: default;
+
+        .upload-percent {
+          font-size: 11px;
+          line-height: 1;
+          color: #555;
+        }
+
+        &.is-failed {
+          background: rgba(255, 77, 79, 0.08);
+          color: #cf1322;
+          cursor: pointer;
+          .upload-percent { color: #cf1322; }
+        }
+      }
+
+      // 【retry-storm-fix】输入区视频附件骨架屏（small 尺寸），铺满 72×72
+      .video-skeleton.small {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--cs-text-secondary, #aaa);
+        font-size: 22px;
+        background: var(--cs-bg-code, #f4f4f6);
+        cursor: pointer;
+
+        &.is-failed {
+          color: #cf1322;
+          background: rgba(255, 77, 79, 0.06);
+        }
+      }
     }
   }
 }
@@ -6860,13 +7029,50 @@ function restoreMessageScroll() {
       position: absolute;
       inset: 0;
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
+      gap: 4px;
       background: var(--cs-bg-code);
       color: var(--cs-text-secondary, #aaa);
       font-size: 22px;
       pointer-events: auto;
       cursor: progress;
+
+      // 【retry-storm-fix】失败态：红色 reload 图标 + 提示文字 + 可点击
+      &.is-failed {
+        background: rgba(255, 77, 79, 0.06);
+        color: #cf1322;
+        cursor: pointer;
+        .overlay-text {
+          font-size: 12px;
+          line-height: 1;
+        }
+      }
+    }
+
+    // 【retry-storm-fix】消息区视频骨架屏，铺满 .media-item，含失败态视觉差异
+    .video-skeleton {
+      width: 100%;
+      height: 100%;
+      min-height: 80px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      background: var(--cs-bg-code, #f4f4f6);
+      color: var(--cs-text-secondary, #888);
+      font-size: 13px;
+      cursor: pointer;
+      .anticon { font-size: 28px; }
+
+      &.is-failed {
+        background: rgba(255, 77, 79, 0.06);
+        color: #cf1322;
+        border: 1px dashed rgba(255, 77, 79, 0.5);
+        .anticon { color: #cf1322; }
+      }
     }
 
     .media-more {
@@ -6920,6 +7126,27 @@ function restoreMessageScroll() {
     &:hover {
       background: rgba(var(--cs-brand-rgb), 0.06);
       box-shadow: 0 1px 4px rgba(var(--cs-brand-rgb), 0.1);
+    }
+  }
+
+  // 【retry-storm-fix】音频骨架屏：cse:// 解密未就绪 / 失败时的占位
+  .audio-skeleton {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    background: var(--cs-bg-code, #f4f4f6);
+    color: var(--cs-text-secondary, #888);
+    border-radius: 8px;
+    font-size: 13px;
+    cursor: pointer;
+    .anticon { font-size: 18px; }
+
+    &.is-failed {
+      background: rgba(255, 77, 79, 0.06);
+      color: #cf1322;
+      border: 1px dashed rgba(255, 77, 79, 0.5);
+      .anticon { color: #cf1322; }
     }
   }
 }
