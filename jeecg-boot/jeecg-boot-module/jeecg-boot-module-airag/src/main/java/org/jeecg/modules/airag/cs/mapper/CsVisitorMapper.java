@@ -34,13 +34,19 @@ public interface CsVisitorMapper extends BaseMapper<CsVisitor> {
     /**
      * 更新访客访问次数和最后访问时间
      */
-    @Update("UPDATE cs_visitor SET visit_count = visit_count + 1, last_visit_time = NOW() WHERE id = #{id}")
+    @Update("UPDATE cs_visitor SET visit_count = COALESCE(visit_count, 0) + 1, last_visit_time = NOW() WHERE id = #{id}")
     int updateVisitInfo(@Param("id") String id);
+
+    /**
+     * 仅当 first_visit_time 为空时回填，避免覆盖已有的首次访问时间
+     */
+    @Update("UPDATE cs_visitor SET first_visit_time = #{ts} WHERE id = #{id} AND first_visit_time IS NULL")
+    int fillFirstVisitTimeIfNull(@Param("id") String id, @Param("ts") java.util.Date ts);
 
     /**
      * 更新会话数
      */
-    @Update("UPDATE cs_visitor SET conversation_count = conversation_count + 1 WHERE id = #{id}")
+    @Update("UPDATE cs_visitor SET conversation_count = COALESCE(conversation_count, 0) + 1 WHERE id = #{id}")
     int incrementConversationCount(@Param("id") String id);
 
     /**

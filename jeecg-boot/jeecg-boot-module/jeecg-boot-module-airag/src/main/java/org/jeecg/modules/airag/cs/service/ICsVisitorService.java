@@ -25,6 +25,26 @@ public interface ICsVisitorService extends IService<CsVisitor> {
     CsVisitor getOrCreateVisitor(String appId, String userId, String userName, String source);
 
     /**
+     * 触达访客（统一入口）：用于会话创建/复用时同步访客访问统计字段
+     * <p>
+     * - 不存在则插入并初始化 firstVisitTime/lastVisitTime/visitCount=1
+     * - 已存在则刷新 lastVisitTime 并 visitCount+1；按需 conversationCount+1；
+     *   若历史数据 firstVisitTime 为空则用 createTime 兜底回填
+     * <p>
+     * 注意：实现使用 REQUIRES_NEW 子事务隔离，调用方应 try/catch 包裹，
+     * 防止统计失败影响主业务。
+     *
+     * @param appId           所属应用ID（可空）
+     * @param userId          访客唯一标识（必填）
+     * @param userName        访客昵称（仅首次创建时使用）
+     * @param source          首次来源渠道（仅首次创建时使用）
+     * @param newConversation 是否新建了会话；true 时 conversationCount+1
+     * @return 触达后的访客信息（可能为 null，当 userId 为空）
+     */
+    CsVisitor touchVisitor(String appId, String userId, String userName,
+                           String source, boolean newConversation);
+
+    /**
      * 根据appId和userId查询访客
      */
     CsVisitor getByAppAndUser(String appId, String userId);

@@ -5,13 +5,16 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import lombok.extern.slf4j.Slf4j;
+import org.jeecg.common.util.oConvertUtils;
 import org.jeecg.modules.airag.cs.entity.CsVisitor;
 import org.jeecg.modules.airag.cs.mapper.CsVisitorMapper;
 import org.jeecg.modules.airag.cs.service.ICsConversationService;
 import org.jeecg.modules.airag.cs.service.ICsVisitorService;
 import org.jeecg.modules.airag.cs.websocket.CsWebSocketMessage;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Date;
@@ -62,6 +65,71 @@ public class CsVisitorServiceImpl extends ServiceImpl<CsVisitorMapper, CsVisitor
         }
         
         return visitor;
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
+    public CsVisitor touchVisitor(String appId, String userId, String userName,
+                                  String source, boolean newConversation) {
+        if (oConvertUtils.isEmpty(userId)) {
+            return null;
+        }
+
+        // 1) appId 非空时优先按 appId+userId 精确匹配；
+        //    appId 为空（新版客服系统）则直接退化为 userId 兜底，避免重复插入
+        CsVisitor visitor = oConvertUtils.isNotEmpty(appId)
+                ? baseMapper.selectByAppAndUser(appId, userId) : null;
+        if (visitor == null) {
+            visitor = baseMapper.selectByUserId(userId);
+        }
+
+        Date now = new Date();
+        if (visitor == null) {
+            visitor = new CsVisitor()
+                    .setAppId(appId)
+                    .setUserId(userId)
+                    .setNickname(userName)
+                    .setSource(source)
+                    .setFirstVisitTime(now)
+                    .setLastVisitTime(now)
+                    .setVisitCount(1)
+                    .setConversationCount(newConversation ? 1 : 0)
+                    .setLevel(CsVisitor.LEVEL_NORMAL)
+                    .setStar(0)
+                    .setGender(CsVisitor.GENDER_UNKNOWN)
+                    .setCreateTime(now);
+            try {
+                baseMapper.insert(visitor);
+                log.info("[CS-Visitor] 触达新访客: appId={}, userId={}, newConv={}",
+                        appId, userId, newConversation);
+            } catch (DuplicateKeyException dup) {
+                // 并发场景：唯一索引冲突，回退查询一次再走更新分支
+                CsVisitor existed = baseMapper.selectByUserId(userId);
+                if (existed == null) {
+                    throw dup;
+                }
+                applyVisit(existed, newConversation, now);
+                return existed;
+            }
+            return visitor;
+        }
+
+        applyVisit(visitor, newConversation, now);
+        return visitor;
+    }
+
+    /**
+     * 已存在访客：刷新访问统计 + 兜底回填 firstVisitTime
+     */
+    private void applyVisit(CsVisitor visitor, boolean newConversation, Date now) {
+        baseMapper.updateVisitInfo(visitor.getId());
+        if (newConversation) {
+            baseMapper.incrementConversationCount(visitor.getId());
+        }
+        if (visitor.getFirstVisitTime() == null) {
+            Date fallback = visitor.getCreateTime() != null ? visitor.getCreateTime() : now;
+            baseMapper.fillFirstVisitTimeIfNull(visitor.getId(), fallback);
+        }
     }
 
     @Override

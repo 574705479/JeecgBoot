@@ -16,6 +16,7 @@ import org.jeecg.modules.airag.cs.mapper.CsCollaboratorMapper;
 import org.jeecg.modules.airag.cs.service.ICsAgentService;
 import org.jeecg.modules.airag.cs.service.ICsConversationService;
 import org.jeecg.modules.airag.cs.service.ICsMessageService;
+import org.jeecg.modules.airag.cs.service.ICsVisitorService;
 import org.jeecg.modules.airag.cs.service.ICsVisitorTokenService;
 import org.jeecg.modules.airag.cs.util.CsCryptoUtil;
 import org.jeecg.modules.airag.cs.vo.CsAgentWorkloadVO;
@@ -52,6 +53,9 @@ public class CsConversationController extends JeecgController<CsConversation, IC
 
     @Autowired
     private ICsMessageService messageService;
+
+    @Autowired
+    private ICsVisitorService visitorService;
 
     @Autowired
     private CsCollaboratorMapper collaboratorMapper;
@@ -147,6 +151,12 @@ public class CsConversationController extends JeecgController<CsConversation, IC
             // 如果 userName 是默认的"访客"，用新格式重新生成
             conversationService.refreshDefaultUserName(active, userIp, deviceId);
             conversationService.closeOtherActiveConversations(userId, appId, active.getId());
+            // 复用活跃会话视为一次新的"访问"：刷新 lastVisitTime 并 visitCount+1，但不增加 conversationCount
+            try {
+                visitorService.touchVisitor(appId, userId, userName, source, false);
+            } catch (Exception e) {
+                log.warn("[CS-Conversation] 复用会话同步访客统计失败: userId={}, err={}", userId, e.getMessage());
+            }
             encryptConversationFields(active);
             return Result.OK(active);
         }
@@ -204,8 +214,20 @@ public class CsConversationController extends JeecgController<CsConversation, IC
             }
         }
         
+        // 预探活跃会话：命中则视为"用户重新进入聊天"→ touchVisitor(false) 累加访问次数；
+        // 未命中则交给 service 内 createConversation 自然触发 touchVisitor(true)。
+        // 注意：不要在 service.getOrCreateConversation 内接入，避免 sendUserMessage 链路误触发。
+        boolean willReuse = oConvertUtils.isEmpty(conversationId)
+                && conversationService.getActiveConversation(userId, appId) != null;
         CsConversation conversation = conversationService.getOrCreateConversation(
                 conversationId, appId, userId, userName);
+        if (willReuse) {
+            try {
+                visitorService.touchVisitor(appId, userId, userName, null, false);
+            } catch (Exception e) {
+                log.warn("[CS-Conversation] get-or-create 同步访客统计失败: userId={}, err={}", userId, e.getMessage());
+            }
+        }
         encryptConversationFields(conversation);
         return Result.OK(conversation);
     }

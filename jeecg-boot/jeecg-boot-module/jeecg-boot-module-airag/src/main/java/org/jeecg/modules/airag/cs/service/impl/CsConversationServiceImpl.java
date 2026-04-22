@@ -22,6 +22,7 @@ import org.jeecg.modules.airag.cs.service.CsIpGeoService;
 import org.jeecg.modules.airag.cs.service.ICsAgentService;
 import org.jeecg.modules.airag.cs.service.ICsConversationService;
 import org.jeecg.modules.airag.cs.service.ICsMessageService;
+import org.jeecg.modules.airag.cs.service.ICsVisitorService;
 import org.jeecg.modules.airag.cs.util.CsCryptoUtil;
 import org.jeecg.modules.airag.cs.util.CsUserAgentUtil;
 import org.jeecg.modules.airag.cs.websocket.CsWebSocketMessage;
@@ -81,6 +82,10 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
 
     @Autowired
     private CsVisitorMapper csVisitorMapper;
+
+    @Autowired
+    @Lazy
+    private ICsVisitorService csVisitorService;
 
     @Autowired
     private CsCryptoUtil csCryptoUtil;
@@ -302,7 +307,15 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             save(conversation);
             log.info("[CS-Conversation] 创建会话(无在线客服): id={}, userId={}", conversation.getId(), userId);
         }
-        
+
+        // 同步访客访问统计：新会话 → visitCount+1 且 conversationCount+1
+        // touchVisitor 内部为 REQUIRES_NEW 子事务，独立提交/回滚；try/catch 兜底防影响主流程
+        try {
+            csVisitorService.touchVisitor(appId, userId, finalUserName, source, true);
+        } catch (Exception e) {
+            log.warn("[CS-Conversation] 同步访客统计失败: userId={}, err={}", userId, e.getMessage());
+        }
+
         return conversation;
     }
 
