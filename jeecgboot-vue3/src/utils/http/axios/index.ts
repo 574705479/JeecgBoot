@@ -72,7 +72,10 @@ const transform: AxiosTransform = {
         userStore.logout(true);
         break;
       case 901:
-        router.push('/license/activate').catch(() => {});
+        // 已经在激活页就别再 push 了，避免堆 history 导致回退/跳转闪烁
+        if (router.currentRoute.value.path !== '/license/activate') {
+          router.replace('/license/activate').catch(() => {});
+        }
         throw new Error('系统未授权');
       case 902:
         createMessage.error(message || '已达授权上限');

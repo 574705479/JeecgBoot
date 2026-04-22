@@ -303,12 +303,47 @@ public class LicenseClientService {
             ResponseEntity<Map> resp = restTemplate.exchange(url, HttpMethod.POST, entity, Map.class);
             return resp.getBody() != null ? resp.getBody() : Collections.singletonMap("code", 50000);
         } catch (Exception e) {
-            log.error("[License] Server call failed: {} {}", url, e.getMessage());
+            log.error("[License] Server call failed: {} {}", url, e.getMessage(), e);
             Map<String, Object> error = new HashMap<>();
             error.put("code", 50000);
-            error.put("message", "无法连接授权服务器: " + e.getMessage());
+            error.put("message", mapServerCallExceptionToChinese(e));
             return error;
         }
+    }
+
+    /**
+     * 把调用授权服务器时的各类异常映射为面向最终用户的中文短语。
+     * 原始 stack 已通过 log.error 记录，HTTP 响应里只给中文，避免英文/技术细节外泄。
+     */
+    private String mapServerCallExceptionToChinese(Throwable e) {
+        Throwable cur = e;
+        while (cur != null) {
+            if (cur instanceof java.net.SocketTimeoutException) {
+                return "授权服务器响应超时，请稍后重试";
+            }
+            if (cur instanceof java.net.UnknownHostException) {
+                return "无法解析授权服务器域名，请检查网络或域名配置";
+            }
+            if (cur instanceof javax.net.ssl.SSLException) {
+                return "授权服务器证书无效，请联系运维确认 HTTPS 配置";
+            }
+            if (cur instanceof java.net.ConnectException) {
+                return "无法连接到授权服务器，请检查网络与防火墙";
+            }
+            cur = cur.getCause();
+        }
+        if (e instanceof org.springframework.web.client.HttpServerErrorException) {
+            int code = ((org.springframework.web.client.HttpServerErrorException) e).getStatusCode().value();
+            return "授权服务器内部错误（HTTP " + code + "），请稍后重试";
+        }
+        if (e instanceof org.springframework.web.client.HttpClientErrorException) {
+            int code = ((org.springframework.web.client.HttpClientErrorException) e).getStatusCode().value();
+            return "授权服务接口请求异常（HTTP " + code + "）";
+        }
+        if (e instanceof org.springframework.web.client.ResourceAccessException) {
+            return "无法连接到授权服务器，请检查网络与防火墙";
+        }
+        return "授权服务调用失败，请稍后重试或联系管理员";
     }
 
     @SuppressWarnings("unchecked")
