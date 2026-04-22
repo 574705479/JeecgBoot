@@ -231,10 +231,16 @@
                   </a-tooltip>
                 </div>
                 <a-input-number
+                  v-if="qd.type === 'number'"
                   v-model:value="editForm.quotas[qd.code]"
                   :min="0"
                   style="width: 100%"
-                  :placeholder="qd.valueType === 'integer' ? '0 表示不限' : ''"
+                  placeholder="0 表示不限"
+                />
+                <a-input
+                  v-else
+                  v-model:value="editForm.quotas[qd.code]"
+                  :placeholder="`输入 ${qd.name || qd.code}`"
                 />
               </a-col>
             </a-row>
@@ -275,11 +281,15 @@
           <a-textarea
             v-model:value="editForm.domains"
             :autoSize="{ minRows: 4, maxRows: 10 }"
-            placeholder="每行输入一个域名，例如：&#10;example.com&#10;cs.example.com"
+            placeholder="每行输入一个域名，例如：&#10;cs.example.com&#10;cs-backup.example.com"
           />
-          <div style="color: #999; font-size: 12px; margin-top: 4px">
-            每行一个域名，用于客户端域名配置的远程下发
-          </div>
+          <a-alert
+            type="error"
+            show-icon
+            banner
+            style="margin-top: 6px; padding: 4px 12px; font-size: 12px"
+            message="必填：不配置则桌面客户端（Electron）激活后会提示「所有业务域名均无法访问」，连不上后端。多写几个等于备用线路，自动选最快的一个。"
+          />
         </a-form-item>
 
         <a-form-item label="下载链接">
@@ -311,9 +321,13 @@
               + 添加下载链接
             </a-button>
           </div>
-          <div style="color: #999; font-size: 12px; margin-top: 4px">
-            配置客户端下载入口（如 Windows / Mac / Linux），将远程推送到客户端
-          </div>
+          <a-alert
+            type="warning"
+            show-icon
+            banner
+            style="margin-top: 6px; padding: 4px 12px; font-size: 12px"
+            message="建议配置：用于在浏览器 Dashboard 显示桌面客户端安装包下载入口（Windows / Mac / Linux）。不配置不影响浏览器访问，仅是没有桌面客户端下载按钮。"
+          />
         </a-form-item>
 
         <a-form-item label="备注">
@@ -325,7 +339,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, h } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import { CopyOutlined } from '@ant-design/icons-vue'
@@ -355,7 +369,7 @@ const quotasDef = ref<any[]>([])
 const featuresDef = ref<any[]>([])
 const editForm = reactive({
   planId: null as number | null,
-  quotas: {} as Record<string, number>,
+  quotas: {} as Record<string, any>,
   features: [] as string[],
   allowedIps: [] as string[],
   remark: '',
@@ -518,9 +532,10 @@ async function openEditModal() {
   const validFeatureCodes = new Set(featuresDef.value.map((d: any) => d.code))
   editForm.features = (license.value.features || []).filter((f: string) => validFeatureCodes.has(f))
 
-  const q: Record<string, number> = {}
+  const q: Record<string, any> = {}
   for (const qd of quotasDef.value) {
-    q[qd.code] = license.value.quotas?.[qd.code] ?? 0
+    const existing = license.value.quotas?.[qd.code]
+    q[qd.code] = existing !== undefined ? existing : (qd.type === 'number' ? 0 : '')
   }
   editForm.quotas = q
 
@@ -551,9 +566,10 @@ function onEditPlanChange(planId: number | null) {
     content: '切换套餐将覆盖当前配额和功能设置，确定要继续吗？',
     onOk() {
       if (plan.quotas) {
-        const q: Record<string, number> = {}
+        const q: Record<string, any> = {}
         for (const qd of quotasDef.value) {
-          q[qd.code] = plan.quotas[qd.code] ?? 0
+          const v = plan.quotas[qd.code]
+          q[qd.code] = v !== undefined ? v : (qd.type === 'number' ? 0 : '')
         }
         editForm.quotas = q
       }
@@ -568,7 +584,31 @@ function onEditPlanChange(planId: number | null) {
   })
 }
 
+async function confirmEmptyDomains(domains: string): Promise<boolean> {
+  if (domains.trim().length > 0) return true
+  return new Promise<boolean>((resolve) => {
+    Modal.confirm({
+      title: '未配置接入域名',
+      width: 480,
+      content: h('div', [
+        h(
+          'p',
+          { style: 'margin: 0 0 8px' },
+          '当前许可证未填写"域名列表"，桌面客户端（Electron）激活后将无法连接到后端服务，会提示"所有业务域名均无法访问"。',
+        ),
+        h('p', { style: 'margin: 0' }, '是否仍要继续保存？'),
+      ]) as any,
+      okText: '仍然保存',
+      okButtonProps: { danger: true },
+      cancelText: '返回填写',
+      onOk: () => resolve(true),
+      onCancel: () => resolve(false),
+    })
+  })
+}
+
 async function handleEditSave() {
+  if (!(await confirmEmptyDomains(editForm.domains))) return
   editSaving.value = true
   try {
     const id = route.params.id
