@@ -150,7 +150,7 @@
           show-icon
           banner
           style="margin-top: 6px; padding: 4px 12px; font-size: 12px"
-          message="必填：不配置则桌面客户端（Electron）激活后会提示「所有业务域名均无法访问」，连不上后端。多写几个等于备用线路，自动选最快的一个。"
+          message="必填：不配置则桌面客户端激活后会提示「所有业务域名均无法访问」，连不上后端。多写几个等于备用线路，自动选最快的一个。"
         />
       </a-form-item>
 
@@ -168,7 +168,7 @@
             />
             <a-input
               v-model:value="item.url"
-              placeholder="下载链接 URL"
+              placeholder="下载网址（如 https://...）"
               style="flex: 1"
             />
             <a-button danger size="small" @click="form.downloadLinks.splice(idx, 1)">
@@ -188,7 +188,7 @@
           show-icon
           banner
           style="margin-top: 6px; padding: 4px 12px; font-size: 12px"
-          message="建议配置：用于在浏览器 Dashboard 显示桌面客户端安装包下载入口（Windows / Mac / Linux）。不配置不影响浏览器访问，仅是没有桌面客户端下载按钮。"
+          message="建议配置：用于在浏览器仪表盘显示桌面客户端安装包下载入口（Windows / Mac / Linux）。不配置不影响浏览器访问，仅是没有桌面客户端下载按钮。"
         />
       </a-form-item>
 
@@ -323,7 +323,7 @@ async function confirmEmptyDomains(domains: string): Promise<boolean> {
         h(
           'p',
           { style: 'margin: 0 0 8px' },
-          '当前许可证未填写"域名列表"，桌面客户端（Electron）激活后将无法连接到后端服务，会提示"所有业务域名均无法访问"。',
+          '当前许可证未填写"域名列表"，桌面客户端激活后将无法连接到后端服务，会提示"所有业务域名均无法访问"。',
         ),
         h('p', { style: 'margin: 0' }, '是否仍要继续保存？'),
       ]) as any,
