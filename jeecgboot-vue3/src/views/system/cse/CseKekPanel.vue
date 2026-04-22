@@ -4,21 +4,23 @@
       <div class="toolbar">
         <a-space>
           <a-button type="primary" preIcon="ant-design:plus-outlined" @click="openGenerate">
-            生成新 KEK
+            生成新密钥
           </a-button>
-          <a-button preIcon="ant-design:cloud-download-outlined" @click="openExport">导出加密备份</a-button>
-          <a-button preIcon="ant-design:cloud-upload-outlined" @click="openImport">从备份恢复</a-button>
+          <a-button preIcon="ant-design:cloud-download-outlined" @click="openExport">导出备份</a-button>
+          <a-button preIcon="ant-design:cloud-upload-outlined" @click="openImport">导入备份</a-button>
           <a-button preIcon="ant-design:reload-outlined" @click="loadAll">刷新</a-button>
         </a-space>
       </div>
 
-      <a-alert
-        type="info"
-        show-icon
-        class="kek-alert"
-        message="KEK 状态说明"
-        description="ACTIVE = 当前用于加密新文件；STAGED = 已生成尚未启用，可随时激活；DEPRECATED = 仍可解密历史文件但不再加密新文件；ARCHIVED = 仅 UI 隐藏，KEK 仍然存在。激活操作会把当前 ACTIVE 自动转为 DEPRECATED。"
-      />
+      <a-alert type="info" show-icon class="kek-alert" message="密钥状态说明">
+        <template #description>
+          <div><b>使用中</b> — 当前用于加密新上传的文件</div>
+          <div><b>待启用</b> — 已生成、可随时切换为使用中</div>
+          <div><b>已下线</b> — 仅用于解密旧文件，不再加密新文件</div>
+          <div><b>已归档</b> — 从列表中收起，密钥仍然保留</div>
+          <div class="alert-note">每次激活待启用密钥时，原使用中密钥会自动切换为已下线。</div>
+        </template>
+      </a-alert>
 
       <a-table
         :columns="kekColumns"
@@ -31,7 +33,7 @@
       >
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'status'">
-            <a-tag :color="statusColor(record.status)">{{ record.status }}</a-tag>
+            <a-tag :color="statusColor(record.status)">{{ statusText(record.status) }}</a-tag>
           </template>
           <template v-else-if="column.key === 'action'">
             <a-space>
@@ -71,14 +73,14 @@
       >
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'action'">
-            <a-tag :color="actionColor(record.action)">{{ record.action }}</a-tag>
+            <a-tag :color="actionColor(record.action)">{{ actionText(record.action) }}</a-tag>
           </template>
         </template>
       </a-table>
     </a-card>
 
-    <!-- 生成新 KEK -->
-    <a-modal v-model:open="genVisible" title="生成新 KEK" :confirm-loading="submitting" @ok="submitGenerate">
+    <!-- 生成新密钥 -->
+    <a-modal v-model:open="genVisible" title="生成新密钥" :confirm-loading="submitting" @ok="submitGenerate">
       <a-form layout="vertical">
         <a-form-item label="备注（可选）">
           <a-input v-model:value="genForm.remark" placeholder="例如：2026Q1 季度轮换" allow-clear />
@@ -86,40 +88,40 @@
         <a-form-item label="超管登录密码（二次确认）" required>
           <a-input-password v-model:value="genForm.password" placeholder="输入您当前的登录密码" />
         </a-form-item>
-        <a-alert type="warning" show-icon message="新生成的 KEK 处于 STAGED 状态，需要点击「激活」后才会用于加密新文件。" />
+        <a-alert type="warning" show-icon message="新生成的密钥状态为「待启用」，需要点击「激活」后才会用于加密新文件。" />
       </a-form>
     </a-modal>
 
     <!-- 激活 -->
-    <a-modal v-model:open="actVisible" title="激活 KEK" :confirm-loading="submitting" @ok="submitActivate">
+    <a-modal v-model:open="actVisible" title="激活密钥" :confirm-loading="submitting" @ok="submitActivate">
       <a-form layout="vertical">
-        <a-form-item label="目标 KEK">
+        <a-form-item label="目标密钥编号">
           <a-input :value="actForm.kid" disabled />
         </a-form-item>
         <a-form-item label="超管登录密码（二次确认）" required>
           <a-input-password v-model:value="actForm.password" placeholder="输入您当前的登录密码" />
         </a-form-item>
-        <a-alert type="warning" show-icon message="激活后，原 ACTIVE 的 KEK 会自动转为 DEPRECATED；新文件将使用此 KEK 加密。" />
+        <a-alert type="warning" show-icon message="激活后，当前「使用中」的密钥会自动切换为「已下线」，新上传的文件将改用此密钥加密。" />
       </a-form>
     </a-modal>
 
     <!-- 归档 -->
-    <a-modal v-model:open="arcVisible" title="归档 KEK" :confirm-loading="submitting" @ok="submitArchive">
+    <a-modal v-model:open="arcVisible" title="归档密钥" :confirm-loading="submitting" @ok="submitArchive">
       <a-form layout="vertical">
-        <a-form-item label="目标 KEK">
+        <a-form-item label="目标密钥编号">
           <a-input :value="arcForm.kid" disabled />
         </a-form-item>
         <a-form-item label="超管登录密码（二次确认）" required>
           <a-input-password v-model:value="arcForm.password" placeholder="输入您当前的登录密码" />
         </a-form-item>
-        <a-alert type="warning" show-icon message="归档不会删除 KEK，旧文件仍可正常解密；如需彻底丢弃，请使用导出备份后再人工删表。" />
+        <a-alert type="warning" show-icon message="归档只是从列表收起，密钥仍然保留并可继续解密旧文件。" />
       </a-form>
     </a-modal>
 
     <!-- 导出 -->
-    <a-modal v-model:open="expVisible" title="导出加密备份" :confirm-loading="submitting" @ok="submitExport">
+    <a-modal v-model:open="expVisible" title="导出备份" :confirm-loading="submitting" @ok="submitExport">
       <a-form layout="vertical">
-        <a-form-item label="备份压缩包密码（≥8 位）" required>
+        <a-form-item label="备份密码（不少于 8 位）" required>
           <a-input-password v-model:value="expForm.zipPassword" placeholder="设置一个高强度密码" />
         </a-form-item>
         <a-form-item label="超管登录密码（二次确认）" required>
@@ -128,15 +130,15 @@
         <a-alert
           type="info"
           show-icon
-          message="备份内 KEK 通过 PBKDF2 + AES-256-GCM 加密，请妥善保管两套密码。"
+          message="备份文件已使用上方设置的密码加密。请妥善保管备份文件和密码，丢失后无法找回。"
         />
       </a-form>
     </a-modal>
 
     <!-- 导入 -->
-    <a-modal v-model:open="impVisible" title="从备份恢复" :confirm-loading="submitting" @ok="submitImport">
+    <a-modal v-model:open="impVisible" title="导入备份" :confirm-loading="submitting" @ok="submitImport">
       <a-form layout="vertical">
-        <a-form-item label="备份文件 (.zip)" required>
+        <a-form-item label="备份文件" required>
           <a-upload
             :before-upload="beforeUpload"
             :file-list="impForm.fileList"
@@ -144,16 +146,16 @@
             @remove="onRemoveFile"
             accept=".zip"
           >
-            <a-button preIcon="ant-design:upload-outlined">选择 zip 文件</a-button>
+            <a-button preIcon="ant-design:upload-outlined">选择备份文件</a-button>
           </a-upload>
         </a-form-item>
-        <a-form-item label="备份压缩包密码" required>
-          <a-input-password v-model:value="impForm.zipPassword" placeholder="导出时设置的 zip 密码" />
+        <a-form-item label="备份密码" required>
+          <a-input-password v-model:value="impForm.zipPassword" placeholder="导出时设置的备份密码" />
         </a-form-item>
         <a-form-item label="超管登录密码（二次确认）" required>
           <a-input-password v-model:value="impForm.password" placeholder="输入您当前的登录密码" />
         </a-form-item>
-        <a-alert type="warning" show-icon message="同名 kid 将被跳过；导入完成后请按需手动激活其中一个。" />
+        <a-alert type="warning" show-icon message="重名密钥会被跳过；导入完成后，如需启用其中一个，请手动点击「激活」。" />
       </a-form>
     </a-modal>
   </div>
@@ -186,12 +188,12 @@ const kekList = ref<CseKekVO[]>([]);
 const auditList = ref<CseKekAuditLogVO[]>([]);
 
 const kekColumns = [
-  { title: 'kid', dataIndex: 'kid', key: 'kid', width: 80 },
+  { title: '密钥编号', dataIndex: 'kid', key: 'kid', width: 100 },
   { title: '状态', dataIndex: 'status', key: 'status', width: 110 },
   { title: '创建人', dataIndex: 'createdBy', key: 'createdBy', width: 120 },
   { title: '创建时间', dataIndex: 'createdTime', key: 'createdTime', width: 170 },
   { title: '激活时间', dataIndex: 'activatedTime', key: 'activatedTime', width: 170 },
-  { title: '弃用时间', dataIndex: 'deprecatedTime', key: 'deprecatedTime', width: 170 },
+  { title: '下线时间', dataIndex: 'deprecatedTime', key: 'deprecatedTime', width: 170 },
   { title: '加密文件数', dataIndex: 'fileCount', key: 'fileCount', width: 110 },
   { title: '备注', dataIndex: 'remark', key: 'remark', ellipsis: true },
   { title: '操作', key: 'action', width: 140, fixed: 'right' as const },
@@ -200,11 +202,32 @@ const kekColumns = [
 const auditColumns = [
   { title: '时间', dataIndex: 'operateTime', key: 'operateTime', width: 170 },
   { title: '动作', dataIndex: 'action', key: 'action', width: 120 },
-  { title: 'kid', dataIndex: 'kid', key: 'kid', width: 80 },
+  { title: '密钥编号', dataIndex: 'kid', key: 'kid', width: 100 },
   { title: '操作人', dataIndex: 'operatorName', key: 'operatorName', width: 120 },
   { title: 'IP', dataIndex: 'operatorIp', key: 'operatorIp', width: 140 },
   { title: '备注', dataIndex: 'remark', key: 'remark', ellipsis: true },
 ];
+
+const STATUS_TEXT: Record<string, string> = {
+  ACTIVE: '使用中',
+  STAGED: '待启用',
+  DEPRECATED: '已下线',
+  ARCHIVED: '已归档',
+};
+
+const ACTION_TEXT: Record<string, string> = {
+  INIT: '初始化',
+  GENERATE: '生成密钥',
+  ACTIVATE: '激活',
+  DEPRECATE: '下线',
+  ARCHIVE: '归档',
+  EXPORT: '导出备份',
+  IMPORT: '导入备份',
+  CONFIG_UPDATE: '修改配置',
+};
+
+const statusText = (s: string) => STATUS_TEXT[s] || s || '-';
+const actionText = (a: string) => ACTION_TEXT[a] || a || '-';
 
 function statusColor(s: string) {
   return s === 'ACTIVE' ? 'success' : s === 'STAGED' ? 'processing' : s === 'DEPRECATED' ? 'warning' : 'default';
@@ -257,7 +280,7 @@ async function submitGenerate() {
   submitting.value = true;
   try {
     await generateKek(genForm.password, genForm.remark);
-    createMessage.success('已生成 STAGED 状态 KEK，请按需激活');
+    createMessage.success('已生成新密钥（待启用），请按需激活');
     genVisible.value = false;
     await loadAll();
   } catch (e: any) {
@@ -282,7 +305,7 @@ async function submitActivate() {
   submitting.value = true;
   try {
     await activateKek(actForm.password, actForm.kid);
-    createMessage.success(`已激活 ${actForm.kid}`);
+    createMessage.success(`已激活密钥 ${actForm.kid}`);
     actVisible.value = false;
     await loadAll();
   } catch (e: any) {
@@ -307,7 +330,7 @@ async function submitArchive() {
   submitting.value = true;
   try {
     await archiveKek(arcForm.password, arcForm.kid);
-    createMessage.success(`已归档 ${arcForm.kid}`);
+    createMessage.success(`已归档密钥 ${arcForm.kid}`);
     arcVisible.value = false;
     await loadAll();
   } catch (e: any) {
@@ -330,7 +353,7 @@ async function submitExport() {
     return;
   }
   if (expForm.zipPassword.length < 8) {
-    createMessage.warning('zip 密码至少 8 位');
+    createMessage.warning('备份密码不少于 8 位');
     return;
   }
   submitting.value = true;
@@ -339,7 +362,7 @@ async function submitExport() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `cse-kek-backup-${Date.now()}.zip`;
+    a.download = `file-encrypt-backup-${Date.now()}.zip`;
     a.click();
     URL.revokeObjectURL(url);
     createMessage.success('备份已下载，请妥善保管');
@@ -377,7 +400,7 @@ function onRemoveFile() {
 }
 async function submitImport() {
   if (!impForm.file) {
-    createMessage.warning('请选择 zip 文件');
+    createMessage.warning('请选择备份文件');
     return;
   }
   if (!impForm.password || !impForm.zipPassword) {
@@ -391,7 +414,7 @@ async function submitImport() {
     fd.append('password', impForm.password);
     fd.append('zipPassword', impForm.zipPassword);
     const n = await importKekZip(fd);
-    createMessage.success(`已导入 ${n} 个 KEK`);
+    createMessage.success(`已导入 ${n} 个密钥`);
     impVisible.value = false;
     await loadAll();
   } catch (e: any) {
@@ -424,6 +447,10 @@ onMounted(() => loadAll());
 }
 .kek-table {
   margin-top: 4px;
+}
+.alert-note {
+  margin-top: 6px;
+  color: rgba(0, 0, 0, 0.55);
 }
 .card-title-with-icon {
   display: inline-flex;

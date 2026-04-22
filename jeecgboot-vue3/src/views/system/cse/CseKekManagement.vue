@@ -5,8 +5,7 @@
         <header class="cse-mgmt-header">
           <h1 class="cse-mgmt-title">文件加密管理</h1>
           <p class="cse-mgmt-subtitle">
-            CSE 文件加密总开关、白名单/黑名单可视化配置，以及主密钥（KEK）的生成、激活、归档与备份。
-            所有写操作均需输入超管登录密码作为二次确认。
+            统一管理上传文件的加密配置和密钥。所有变更立即生效，并写入审计日志，写操作均需输入超管登录密码二次确认。
           </p>
         </header>
 

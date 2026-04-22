@@ -6,7 +6,7 @@
         <template #title>
           <span class="card-title-with-icon">
             <Icon icon="ant-design:safety-certificate-outlined" />
-            CSE 总开关
+            文件加密总开关
           </span>
         </template>
         <div class="switch-row">
@@ -18,8 +18,8 @@
           />
           <span class="switch-hint">
             {{ form.enabled
-              ? '已启用：上传请求会按下方白名单/黑名单决定是否走 CSE 加密链路'
-              : '已关闭：所有新文件将明文上传，仅历史 cse 文件可解密' }}
+              ? '已启用：新上传的文件会按下方白名单 / 黑名单决定是否加密'
+              : '已关闭：新上传的文件不再加密；已加密的旧文件仍可正常访问' }}
           </span>
         </div>
         <a-alert
@@ -28,7 +28,7 @@
           show-icon
           banner
           class="warn-banner"
-          message="⚠ 总开关已关闭，全站新文件将明文上传"
+          message="总开关已关闭，所有新上传的文件将不再加密"
         />
       </a-card>
 
@@ -39,7 +39,7 @@
             <Icon icon="ant-design:lock-outlined" />
             加密业务（白名单）
           </span>
-          <span class="card-subtitle">勾选的业务会走 CSE 加密链路，返回 cse://&lt;fid&gt; 格式</span>
+          <span class="card-subtitle">勾选的业务，新上传的文件会自动加密</span>
         </template>
         <a-table
           :columns="encryptColumns"
@@ -62,8 +62,8 @@
                 @change="onToggleEncrypt(record)"
               />
             </template>
-            <template v-else-if="column.key === 'path'">
-              <code class="path-code">{{ record.path }}</code>
+            <template v-else-if="column.key === 'name'">
+              <span class="name-text">{{ record.name }}</span>
               <a-tag v-if="record.forceLocked" color="warning" class="lock-tag">
                 <Icon icon="ant-design:lock-filled" /> 系统强制
               </a-tag>
@@ -82,7 +82,7 @@
             <Icon icon="ant-design:unlock-outlined" />
             公开业务（黑名单）
           </span>
-          <span class="card-subtitle">命中即明文上传。黑名单优先级高于白名单</span>
+          <span class="card-subtitle">勾选的业务，新上传的文件不加密（用于公开下载场景）。黑名单优先级高于白名单</span>
         </template>
         <a-table
           :columns="publicColumns"
@@ -105,8 +105,8 @@
                 @change="onTogglePublic(record)"
               />
             </template>
-            <template v-else-if="column.key === 'path'">
-              <code class="path-code">{{ record.path }}</code>
+            <template v-else-if="column.key === 'name'">
+              <span class="name-text">{{ record.name }}</span>
               <a-tag v-if="record.forceLocked" color="warning" class="lock-tag">
                 <Icon icon="ant-design:lock-filled" /> 系统强制
               </a-tag>
@@ -120,13 +120,13 @@
 
       <!-- ④ 高级（自定义路径兜底） -->
       <a-collapse v-model:activeKey="advancedActive" class="advanced-collapse" :bordered="false">
-        <a-collapse-panel key="advanced" header="高级设置：字典外的自定义路径（兜底）">
+        <a-collapse-panel key="advanced" header="高级设置">
           <a-alert
             type="info"
             show-icon
             class="adv-alert"
-            message="字典已覆盖常用业务，仅当出现字典外的新 bizPath 时使用"
-            description="建议长期路径走代码字典而非这里。tag 格式：以 / 结尾，例如 my-biz/"
+            message="一般无需配置"
+            description="上方两个列表已覆盖常用业务。仅当上方列表里没有，又需要临时调整时，才在此处填写业务路径。格式：以 / 结尾，例如 my-biz/"
           />
           <a-form layout="vertical">
             <a-form-item label="自定义加密路径">
@@ -158,7 +158,7 @@
             <Icon icon="ant-design:experiment-outlined" />
             效果测试
           </span>
-          <span class="card-subtitle">输入业务路径，预览当前/待保存配置下是否会加密</span>
+          <span class="card-subtitle">输入业务路径，预览该业务上传时是否会加密（仅模拟，不会真的上传文件）</span>
         </template>
         <div class="dryrun-row">
           <a-input
@@ -182,7 +182,7 @@
             class="result-tag"
           >
             <Icon :icon="dryRunResult.shouldEncrypt ? 'ant-design:check-circle-filled' : 'ant-design:warning-filled'" />
-            {{ dryRunResult.shouldEncrypt ? '会加密（走 CSE 链路）' : '不加密（明文上传）' }}
+            {{ dryRunResult.shouldEncrypt ? '会加密' : '不加密' }}
           </a-tag>
           <span v-if="dryRunResult.matchedRule" class="rule-text">
             命中规则：<code>{{ dryRunResult.matchedRule }}</code>
@@ -197,13 +197,13 @@
           type="info"
           show-icon
           class="save-alert"
-          message="修改仅影响未来上传"
-          description="历史已上传的 cse:// 文件不会受影响。保存后无需重启即可生效（60 秒内全量节点失效缓存）。"
+          message="保存说明"
+          description="修改仅影响新上传的文件，已加密的旧文件不受影响。保存后立即生效（约 60 秒内同步到全部节点），所有变更会写入审计日志。"
         />
         <div class="save-row">
           <a-space>
             <a-button @click="loadConfig" :loading="loading">
-              <Icon icon="ant-design:reload-outlined" /> 重置（重新读取）
+              <Icon icon="ant-design:reload-outlined" /> 撤销修改
             </a-button>
             <a-button type="primary" :loading="submitting" @click="openSave">
               <Icon icon="ant-design:save-outlined" /> 保存配置
@@ -214,7 +214,7 @@
     </a-spin>
 
     <!-- 二次密码确认 -->
-    <a-modal v-model:open="saveVisible" title="保存 CSE 基础配置" :confirm-loading="submitting" @ok="submitSave">
+    <a-modal v-model:open="saveVisible" title="保存配置" :confirm-loading="submitting" @ok="submitSave">
       <a-form layout="vertical">
         <a-form-item label="即将保存">
           <div class="preview-block">
@@ -236,7 +236,6 @@
         <a-form-item label="超管登录密码（二次确认）" required>
           <a-input-password v-model:value="savePassword" placeholder="输入您当前的登录密码" />
         </a-form-item>
-        <a-alert type="warning" show-icon message="保存后立即生效（60 秒内全量节点失效缓存）。所有变更会写入审计日志。" />
       </a-form>
     </a-modal>
   </div>
@@ -290,15 +289,13 @@ const savePassword = ref('');
 
 const encryptColumns = [
   { title: '加密', key: 'check', width: 70, align: 'center' as const },
-  { title: '业务路径', key: 'path', width: 220 },
-  { title: '名称', dataIndex: 'name', key: 'name', width: 200 },
+  { title: '业务名称', key: 'name', width: 240 },
   { title: '说明', key: 'description', ellipsis: true },
 ];
 
 const publicColumns = [
   { title: '公开', key: 'check', width: 70, align: 'center' as const },
-  { title: '业务路径', key: 'path', width: 220 },
-  { title: '名称', dataIndex: 'name', key: 'name', width: 200 },
+  { title: '业务名称', key: 'name', width: 240 },
   { title: '说明', key: 'description', ellipsis: true },
 ];
 
@@ -396,7 +393,7 @@ async function loadConfig() {
 
 async function handleDryRun() {
   if (!dryRunPathInput.value.trim()) {
-    createMessage.warning('请输入要测试的 bizPath');
+    createMessage.warning('请输入要测试的业务路径');
     return;
   }
   dryRunLoading.value = true;
@@ -438,7 +435,7 @@ async function submitSave() {
       publicPaths: finalPublic.value,
       password: savePassword.value,
     });
-    createMessage.success('配置已保存，立即生效');
+    createMessage.success('保存成功');
     saveVisible.value = false;
     await loadConfig();
   } catch (e: any) {
@@ -494,13 +491,9 @@ onMounted(() => loadConfig());
 .dict-table :deep(.row-locked) {
   background: rgba(255, 193, 7, 0.04);
 }
-.path-code {
-  background: #f5f5f7;
-  padding: 1px 6px;
-  border-radius: 4px;
-  font-family: 'Menlo', 'Consolas', monospace;
-  font-size: 12px;
-  color: #d4380d;
+.name-text {
+  color: #1d1d1f;
+  font-weight: 500;
 }
 .lock-tag {
   margin-left: 8px;

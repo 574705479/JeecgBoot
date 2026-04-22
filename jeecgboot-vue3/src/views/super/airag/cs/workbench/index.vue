@@ -4588,7 +4588,7 @@ function connectWebSocket() {
   };
 }
 
-function handleWsMessage(data: any) {
+async function handleWsMessage(data: any) {
   lastWsMessageAt = Date.now();
   switch (data.type) {
     case 'message':
@@ -4762,9 +4762,22 @@ function handleWsMessage(data: any) {
           (filter.value === 'mine' && assignedAgentId === agentId.value) ||
           filter.value === 'all'
         ) {
-          loadConversations();
+          await loadConversations();
         }
-        
+
+        // 仅当被分配给当前客服时给出"人工接入"强提示（声音 + 桌面通知）
+        // 覆盖三类后端触发：访客转人工 / 客服自点接入 / 系统重分配
+        // 三层防护：owner_only 判定 + shouldPlaySound 路由判定 + notifyNewMessage 内置失焦判定
+        if (assignedAgentId && assignedAgentId === agentId.value) {
+          const targetConv = conversations.value.find(c => c.id === extraData.conversationId);
+          if (shouldPlaySound()) playNotificationSound();
+          notifyNewMessage(targetConv, {
+            ...data,
+            content: '访客已请求人工接入',
+            conversationId: extraData.conversationId,
+          });
+        }
+
         // 延迟刷新统计数据（防抖）
         loadStatsDebounced();
         // 监控模式：刷新整个列表和客服状态
