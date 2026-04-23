@@ -18,10 +18,16 @@ import { DEFAULT_LOGO_URL } from '/@/utils/asset';
 
 const DB_NAME = 'jeecg_image_cache';
 const STORE_NAME = 'images';
-const DB_VERSION = 1;
+// v2 新增 'media' store 用于视频/音频持久化（与图片隔离配额，避免视频撑爆图片 LRU）
+const STORE_NAME_MEDIA = 'media';
+const DB_VERSION = 2;
 const MAX_IDB_ENTRIES = 300;
 const MAX_MEM_ENTRIES = 150;
 const MAX_SINGLE_SIZE = 5 * 1024 * 1024;
+// 视频/音频允许更大单文件（典型聊天短视频 5~30MB）。超过此上限直接放弃 IDB（仍走内存 + 实时解密）
+const MAX_MEDIA_SIZE = 30 * 1024 * 1024;
+// 视频 IDB 最多 50 条；按 30MB 上限算最坏情况 1.5GB，仍在常见浏览器配额内（80%~95% 之前 LRU 兜底）
+const MAX_MEDIA_IDB_ENTRIES = 50;
 const TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const REVOKE_DELAY_MS = 60 * 1000;
 
@@ -125,6 +131,10 @@ function openDB(): Promise<IDBDatabase> {
         if (!db.objectStoreNames.contains(STORE_NAME)) {
           db.createObjectStore(STORE_NAME, { keyPath: 'key' });
         }
+        // v1 → v2：新增 media store。已有用户的图片缓存 (images) 不动。
+        if (!db.objectStoreNames.contains(STORE_NAME_MEDIA)) {
+          db.createObjectStore(STORE_NAME_MEDIA, { keyPath: 'key' });
+        }
       };
       req.onsuccess = () => {
         _db = req.result;
@@ -147,12 +157,12 @@ interface CacheEntry {
   timestamp: number;
 }
 
-function idbGet(key: string): Promise<CacheEntry | undefined> {
+function idbGet(key: string, store: string = STORE_NAME): Promise<CacheEntry | undefined> {
   return openDB().then(
     (db) =>
       new Promise((resolve) => {
-        const tx = db.transaction(STORE_NAME, 'readonly');
-        const req = tx.objectStore(STORE_NAME).get(key);
+        const tx = db.transaction(store, 'readonly');
+        const req = tx.objectStore(store).get(key);
         req.onsuccess = () => resolve(req.result as CacheEntry | undefined);
         req.onerror = () => resolve(undefined);
       }),
@@ -160,12 +170,12 @@ function idbGet(key: string): Promise<CacheEntry | undefined> {
   );
 }
 
-function idbPut(entry: CacheEntry): Promise<void> {
+function idbPut(entry: CacheEntry, store: string = STORE_NAME): Promise<void> {
   return openDB().then(
     (db) =>
       new Promise((resolve) => {
-        const tx = db.transaction(STORE_NAME, 'readwrite');
-        tx.objectStore(STORE_NAME).put(entry);
+        const tx = db.transaction(store, 'readwrite');
+        tx.objectStore(store).put(entry);
         tx.oncomplete = () => resolve();
         tx.onerror = () => resolve();
       }),
@@ -173,12 +183,12 @@ function idbPut(entry: CacheEntry): Promise<void> {
   );
 }
 
-function idbDelete(key: string): Promise<void> {
+function idbDelete(key: string, store: string = STORE_NAME): Promise<void> {
   return openDB().then(
     (db) =>
       new Promise((resolve) => {
-        const tx = db.transaction(STORE_NAME, 'readwrite');
-        tx.objectStore(STORE_NAME).delete(key);
+        const tx = db.transaction(store, 'readwrite');
+        tx.objectStore(store).delete(key);
         tx.oncomplete = () => resolve();
         tx.onerror = () => resolve();
       }),
@@ -186,12 +196,12 @@ function idbDelete(key: string): Promise<void> {
   );
 }
 
-function idbGetAll(): Promise<CacheEntry[]> {
+function idbGetAll(store: string = STORE_NAME): Promise<CacheEntry[]> {
   return openDB().then(
     (db) =>
       new Promise((resolve) => {
-        const tx = db.transaction(STORE_NAME, 'readonly');
-        const req = tx.objectStore(STORE_NAME).getAll();
+        const tx = db.transaction(store, 'readonly');
+        const req = tx.objectStore(store).getAll();
         req.onsuccess = () => resolve(req.result as CacheEntry[]);
         req.onerror = () => resolve([]);
       }),
@@ -199,16 +209,29 @@ function idbGetAll(): Promise<CacheEntry[]> {
   );
 }
 
-function idbGetAllKeys(): Promise<string[]> {
+function idbGetAllKeys(store: string = STORE_NAME): Promise<string[]> {
   return openDB().then(
     (db) =>
       new Promise((resolve) => {
-        const tx = db.transaction(STORE_NAME, 'readonly');
-        const req = tx.objectStore(STORE_NAME).getAllKeys();
+        const tx = db.transaction(store, 'readonly');
+        const req = tx.objectStore(store).getAllKeys();
         req.onsuccess = () => resolve(req.result as string[]);
         req.onerror = () => resolve([]);
       }),
     () => [],
+  );
+}
+
+function idbClearStore(store: string): Promise<void> {
+  return openDB().then(
+    (db) =>
+      new Promise((resolve) => {
+        const tx = db.transaction(store, 'readwrite');
+        tx.objectStore(store).clear();
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+      }),
+    () => {},
   );
 }
 
@@ -366,6 +389,22 @@ export function isImageReady(url: string): boolean {
   return false;
 }
 
+/**
+ * 同步获取已缓存的原图 blob URL（不触发任何加载）。
+ * 富文本指令 v-cse-html 用它做 quick check，避免重复异步等待。
+ * 仅查 memoryCache（非 cseReactiveMap），保证返回的 blob URL 还在 LRU 内未被 revoke。
+ */
+export function getImageBlobIfReady(url: string): string | null {
+  if (!url || !isCseUrl(url)) return null;
+  const key = buildKey(url);
+  const cached = memoryCache.get(key);
+  if (cached) {
+    touchMemory(key);
+    return cached;
+  }
+  return null;
+}
+
 const TRANSPARENT_PNG =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 
@@ -472,6 +511,9 @@ export function clearImageCache(): void {
   mediaRefCount.clear();
   pendingMedia.clear();
   failureRegistry.clear();
+  // logout 场景：图片 + 视频 IDB 都要清。fire-and-forget，不阻塞 UI。
+  idbClearStore(STORE_NAME).catch(() => {});
+  idbClearStore(STORE_NAME_MEDIA).catch(() => {});
   clearDekCache();
 }
 
@@ -573,6 +615,19 @@ const mediaReactive = shallowReactive(new Map<string, string>());
 const mediaRefCount = new Map<string, number>();
 const pendingMedia = new Map<string, Promise<string>>();
 
+function buildMediaKey(url: string): string {
+  return `media:${currentUserId()}:${url}`;
+}
+
+/**
+ * 视频/音频缓存：与图片独立 IDB store + 30MB 单文件上限
+ * 
+ * 流程：
+ *   1. 内存 hit → 直接返回 blob URL（同步）
+ *   2. 内存 miss + IDB hit → 异步 hydrate（createObjectURL + 写内存 + 触发 reactive 刷新），
+ *      省掉了一次 /sys/secure/file/{fid}/key 取密 + /sys/secure/file/{fid} 拉密文 + AES 解密
+ *   3. 全 miss → decryptFileById（含 inFlight 去重）→ 写 IDB（异步，不阻塞 UI）→ 写内存
+ */
 export function withMediaCache(url: string, mime?: string): string {
   if (!url) return '';
   if (!isCseUrl(url)) return url;
@@ -587,18 +642,22 @@ export function withMediaCache(url: string, mime?: string): string {
       return '';
     }
     const myGen = cacheGeneration;
-    const p = decryptFileByIdToBlobUrl(fid, mime || 'application/octet-stream')
+    const p = loadMediaFromCacheOrDecrypt(url, fid, mime || 'application/octet-stream', myGen)
       .then((blobUrl) => {
         if (myGen !== cacheGeneration) {
-          try { URL.revokeObjectURL(blobUrl); } catch {}
+          if (blobUrl) {
+            try { URL.revokeObjectURL(blobUrl); } catch {}
+          }
           return '';
         }
-        clearFailure(url);
-        mediaReactive.set(url, blobUrl);
+        if (blobUrl) {
+          clearFailure(url);
+          mediaReactive.set(url, blobUrl);
+        }
         return blobUrl;
       })
       .catch((e) => {
-        console.warn('[withMediaCache] decrypt fail', fid, e?.message || e);
+        console.warn('[withMediaCache] load fail', fid, e?.message || e);
         if (myGen !== cacheGeneration) return '';
         recordFailure(url, e);
         return '';
@@ -610,6 +669,59 @@ export function withMediaCache(url: string, mime?: string): string {
   }
 
   return '';
+}
+
+/**
+ * 视频/音频加载主流程：
+ *   IDB hit + TTL 内 → 直接 createObjectURL 返回（省网络 + 省解密）
+ *   IDB miss / 过期 → decryptFileById → 回写 IDB（≤30MB 才存）
+ */
+async function loadMediaFromCacheOrDecrypt(
+  url: string,
+  fid: string,
+  mime: string,
+  myGen: number,
+): Promise<string> {
+  const cacheKey = buildMediaKey(url);
+
+  // 第一步：先查 IDB
+  try {
+    const e = await idbGet(cacheKey, STORE_NAME_MEDIA);
+    if (e && Date.now() - e.timestamp < TTL_MS) {
+      // 检测 generation 是否已变（用户切账号 / clearImageCache）
+      if (myGen !== cacheGeneration) return '';
+      const blobUrl = URL.createObjectURL(e.blob);
+      return blobUrl;
+    }
+  } catch {}
+
+  // 第二步：IDB miss → 实际解密
+  const blob = await decryptFileById(fid, { mime });
+  if (myGen !== cacheGeneration) {
+    return '';
+  }
+  const blobUrl = URL.createObjectURL(blob);
+
+  // 第三步：异步回写 IDB（不阻塞返回，单文件 ≤30MB 才入库）
+  if (blob.size > 0 && blob.size <= MAX_MEDIA_SIZE) {
+    idbPut({ key: cacheKey, blob, timestamp: Date.now() }, STORE_NAME_MEDIA)
+      .then(() => evictMediaIdbIfNeeded())
+      .catch(() => {});
+  }
+  return blobUrl;
+}
+
+async function evictMediaIdbIfNeeded(): Promise<void> {
+  try {
+    const keys = await idbGetAllKeys(STORE_NAME_MEDIA);
+    if (keys.length <= MAX_MEDIA_IDB_ENTRIES) return;
+    const all = await idbGetAll(STORE_NAME_MEDIA);
+    all.sort((a, b) => a.timestamp - b.timestamp);
+    const toRemove = all.length - MAX_MEDIA_IDB_ENTRIES;
+    for (let i = 0; i < toRemove; i++) {
+      await idbDelete(all[i].key, STORE_NAME_MEDIA);
+    }
+  } catch {}
 }
 
 export function retryMedia(canonicalUrl: string): void {
@@ -640,6 +752,11 @@ export function releaseMedia(url: string): void {
   mediaRefCount.delete(url);
 }
 
+/**
+ * 清空内存中的视频 blob URL（onUnmounted / restartConversation 调用）。
+ * IDB 持久化数据保留，下次进页面 withMediaCache 命中 IDB 即秒开。
+ * logout 场景请改用 clearImageCache（会一并清 IDB）。
+ */
 export function releaseAllMedia(): void {
   bumpGeneration();
   for (const blobUrl of mediaReactive.values()) {
@@ -653,7 +770,3 @@ export function releaseAllMedia(): void {
   failureRegistry.clear();
 }
 
-async function decryptFileByIdToBlobUrl(fid: string, mime: string): Promise<string> {
-  const blob = await decryptFileById(fid, { mime });
-  return URL.createObjectURL(blob);
-}

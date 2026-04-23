@@ -1,63 +1,46 @@
 /**
- * 1:1 复制自 jeecgboot-vue3/src/directives/cseHtmlImg.ts
- *
  * 全局指令 v-cse-html：富文本 / v-html 内 cse:// 图片异步解密渲染
  *
  * 设计要点：
- *  - 进程内 blobMap 长生命周期（持有，不参与 LRU），由 clearAllCseCache 统一清理
- *  - pending 去重并发请求
- *  - failCount 抑制反复重试与日志刷屏
+ *  - 缓存层完全委托给 /@/utils/file/imageCache（withImageCacheAsync）：
+ *    自动获得内存 LRU + IndexedDB 持久化（7 天 TTL）+ 失败重试退避 + cseReactive 触发
+ *  - 与附件图片共享缓存，同一张图既出现在富文本又出现在 image grid 时只解密一次
+ *  - 本地 failCount 仅做日志降噪，不重复实现失败抑制
+ *  - pending 去重已在 imageCache 内部实现，本文件不再二次维护
  */
 import type { App, Directive } from 'vue';
-import { isCseUrl, parseCseFid } from '/@/utils/cse/cseUrl';
-import { decryptFileToObjectUrl } from '/@/utils/cse/cseDecrypt';
+import { isCseUrl } from '/@/utils/cse/cseUrl';
+import { withImageCacheAsync, getImageBlobIfReady, clearImageCache } from '/@/utils/file/imageCache';
 
 const TRANSPARENT_PNG =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 
-const cseBlobMap = new Map<string, string>();
-const pending = new Map<string, Promise<string>>();
 const failCount = new Map<string, number>();
 const MAX_FAIL = 2;
 
 export function getCseBlobIfReady(cseUrl: string): string | null {
-  return cseBlobMap.get(cseUrl) || null;
+  return getImageBlobIfReady(cseUrl);
 }
 
 export function resolveCseBlob(cseUrl: string): Promise<string> {
-  const cached = cseBlobMap.get(cseUrl);
-  if (cached) return Promise.resolve(cached);
-
-  const ex = pending.get(cseUrl);
-  if (ex) return ex;
-
+  if (!isCseUrl(cseUrl)) return Promise.resolve(TRANSPARENT_PNG);
   if ((failCount.get(cseUrl) || 0) >= MAX_FAIL) {
     return Promise.resolve(TRANSPARENT_PNG);
   }
-
-  const fid = parseCseFid(cseUrl);
-  if (!fid) return Promise.resolve(TRANSPARENT_PNG);
-
-  const p = decryptFileToObjectUrl(fid, { mime: 'image/*' })
-    .then((blobUrl) => {
-      cseBlobMap.set(cseUrl, blobUrl);
+  // 委托给 imageCache：内存 hit → IDB hit → decrypt 三级链路全自动
+  return withImageCacheAsync(cseUrl).then((u) => {
+    if (u && u.startsWith('blob:')) {
       failCount.delete(cseUrl);
-      return blobUrl;
-    })
-    .catch((e) => {
-      const n = (failCount.get(cseUrl) || 0) + 1;
-      failCount.set(cseUrl, n);
-      if (n <= 1) {
-        console.warn('[cseHtmlImg] decrypt fail', fid, e?.message || e);
-      }
-      return TRANSPARENT_PNG;
-    })
-    .finally(() => {
-      pending.delete(cseUrl);
-    });
-
-  pending.set(cseUrl, p);
-  return p;
+      return u;
+    }
+    // imageCache 失败兜底返回 TRANSPARENT_PNG（cse 场景），此时计数避免无限重试日志
+    const n = (failCount.get(cseUrl) || 0) + 1;
+    failCount.set(cseUrl, n);
+    if (n <= 1) {
+      console.warn('[cseHtmlImg] decrypt fail', cseUrl);
+    }
+    return TRANSPARENT_PNG;
+  });
 }
 
 const VIEWPORT_OBSERVER_MARGIN = '200px';
@@ -98,7 +81,7 @@ function processImg(img: HTMLImageElement): void {
   }
 
   if (cseUrl) {
-    const ready = cseBlobMap.get(cseUrl);
+    const ready = getImageBlobIfReady(cseUrl);
     if (ready) {
       if (img.getAttribute('src') !== ready) img.setAttribute('src', ready);
     } else {
@@ -203,15 +186,13 @@ export const vCseHtml: Directive<HTMLElement> = {
   },
 };
 
+/**
+ * 兼容旧 API：内部委托给 imageCache.clearImageCache（统一清空内存 + IDB + DEK）。
+ * 一般在 logout / 切租户时调用。
+ */
 export function clearCseHtmlImgCache(): void {
-  for (const u of cseBlobMap.values()) {
-    try {
-      URL.revokeObjectURL(u);
-    } catch {}
-  }
-  cseBlobMap.clear();
-  pending.clear();
   failCount.clear();
+  clearImageCache();
 }
 
 export function setupCseHtmlDirective(app: App): void {
