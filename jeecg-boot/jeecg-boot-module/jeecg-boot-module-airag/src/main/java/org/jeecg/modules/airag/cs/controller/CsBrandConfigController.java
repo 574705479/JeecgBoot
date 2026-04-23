@@ -8,15 +8,18 @@ import org.apache.shiro.authz.annotation.Logical;
 import org.apache.shiro.authz.annotation.RequiresRoles;
 import org.jeecg.common.api.vo.Result;
 import com.alibaba.fastjson.JSON;
+import org.jeecg.modules.airag.cs.constant.CsRedisKeys;
 import org.jeecg.modules.airag.cs.entity.CsBrandConfig;
 import org.jeecg.modules.airag.cs.service.ICsBrandConfigService;
 import org.jeecg.modules.airag.cs.util.CsCryptoUtil;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Date;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 客服系统品牌配置
@@ -36,18 +39,63 @@ public class CsBrandConfigController {
     @Autowired
     private CsCryptoUtil csCryptoUtil;
 
+    @Autowired
+    private RedisTemplate<String, String> redisTemplate;
+
     /**
      * 获取当前品牌配置
+     *
+     * <p>Phase 3 加 Redis 缓存：缓存的是「明文 JSON 字符串」（不是密文），返回时再加 transport
+     * 加密。这样：
+     * <ul>
+     *   <li>多端共享同一份缓存（密文每次返回会因 IV/key rotate 不同，不能缓存）</li>
+     *   <li>save 接口主动失效缓存，TTL 5min 兜底防漂移</li>
+     *   <li>Redis 故障时回落直接查 DB（do-not-cache 路径）</li>
+     * </ul>
      */
     @Operation(summary = "获取当前品牌配置")
     @org.jeecg.config.shiro.IgnoreAuth
     @GetMapping("/get")
     public Result<String> getBrandConfig() {
+        return Result.OK(csCryptoUtil.encryptTransport(loadBrandConfigJson()));
+    }
+
+    /**
+     * 提供给 bootstrap 合包接口直接复用：返回当前品牌配置的明文 JSON 字符串
+     * （不带 transport 加密，由调用方自行处理外层加密）。
+     */
+    public String loadBrandConfigJson() {
+        try {
+            String cached = redisTemplate.opsForValue().get(CsRedisKeys.REDIS_BRAND_CONFIG);
+            if (cached != null) {
+                return cached;
+            }
+        } catch (Exception e) {
+            log.warn("[CS-Brand] Redis 读品牌配置失败，回落 DB: {}", e.getMessage());
+        }
         QueryWrapper<CsBrandConfig> wrapper = new QueryWrapper<>();
         wrapper.eq("del_flag", 0).eq("status", 1).orderByDesc("update_time");
         List<CsBrandConfig> list = brandConfigService.list(wrapper);
         CsBrandConfig config = list.isEmpty() ? null : list.get(0);
-        return Result.OK(csCryptoUtil.encryptTransport(JSON.toJSONString(config)));
+        String json = JSON.toJSONString(config);
+        try {
+            redisTemplate.opsForValue().set(
+                    CsRedisKeys.REDIS_BRAND_CONFIG,
+                    json,
+                    CsRedisKeys.BRAND_CONFIG_TTL_SECONDS,
+                    TimeUnit.SECONDS);
+        } catch (Exception e) {
+            log.warn("[CS-Brand] Redis 写品牌配置失败（非致命）: {}", e.getMessage());
+        }
+        return json;
+    }
+
+    private void evictBrandConfigCache() {
+        try {
+            redisTemplate.delete(CsRedisKeys.REDIS_BRAND_CONFIG);
+        } catch (Exception e) {
+            log.warn("[CS-Brand] Redis 失效品牌缓存失败（非致命）: {}", e.getMessage());
+        }
     }
 
     /**
@@ -78,6 +126,7 @@ public class CsBrandConfigController {
         }
         target.setUpdateTime(now);
         brandConfigService.saveOrUpdate(target);
+        evictBrandConfigCache();
         return Result.OK("保存成功");
     }
 }

@@ -138,6 +138,9 @@ public class CsWebSocketHandler implements WebSocketHandler {
                 extra.put("hasAgent", oConvertUtils.isNotEmpty(conversation.getOwnerAgentId()));
                 extra.put("status", conversation.getStatus());
             }
+            // Phase 3 Sprint 2：握手时下推最近 5 条消息，覆盖 bootstrap 响应到 WS 连接之间的"数据新鲜度缝隙"。
+            // 前端按 messageId 去重合并，已存在的不会覆盖；新到的消息可立刻显示，省去额外 HTTP。
+            attachRecentMessagesToExtra(extra, conversationId);
         }
         
         // 发送连接成功消息
@@ -157,6 +160,55 @@ public class CsWebSocketHandler implements WebSocketHandler {
         if (CsWebSocketInterceptor.USER_TYPE_USER.equals(userType) && conversation != null) {
             notifyAgentsNewConversation(conversation);
             notifyAgentsUserOnline(conversationId, userId);
+        }
+    }
+
+    /**
+     * Phase 3 Sprint 2：在 WS 握手成功时，把"最近 5 条消息 + 未读数"塞到 welcome 消息的 extra 里。
+     *
+     * <p>价值：bootstrap HTTP 完成到 WS 真正连接之间通常有 100-300ms 的窗口期，
+     * 这段时间内如果客服推送了新消息，访客侧会看到"消息延迟出现"的体验问题。
+     * WS 握手时把最近 5 条消息一并下推，前端按 messageId 去重合并，
+     * 既覆盖了缝隙，也避免重复 HTTP 调用拉取。</p>
+     *
+     * <p>消息内容字段做传输层加密（与 HTTP /cs/message/list 一致），
+     * 前端 decryptMessage(content) 即可获得明文。</p>
+     *
+     * @param extra welcome 消息的 extra map（原地修改）
+     * @param conversationId 当前会话 ID（已校验非空）
+     */
+    private void attachRecentMessagesToExtra(Map<String, Object> extra, String conversationId) {
+        if (extra == null || oConvertUtils.isEmpty(conversationId)) {
+            return;
+        }
+        try {
+            java.util.List<org.jeecg.modules.airag.cs.entity.CsMessage> recent =
+                messageService.getMessages(conversationId, 5);
+            if (recent == null || recent.isEmpty()) {
+                return;
+            }
+            // 复制成轻量 Map 列表，避免 JSON 序列化把不必要的内部字段也带出去
+            java.util.List<java.util.Map<String, Object>> recentLite = new java.util.ArrayList<>(recent.size());
+            for (org.jeecg.modules.airag.cs.entity.CsMessage m : recent) {
+                java.util.Map<String, Object> lite = new java.util.HashMap<>();
+                lite.put("id", m.getId());
+                lite.put("conversationId", m.getConversationId());
+                lite.put("senderId", m.getSenderId());
+                lite.put("senderName", m.getSenderName());
+                lite.put("senderType", m.getSenderType());
+                lite.put("senderAvatar", m.getSenderAvatar());
+                lite.put("msgType", m.getMsgType());
+                // 已存储加密的 content 再加一层传输加密，前端 decryptMessage 解开两层
+                lite.put("content", csCryptoUtil.encryptTransport(m.getContent()));
+                lite.put("createTime", m.getCreateTime());
+                lite.put("extra", m.getExtra());
+                lite.put("isAiGenerated", m.getIsAiGenerated());
+                recentLite.add(lite);
+            }
+            extra.put("recentMessages", recentLite);
+            extra.put("recentMessagesCount", recentLite.size());
+        } catch (Exception e) {
+            log.warn("[CS-WebSocket] 握手下推最近消息失败: convId={}, err={}", conversationId, e.getMessage());
         }
     }
 

@@ -9,12 +9,14 @@
     "build": "vue-tsc --noEmit -p tsconfig.json && vite build",
     "build:nocheck": "vite build",
     "preview": "vite preview",
+    "preview:local": "vite build --mode preview-local && cross-env PREVIEW_BACKEND=http://localhost:8080/jeecg-boot vite preview",
     "build:report": "cross-env REPORT=true vite build"
   },
   "dependencies": {
     "@ant-design/icons-vue": "^7.0.1",
     "@noble/ciphers": "^2.2.0",
     "@noble/hashes": "^2.2.0",
+    "@tanstack/vue-virtual": "^3.13.24",
     "ant-design-vue": "^4.2.6",
     "axios": "^1.12.2",
     "crypto-js": "^4.2.0",

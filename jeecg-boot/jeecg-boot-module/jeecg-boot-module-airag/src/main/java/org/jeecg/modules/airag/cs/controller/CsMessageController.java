@@ -615,13 +615,17 @@ public class CsMessageController {
 
     /**
      * 获取会话消息（通过参数）
+     *
+     * <p>Phase 3: 默认 limit 从 100 → 20。访客端首屏只需要最近少量消息即可看到聊天界面，
+     * 向上滚动到顶后由 {@code /cs/message/{conversationId}/page?beforeId=...} 翻页拉取更多。
+     * 这样首屏 payload 从 150-600KB 降到 30-120KB，AES 解密次数从 100 降到 20。</p>
      */
     @Operation(summary = "获取会话消息列表")
     @org.jeecg.config.shiro.IgnoreAuth
     @GetMapping("/list")
     public Result<List<CsMessage>> getMessageList(
             @RequestParam String conversationId,
-            @RequestParam(defaultValue = "100") Integer limit,
+            @RequestParam(defaultValue = "20") Integer limit,
             HttpServletRequest request) {
         if (!validateVisitorAccess(conversationId, request)) {
             return Result.error("访客凭证无效或已过期");

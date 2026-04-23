@@ -74,10 +74,35 @@ public final class CsRedisKeys {
     public static final String CONFIG_DATA_CLEANUP = "data_cleanup";
     public static final String REDIS_DATA_CLEANUP = REDIS_PREFIX + CONFIG_DATA_CLEANUP;
 
+    /**
+     * 品牌配置缓存 key（cs_brand_config 表当前生效的 status=1 条目，整体 JSON 缓存）。
+     *
+     * <p>Phase 3：访客端首屏 bootstrap 重度依赖品牌配置（logo/标题/主题色），原 controller 每次
+     * 全表查 + ORDER BY，QPS 上来后 DB 压力明显。改为先读 Redis、写操作时 del，TTL 兜底防漂移。</p>
+     */
+    public static final String REDIS_BRAND_CONFIG = REDIS_PREFIX + "brand_config";
+
+    /** 品牌配置 Redis 缓存 TTL（秒）。5 分钟与人工修改的容忍窗口对齐 */
+    public static final int BRAND_CONFIG_TTL_SECONDS = 300;
+
     // ==================== 运行期状态 Key（仅 Redis，不入库） ====================
 
     /** 客服轮询分配游标 */
     public static final String REDIS_ROUND_ROBIN_INDEX = REDIS_PREFIX + "round_robin_index";
+
+    /**
+     * 客服在线状态 ZSET key（score = 心跳/上线时间戳ms，member = agentId）。
+     *
+     * <p>Phase 3：原 {@code getOnlineAgents()} 走 cs_agent 全表 LIKE/IN 查询，访客端首屏
+     * 高频调用会拖慢 DB。引入 Redis ZSET 维护"30s 内有过心跳/上线"的 agentId 集合，
+     * {@code ZRANGEBYSCORE > now-30s} 可在 O(logN) 内拿到在线列表。</p>
+     *
+     * <p>由 goOnline / setBusy / agent 心跳时 ZADD，goOffline 时 ZREM。Redis 不可用时回落 DB 查。</p>
+     */
+    public static final String REDIS_AGENT_ONLINE_ZSET = "cs:agent:online";
+
+    /** 在线状态 ZSET 心跳过期窗口（毫秒）。客服心跳间隔 ~10s，30s 兜底比心跳更宽松，避免误下线 */
+    public static final long AGENT_ONLINE_TTL_MS = 30_000L;
 
     /**
      * 客服"最近一次登录"标记 key 前缀（完整 key 形如 cs:agent:recent_login:{agentId}）。

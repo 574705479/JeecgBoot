@@ -121,4 +121,24 @@ public interface ICsAgentService extends IService<CsAgent> {
      * @return 所有在线客服列表
      */
     List<CsAgent> getOnlineAgents();
+
+    /**
+     * 获取在线客服数量。
+     *
+     * <p>Phase 3：访客端 bootstrap / online-status 接口高频调用，独立计数版本可走 Redis ZCARD
+     * 直接拿数字，避免把整个客服列表序列化回客户端。</p>
+     *
+     * @return 在线客服数量（含忙碌/隐身），Redis 不可用时回落 DB 查
+     */
+    int countOnlineAgents();
+
+    /**
+     * 客服心跳：刷新 Redis 在线 ZSET 的 score 为当前时间戳。
+     *
+     * <p>由 WebSocket 心跳帧 / 客服端定时器调用。如果 agentId 不存在或已下线，自动 ZADD 进 ZSET，
+     * 这样在 Redis 故障恢复后能自然回填。</p>
+     *
+     * @param agentId 客服ID
+     */
+    void markAgentHeartbeat(String agentId);
 }

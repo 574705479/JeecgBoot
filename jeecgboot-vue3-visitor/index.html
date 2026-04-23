@@ -9,6 +9,16 @@
     <link rel="icon" href="/logo.svg" />
     <title>在线客服</title>
     <style>
+      /*
+       * Phase 3 骨架屏：所有样式 inline 在 <head>，零外部依赖。
+       * HTML 第一字节到达浏览器即可看到完整聊天界面骨架（头部 + 消息气泡 × 3 + 输入框），
+       * 不再有"白屏 → spinner → 真实界面"三段式跳变。
+       *
+       * 设计要点：
+       * 1. 颜色与主题色 #1677ff 对齐，避免 spinner 色差
+       * 2. shimmer 动画用 background-position 平移，不触发 layout/paint
+       * 3. Vue 挂载后由根组件清掉 #visitor-loading（已有 cleanup 逻辑）
+       */
       html, body, #app {
         margin: 0;
         padding: 0;
@@ -24,39 +34,207 @@
         color: #333;
         -webkit-font-smoothing: antialiased;
       }
+
       #visitor-loading {
         position: fixed;
         inset: 0;
         display: flex;
-        align-items: center;
-        justify-content: center;
         flex-direction: column;
         background: #f5f7fa;
         z-index: 9999;
       }
-      #visitor-loading .vl-spinner {
-        width: 36px;
-        height: 36px;
-        border: 3px solid #e6f4ff;
-        border-top-color: #1677ff;
+
+      /* ---------- 头部骨架 ---------- */
+      .skel-header {
+        flex: 0 0 auto;
+        height: 56px;
+        background: #ffffff;
+        border-bottom: 1px solid #f0f0f0;
+        display: flex;
+        align-items: center;
+        padding: 0 16px;
+        gap: 12px;
+        box-shadow: 0 1px 0 rgba(0, 0, 0, 0.02);
+      }
+      .skel-header .skel-logo {
+        width: 32px;
+        height: 32px;
         border-radius: 50%;
-        animation: vl-spin 0.8s linear infinite;
       }
-      #visitor-loading .vl-text {
-        margin-top: 12px;
-        color: #999;
-        font-size: 12px;
+      .skel-header .skel-title-group {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        flex: 1;
       }
-      @keyframes vl-spin {
-        to { transform: rotate(360deg); }
+      .skel-header .skel-title {
+        width: 120px;
+        height: 14px;
+        border-radius: 3px;
+      }
+      .skel-header .skel-subtitle {
+        width: 64px;
+        height: 10px;
+        border-radius: 3px;
+      }
+      .skel-header .skel-status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #d9d9d9;
+      }
+
+      /* ---------- 消息区骨架 ---------- */
+      .skel-msgs {
+        flex: 1 1 auto;
+        padding: 16px 12px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      .skel-msg {
+        display: flex;
+        align-items: flex-end;
+        gap: 8px;
+      }
+      .skel-msg.agent {
+        justify-content: flex-start;
+      }
+      .skel-msg.user {
+        justify-content: flex-end;
+        flex-direction: row-reverse;
+      }
+      .skel-msg .skel-avatar {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        flex: 0 0 auto;
+      }
+      .skel-msg .skel-bubble {
+        height: 38px;
+        border-radius: 12px;
+        max-width: 70%;
+      }
+      .skel-msg.agent .skel-bubble {
+        background-color: #ffffff;
+      }
+      .skel-msg.user .skel-bubble {
+        background-color: #d6e8ff;
+      }
+      .skel-msg.agent .skel-bubble.short { width: 120px; }
+      .skel-msg.agent .skel-bubble.medium { width: 200px; }
+      .skel-msg.agent .skel-bubble.long { width: 240px; height: 56px; }
+      .skel-msg.user .skel-bubble.short { width: 100px; }
+      .skel-msg.user .skel-bubble.medium { width: 180px; }
+
+      /* ---------- 输入框骨架 ---------- */
+      .skel-input-wrap {
+        flex: 0 0 auto;
+        background: #ffffff;
+        border-top: 1px solid #f0f0f0;
+        padding: 10px 12px 14px;
+      }
+      .skel-input-wrap .skel-toolbar {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 8px;
+      }
+      .skel-input-wrap .skel-tool {
+        width: 24px;
+        height: 24px;
+        border-radius: 4px;
+      }
+      .skel-input-wrap .skel-input {
+        height: 36px;
+        border-radius: 6px;
+      }
+
+      /* ---------- shimmer 动画（共享 base） ---------- */
+      .skel-shimmer,
+      .skel-logo,
+      .skel-title,
+      .skel-subtitle,
+      .skel-avatar,
+      .skel-bubble,
+      .skel-tool,
+      .skel-input {
+        background-color: #e6ebf2;
+        background-image: linear-gradient(
+          90deg,
+          rgba(255, 255, 255, 0) 0%,
+          rgba(255, 255, 255, 0.55) 50%,
+          rgba(255, 255, 255, 0) 100%
+        );
+        background-size: 200% 100%;
+        background-repeat: no-repeat;
+        background-position: -150% 0;
+        animation: skel-shimmer 1.4s ease-in-out infinite;
+      }
+      .skel-msg.user .skel-bubble {
+        background-color: #d6e8ff;
+      }
+
+      @keyframes skel-shimmer {
+        0% { background-position: -150% 0; }
+        100% { background-position: 250% 0; }
+      }
+
+      /* 减少动效用户偏好 */
+      @media (prefers-reduced-motion: reduce) {
+        .skel-shimmer,
+        .skel-logo,
+        .skel-title,
+        .skel-subtitle,
+        .skel-avatar,
+        .skel-bubble,
+        .skel-tool,
+        .skel-input {
+          animation: none;
+          background-image: none;
+        }
       }
     </style>
   </head>
   <body>
     <div id="app">
-      <div id="visitor-loading">
-        <div class="vl-spinner"></div>
-        <div class="vl-text">正在连接客服...</div>
+      <div id="visitor-loading" aria-hidden="true">
+        <div class="skel-header">
+          <div class="skel-logo"></div>
+          <div class="skel-title-group">
+            <div class="skel-title"></div>
+            <div class="skel-subtitle"></div>
+          </div>
+          <div class="skel-status-dot"></div>
+        </div>
+        <div class="skel-msgs">
+          <div class="skel-msg agent">
+            <div class="skel-avatar"></div>
+            <div class="skel-bubble medium"></div>
+          </div>
+          <div class="skel-msg user">
+            <div class="skel-bubble short"></div>
+          </div>
+          <div class="skel-msg agent">
+            <div class="skel-avatar"></div>
+            <div class="skel-bubble long"></div>
+          </div>
+          <div class="skel-msg user">
+            <div class="skel-bubble medium"></div>
+          </div>
+          <div class="skel-msg agent">
+            <div class="skel-avatar"></div>
+            <div class="skel-bubble short"></div>
+          </div>
+        </div>
+        <div class="skel-input-wrap">
+          <div class="skel-toolbar">
+            <div class="skel-tool"></div>
+            <div class="skel-tool"></div>
+            <div class="skel-tool"></div>
+          </div>
+          <div class="skel-input"></div>
+        </div>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>

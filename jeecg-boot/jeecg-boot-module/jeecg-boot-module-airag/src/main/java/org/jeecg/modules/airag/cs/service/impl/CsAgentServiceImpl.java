@@ -25,8 +25,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import jakarta.annotation.PostConstruct;
 
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 客服管理服务实现
@@ -64,6 +66,12 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
                     .set(CsAgent::getStatus, CsAgent.STATUS_OFFLINE)
                     .set(CsAgent::getCurrentSessions, 0));
             log.info("[CS-Agent] 服务启动，批量重置{}个客服为离线状态", count);
+        }
+        // 同步清空 Redis 在线 ZSET（ZSET 是运行期临时态，启动时全量重置）
+        try {
+            redisTemplate.delete(CsRedisKeys.REDIS_AGENT_ONLINE_ZSET);
+        } catch (Exception e) {
+            log.warn("[CS-Agent] 启动时清空在线 ZSET 失败（非致命）: {}", e.getMessage());
         }
     }
 
@@ -114,7 +122,9 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
                 .set(CsAgent::getStatus, CsAgent.STATUS_ONLINE)
                 .set(CsAgent::getLastOnlineTime, new Date()));
         log.info("[CS-Agent] 客服上线: agentId={}", agentId);
-        
+
+        addToOnlineZset(agentId);
+
         // ★ 广播客服状态变化
         broadcastAgentStatusChanged(agentId, CsAgent.STATUS_ONLINE, "在线");
 
@@ -142,7 +152,15 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
                 .set(CsAgent::getStatus, newStatus)
                 .set(CsAgent::getCurrentSessions, 0));
         log.info("[CS-Agent] 客服{}: agentId={}, triggerSource={}", statusText, agentId, triggerSource);
-        
+
+        // 隐身（manual）也算占坐席（与原 getOnlineAgents 行为一致：ne OFFLINE），
+        // 因此只在真正 OFFLINE 时才从 ZSET 移除；隐身仍续写心跳保持在 ZSET。
+        if (newStatus == CsAgent.STATUS_OFFLINE) {
+            removeFromOnlineZset(agentId);
+        } else {
+            addToOnlineZset(agentId);
+        }
+
         // ★ 广播客服状态变化
         broadcastAgentStatusChanged(agentId, newStatus, statusText);
 
@@ -159,7 +177,10 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
                 .eq(CsAgent::getId, agentId)
                 .set(CsAgent::getStatus, CsAgent.STATUS_BUSY));
         log.info("[CS-Agent] 客服设置忙碌: agentId={}", agentId);
-        
+
+        // 忙碌仍然算占坐席，保持在线 ZSET 中
+        addToOnlineZset(agentId);
+
         // ★ 广播客服状态变化
         broadcastAgentStatusChanged(agentId, CsAgent.STATUS_BUSY, "忙碌");
 
@@ -377,10 +398,86 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
 
     @Override
     public List<CsAgent> getOnlineAgents() {
-        // 查询所有非离线客服（在线/忙碌/隐身都算占坐席）
-        LambdaQueryWrapper<CsAgent> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.ne(CsAgent::getStatus, CsAgent.STATUS_OFFLINE);
-        return list(queryWrapper);
+        // Phase 3: 优先走 Redis ZSET 拿在线 agentId 集合，再 IN 查询拿详情；
+        // ZSET 不可用 / 为空时回落到原有"全表 ne OFFLINE"查询，保证首次部署平滑。
+        try {
+            List<String> ids = getOnlineAgentIdsFromZset();
+            if (!ids.isEmpty()) {
+                return list(new LambdaQueryWrapper<CsAgent>()
+                        .in(CsAgent::getId, ids)
+                        .ne(CsAgent::getStatus, CsAgent.STATUS_OFFLINE));
+            }
+        } catch (Exception e) {
+            log.warn("[CS-Agent] Redis ZSET 在线列表读取失败，回落 DB: {}", e.getMessage());
+        }
+        // 兜底：DB 全表查
+        return list(new LambdaQueryWrapper<CsAgent>()
+                .ne(CsAgent::getStatus, CsAgent.STATUS_OFFLINE));
+    }
+
+    @Override
+    public int countOnlineAgents() {
+        // Phase 3: ZCARD（先按 score 过期清理一遍）→ DB 兜底
+        try {
+            long now = System.currentTimeMillis();
+            // 清理过期心跳
+            redisTemplate.opsForZSet().removeRangeByScore(
+                    CsRedisKeys.REDIS_AGENT_ONLINE_ZSET, 0, now - CsRedisKeys.AGENT_ONLINE_TTL_MS);
+            Long size = redisTemplate.opsForZSet().zCard(CsRedisKeys.REDIS_AGENT_ONLINE_ZSET);
+            if (size != null && size > 0) {
+                return size.intValue();
+            }
+        } catch (Exception e) {
+            log.warn("[CS-Agent] Redis ZSET 计数失败，回落 DB: {}", e.getMessage());
+        }
+        return (int) count(new LambdaQueryWrapper<CsAgent>()
+                .ne(CsAgent::getStatus, CsAgent.STATUS_OFFLINE));
+    }
+
+    @Override
+    public void markAgentHeartbeat(String agentId) {
+        if (oConvertUtils.isEmpty(agentId)) {
+            return;
+        }
+        addToOnlineZset(agentId);
+    }
+
+    // ==================== Redis ZSET 辅助 ====================
+
+    /**
+     * 把 agentId 加入在线 ZSET，score 为当前时间戳（毫秒）。Redis 故障时静默吞异常，
+     * 不影响主流程（getOnlineAgents 会回落 DB）。
+     */
+    private void addToOnlineZset(String agentId) {
+        try {
+            redisTemplate.opsForZSet().add(
+                    CsRedisKeys.REDIS_AGENT_ONLINE_ZSET, agentId, System.currentTimeMillis());
+        } catch (Exception e) {
+            log.debug("[CS-Agent] Redis ZSET ZADD 失败（非致命）: agentId={}, err={}", agentId, e.getMessage());
+        }
+    }
+
+    private void removeFromOnlineZset(String agentId) {
+        try {
+            redisTemplate.opsForZSet().remove(CsRedisKeys.REDIS_AGENT_ONLINE_ZSET, agentId);
+        } catch (Exception e) {
+            log.debug("[CS-Agent] Redis ZSET ZREM 失败（非致命）: agentId={}, err={}", agentId, e.getMessage());
+        }
+    }
+
+    /**
+     * 从 ZSET 拉取最近 30s 内有过心跳/上线的 agentId 列表。
+     * 同时把超过 TTL 的成员清理掉，避免 ZSET 无限膨胀。
+     */
+    private List<String> getOnlineAgentIdsFromZset() {
+        long now = System.currentTimeMillis();
+        long minScore = now - CsRedisKeys.AGENT_ONLINE_TTL_MS;
+        // 顺手清理过期 member
+        redisTemplate.opsForZSet().removeRangeByScore(
+                CsRedisKeys.REDIS_AGENT_ONLINE_ZSET, 0, minScore);
+        Set<String> ids = redisTemplate.opsForZSet().rangeByScore(
+                CsRedisKeys.REDIS_AGENT_ONLINE_ZSET, minScore, Double.POSITIVE_INFINITY);
+        return ids == null ? new ArrayList<>() : new ArrayList<>(ids);
     }
 
 }
