@@ -1,0 +1,40 @@
+{
+  "compilerOptions": {
+    "target": "es2020",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "strict": false,
+    "noImplicitAny": false,
+    "strictNullChecks": false,
+    "strictFunctionTypes": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "forceConsistentCasingInFileNames": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "useDefineForClassFields": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "experimentalDecorators": true,
+    "jsx": "preserve",
+    "baseUrl": ".",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "types": ["vite/client", "node"],
+    "typeRoots": ["./node_modules/@types", "./types"],
+    "paths": {
+      "/@/*": ["src/*"],
+      "@/*": ["src/*"],
+      "/#/*": ["types/*"],
+      "#/*": ["types/*"]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.d.ts",
+    "src/**/*.tsx",
+    "src/**/*.vue",
+    "types/**/*.d.ts"
+  ],
+  "exclude": ["node_modules", "dist"]
+}
