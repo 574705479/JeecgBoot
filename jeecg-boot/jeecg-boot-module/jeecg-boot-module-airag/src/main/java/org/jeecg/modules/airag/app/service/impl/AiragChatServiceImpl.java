@@ -119,6 +119,8 @@ public class AiragChatServiceImpl implements IAiragChatService {
         if (oConvertUtils.isEmpty(chatConversation.getTitle())) {
             chatConversation.setTitle(userMessage.length() > 5 ? userMessage.substring(0, 5) : userMessage);
         }
+        // 捕获 HTTP 入口的访客上下文（IP/UA/deviceId/lang），SSE 异步线程通过 ChatConversation 透传给 cs_conversation
+        captureVisitorContextFromRequest(chatConversation);
         //update-begin---author:chenrui ---date:20251106  for：[issues/8545]新建AI应用的时候只能选择没有自定义参数的AI流程------------
         // 保存工作流入参配置（如果有）
         if (oConvertUtils.isObjectNotEmpty(chatSendParams.getFlowInputs())) {
@@ -1024,7 +1026,9 @@ public class AiragChatServiceImpl implements IAiragChatService {
                 chatMessageService.saveAiUserMessage(
                         chatConversation.getId(), appId, userId,
                         externalUserId, externalUserName,
-                        historyMessage.getContent(), imageUrls);
+                        historyMessage.getContent(), imageUrls,
+                        chatConversation.getVisitorIp(), chatConversation.getVisitorUserAgent(),
+                        chatConversation.getVisitorDeviceId(), chatConversation.getVisitorLang());
             } else if (AiragConsts.MESSAGE_ROLE_AI.equals(historyMessage.getRole())) {
                 // AI消息
                 chatMessageService.saveAiAssistantMessage(
@@ -1600,6 +1604,42 @@ public class AiragChatServiceImpl implements IAiragChatService {
             return null;
         }
         return null;
+    }
+
+    /**
+     * 在 HTTP 入口捕获访客上下文（IP/UA/deviceId/语言），存到 ChatConversation 的 transient 字段。
+     * SSE 异步线程后续通过 ChatConversation 透传到 cs_conversation 创建逻辑，避免「未知访客」。
+     */
+    private void captureVisitorContextFromRequest(ChatConversation chatConversation) {
+        if (chatConversation == null) {
+            return;
+        }
+        try {
+            HttpServletRequest req = SpringContextUtils.getHttpServletRequest();
+            if (req == null) {
+                return;
+            }
+            chatConversation.setVisitorIp(org.jeecg.modules.airag.cs.util.CsRequestUtil.getClientIp(req));
+            chatConversation.setVisitorUserAgent(req.getHeader("User-Agent"));
+            String deviceId = req.getHeader("X-Device-Id");
+            if (oConvertUtils.isEmpty(deviceId)) {
+                deviceId = req.getParameter("deviceId");
+            }
+            chatConversation.setVisitorDeviceId(deviceId);
+            String acceptLang = req.getHeader("Accept-Language");
+            if (oConvertUtils.isNotEmpty(acceptLang)) {
+                String first = acceptLang.split(",")[0].trim();
+                int semi = first.indexOf(';');
+                if (semi > 0) {
+                    first = first.substring(0, semi).trim();
+                }
+                if (oConvertUtils.isNotEmpty(first)) {
+                    chatConversation.setVisitorLang(first);
+                }
+            }
+        } catch (Exception ignored) {
+            // 异步线程或非 HTTP 上下文中调用属正常情况
+        }
     }
 
 

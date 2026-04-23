@@ -90,4 +90,30 @@ public class ChatConversation {
      * Redis缓存key（用于SSE回调线程中保存会话）
      */
     private String cacheKey;
+
+    // ==================== 访客上下文（仅内存使用，不持久化） ====================
+
+    /**
+     * 访客 IP（HTTP 入口捕获，供 SSE 异步线程透传给 cs_conversation）
+     */
+    @JsonIgnore
+    private transient String visitorIp;
+
+    /**
+     * 访客 User-Agent
+     */
+    @JsonIgnore
+    private transient String visitorUserAgent;
+
+    /**
+     * 访客设备指纹
+     */
+    @JsonIgnore
+    private transient String visitorDeviceId;
+
+    /**
+     * 访客浏览器首选语言
+     */
+    @JsonIgnore
+    private transient String visitorLang;
 }

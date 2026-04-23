@@ -39,6 +39,9 @@ public class CsWebSocketInterceptor implements HandshakeInterceptor {
     public static final String ATTR_CONVERSATION_ID = "conversationId";
     public static final String ATTR_TOKEN_EXPIRE_AT = "tokenExpireAt";
     public static final String ATTR_CLIENT_IP = "clientIp";
+    public static final String ATTR_USER_AGENT = "userAgent";
+    public static final String ATTR_DEVICE_ID = "deviceId";
+    public static final String ATTR_USER_LANG = "userLang";
 
     /** 用户类型：普通用户 */
     public static final String USER_TYPE_USER = "user";
@@ -63,7 +66,7 @@ public class CsWebSocketInterceptor implements HandshakeInterceptor {
         if (request instanceof ServletServerHttpRequest) {
             ServletServerHttpRequest servletRequest = (ServletServerHttpRequest) request;
             String clientIp = getClientIp(servletRequest);
-            
+
             // 获取请求参数
             String userId = servletRequest.getServletRequest().getParameter("userId");
             String userName = servletRequest.getServletRequest().getParameter("userName");
@@ -72,6 +75,14 @@ public class CsWebSocketInterceptor implements HandshakeInterceptor {
             String conversationId = servletRequest.getServletRequest().getParameter("conversationId");
             String visitorToken = servletRequest.getServletRequest().getParameter("visitorToken");
             String sessionToken = servletRequest.getServletRequest().getParameter("sessionToken");
+
+            // 访客上下文：UA / deviceId / 浏览器语言
+            String userAgent = servletRequest.getServletRequest().getHeader("User-Agent");
+            String deviceIdParam = servletRequest.getServletRequest().getParameter("deviceId");
+            if (oConvertUtils.isEmpty(deviceIdParam)) {
+                deviceIdParam = servletRequest.getServletRequest().getHeader("X-Device-Id");
+            }
+            String userLang = parsePreferredLang(servletRequest.getServletRequest().getHeader("Accept-Language"));
 
             // 判断用户类型
             String path = request.getURI().getPath();
@@ -163,7 +174,7 @@ public class CsWebSocketInterceptor implements HandshakeInterceptor {
                         log.warn("[CS-WebSocket] 握手失败：接入密钥无效");
                         return false;
                     }
-                    String deviceId = servletRequest.getServletRequest().getParameter("deviceId");
+                    String deviceId = deviceIdParam;
                     if (oConvertUtils.isNotEmpty(deviceId)) {
                         userId = deviceId;
                     }
@@ -197,6 +208,15 @@ public class CsWebSocketInterceptor implements HandshakeInterceptor {
             attributes.put(ATTR_APP_ID, appId);
             attributes.put(ATTR_CONVERSATION_ID, conversationId);
             attributes.put(ATTR_CLIENT_IP, clientIp);
+            if (oConvertUtils.isNotEmpty(userAgent)) {
+                attributes.put(ATTR_USER_AGENT, userAgent);
+            }
+            if (oConvertUtils.isNotEmpty(deviceIdParam)) {
+                attributes.put(ATTR_DEVICE_ID, deviceIdParam);
+            }
+            if (oConvertUtils.isNotEmpty(userLang)) {
+                attributes.put(ATTR_USER_LANG, userLang);
+            }
 
             log.info("[CS-WebSocket] 握手成功: userId={}, userType={}, appId={}", userId, userType, appId);
             return true;
@@ -212,5 +232,21 @@ public class CsWebSocketInterceptor implements HandshakeInterceptor {
 
     private String getClientIp(ServletServerHttpRequest request) {
         return CsRequestUtil.getClientIp(request);
+    }
+
+    /**
+     * 解析 Accept-Language 头取首选语言
+     * 例: "zh-CN,zh;q=0.9,en;q=0.8" -> "zh-CN"
+     */
+    private String parsePreferredLang(String acceptLanguage) {
+        if (oConvertUtils.isEmpty(acceptLanguage)) {
+            return null;
+        }
+        String first = acceptLanguage.split(",")[0].trim();
+        int semi = first.indexOf(';');
+        if (semi > 0) {
+            first = first.substring(0, semi).trim();
+        }
+        return oConvertUtils.isEmpty(first) ? null : first;
     }
 }

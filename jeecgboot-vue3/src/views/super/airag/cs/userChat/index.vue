@@ -2594,6 +2594,18 @@ function connectWebSocket() {
       authParams += `&key=${encodeURIComponent(appKey.value)}`;
     }
   }
+  // Token 模式下 userId 来自 token，与浏览器 deviceId 是两个值；这里始终把浏览器 deviceId
+  // 拼到 WS URL，让后端握手期能稳定捕获，避免 cs_conversation 出现「未知访客」。
+  if (!authParams.includes('deviceId=')) {
+    try {
+      const browserDeviceId = generateDeviceId();
+      if (browserDeviceId) {
+        authParams += `&deviceId=${encodeURIComponent(browserDeviceId)}`;
+      }
+    } catch (e) {
+      // 忽略生成失败，握手期仍可走原逻辑
+    }
+  }
   const wsUrl = `${wsBase}/ws/cs/user?userId=${userId.value}&conversationId=${conversationId.value}${authParams}`;
 
   console.log('[UserChat] 连接WebSocket:', wsUrl);

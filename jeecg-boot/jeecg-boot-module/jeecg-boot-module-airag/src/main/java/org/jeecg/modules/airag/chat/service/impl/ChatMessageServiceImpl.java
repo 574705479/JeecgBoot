@@ -68,6 +68,15 @@ public class ChatMessageServiceImpl implements IChatMessageService {
     public ChatMessage saveAiUserMessage(String conversationId, String appId, String userId,
                                           String externalUserId, String externalUserName,
                                           String content, List<String> images) {
+        return saveAiUserMessage(conversationId, appId, userId, externalUserId, externalUserName,
+                content, images, null, null, null, null);
+    }
+
+    @Override
+    public ChatMessage saveAiUserMessage(String conversationId, String appId, String userId,
+                                          String externalUserId, String externalUserName,
+                                          String content, List<String> images,
+                                          String userIp, String userAgent, String deviceId, String userLang) {
         ChatMessage message = new ChatMessage()
                 .setConversationId(conversationId)
                 .setAppId(appId)
@@ -80,32 +89,36 @@ public class ChatMessageServiceImpl implements IChatMessageService {
                 .setSenderName(oConvertUtils.isNotEmpty(externalUserName) ? externalUserName : "用户")
                 .setContent(content)
                 .setMsgType(ChatMessage.MSG_TYPE_TEXT);
-        
+
         // 处理图片
         if (images != null && !images.isEmpty()) {
             Map<String, Object> extra = new HashMap<>();
             extra.put("images", images);
             message.setExtra(extra);
         }
-        
+
         ChatMessage savedMessage = saveMessage(message);
-        
-        // ★ 自动同步到客服会话系统
-        syncToCsConversation(conversationId, appId, 
+
+        // ★ 自动同步到客服会话系统（携带访客上下文）
+        syncToCsConversation(conversationId, appId,
                 oConvertUtils.isNotEmpty(externalUserId) ? externalUserId : userId,
                 oConvertUtils.isNotEmpty(externalUserName) ? externalUserName : "访客",
-                content);
-        
+                content, userIp, userAgent, deviceId, userLang);
+
         return savedMessage;
     }
-    
+
     /**
      * 同步到客服会话系统
      * 用于在新架构中自动创建/更新客服会话记录
+     *
+     * <p>访客上下文 (userIp/userAgent/deviceId/userLang) 优先使用调用方传入的值；
+     * 当调用方未传入时（如直接同步 HTTP 请求），尝试从 RequestContextHolder 兜底获取。</p>
      */
-    private void syncToCsConversation(String conversationId, String appId, 
-                                       String visitorId, String visitorName, String content) {
-        log.info("[ChatMessage] 开始同步客服会话: conversationId={}, appId={}, visitorId={}", 
+    private void syncToCsConversation(String conversationId, String appId,
+                                       String visitorId, String visitorName, String content,
+                                       String userIp, String userAgent, String deviceId, String userLang) {
+        log.info("[ChatMessage] 开始同步客服会话: conversationId={}, appId={}, visitorId={}",
                 conversationId, appId, visitorId);
         try {
             if (csConversationService == null) {
@@ -116,8 +129,43 @@ public class ChatMessageServiceImpl implements IChatMessageService {
                 log.warn("[ChatMessage] conversationId 为空，无法同步");
                 return;
             }
-            // 确保会话存在 (如果不存在则创建)
-            csConversationService.getOrCreateConversation(conversationId, appId, visitorId, visitorName);
+
+            // RequestContextHolder 兜底：若未透传上下文且当前线程绑定了 HTTP 请求，则从请求中提取
+            if (oConvertUtils.isEmpty(userIp) && oConvertUtils.isEmpty(userAgent) && oConvertUtils.isEmpty(deviceId)) {
+                try {
+                    org.springframework.web.context.request.RequestAttributes ra =
+                            org.springframework.web.context.request.RequestContextHolder.getRequestAttributes();
+                    if (ra instanceof org.springframework.web.context.request.ServletRequestAttributes) {
+                        jakarta.servlet.http.HttpServletRequest req =
+                                ((org.springframework.web.context.request.ServletRequestAttributes) ra).getRequest();
+                        if (req != null) {
+                            userIp = org.jeecg.modules.airag.cs.util.CsRequestUtil.getClientIp(req);
+                            userAgent = req.getHeader("User-Agent");
+                            String h = req.getHeader("X-Device-Id");
+                            if (oConvertUtils.isNotEmpty(h)) {
+                                deviceId = h;
+                            }
+                            String acceptLang = req.getHeader("Accept-Language");
+                            if (oConvertUtils.isNotEmpty(acceptLang)) {
+                                String first = acceptLang.split(",")[0].trim();
+                                int semi = first.indexOf(';');
+                                if (semi > 0) {
+                                    first = first.substring(0, semi).trim();
+                                }
+                                if (oConvertUtils.isNotEmpty(first)) {
+                                    userLang = first;
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {
+                    // 异步线程无 RequestContext 是正常的
+                }
+            }
+
+            // 确保会话存在 (如果不存在则创建)，传入访客上下文避免 cs_conversation 出现「未知访客」
+            csConversationService.getOrCreateConversation(conversationId, appId, visitorId, visitorName,
+                    userIp, userAgent, deviceId, userLang);
             // 更新最后消息
             csConversationService.updateLastMessage(conversationId, content, 0);
             log.info("[ChatMessage] ★ 同步客服会话成功: conversationId={}", conversationId);

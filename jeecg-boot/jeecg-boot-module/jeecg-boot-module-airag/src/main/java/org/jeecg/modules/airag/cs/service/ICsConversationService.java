@@ -56,6 +56,25 @@ public interface ICsConversationService extends IService<CsConversation> {
     CsConversation getOrCreateConversation(String conversationId, String appId, String userId, String userName);
 
     /**
+     * 获取或创建会话 (用户发消息时调用) — 带访客上下文重载
+     *
+     * <p>本重载用于在 WebSocket、HTTP 兜底、RAG SSE 等场景下，将真实的访客 IP / UA / 设备码 /
+     * 浏览器语言透传到新建会话，避免「未知访客」工作台展示空白。</p>
+     *
+     * @param conversationId 会话ID
+     * @param appId          应用ID
+     * @param userId         用户ID
+     * @param userName       用户名称
+     * @param userIp         用户IP（可空）
+     * @param userAgent      User-Agent 字符串（可空）
+     * @param deviceId       设备指纹（可空）
+     * @param userLang       浏览器语言（可空）
+     * @return 会话
+     */
+    CsConversation getOrCreateConversation(String conversationId, String appId, String userId, String userName,
+                                           String userIp, String userAgent, String deviceId, String userLang);
+
+    /**
      * 获取会话
      * 
      * @param conversationId 会话ID

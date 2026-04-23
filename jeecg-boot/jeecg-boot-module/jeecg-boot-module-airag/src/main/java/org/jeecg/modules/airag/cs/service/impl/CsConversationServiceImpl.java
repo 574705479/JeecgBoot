@@ -97,6 +97,9 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
     public CsConversation createConversation(String appId, String userId, String userName, String source,
                                              String userIp, String userAgent, String deviceId, String userLang,
                                              String preferredAgentId, String landingPage, String referrerPage) {
+        // 监控：IP/UA/deviceId 全为空时打印告警，便于追溯漏网创建链路（同 userId 5 分钟限流）
+        warnIfMissingDeviceContext(userId, userIp, userAgent, deviceId);
+
         // 读取AI开关和对话分配配置
         boolean aiEnabled = isAiEnabled();
         boolean aiPrologueEnabled = isAiPrologueEnabled();
@@ -320,6 +323,44 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
     }
 
     /**
+     * 监控：当 IP / UA / deviceId 三项全空时，打印 WARN 日志便于追溯漏网链路。
+     * 同 userId（无 userId 时使用 "_anon"）5 分钟内最多打 1 次，避免日志爆炸。
+     */
+    private static final java.util.concurrent.ConcurrentHashMap<String, Long> MISSING_CTX_LOG_LIMITER =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long MISSING_CTX_LOG_INTERVAL_MS = 5 * 60 * 1000L;
+
+    private void warnIfMissingDeviceContext(String userId, String userIp, String userAgent, String deviceId) {
+        if (oConvertUtils.isNotEmpty(userIp) || oConvertUtils.isNotEmpty(userAgent) || oConvertUtils.isNotEmpty(deviceId)) {
+            return;
+        }
+        String key = oConvertUtils.isNotEmpty(userId) ? userId : "_anon";
+        long now = System.currentTimeMillis();
+        Long last = MISSING_CTX_LOG_LIMITER.get(key);
+        if (last != null && (now - last) < MISSING_CTX_LOG_INTERVAL_MS) {
+            return;
+        }
+        MISSING_CTX_LOG_LIMITER.put(key, now);
+        // 简易容量保护
+        if (MISSING_CTX_LOG_LIMITER.size() > 5000) {
+            MISSING_CTX_LOG_LIMITER.entrySet().removeIf(e -> (now - e.getValue()) > MISSING_CTX_LOG_INTERVAL_MS);
+        }
+
+        StringBuilder stack = new StringBuilder();
+        StackTraceElement[] trace = Thread.currentThread().getStackTrace();
+        int printed = 0;
+        for (StackTraceElement el : trace) {
+            String cls = el.getClassName();
+            if (cls.startsWith("java.") || cls.startsWith("sun.") || cls.contains("CsConversationServiceImpl")) {
+                continue;
+            }
+            stack.append(" <- ").append(cls).append('.').append(el.getMethodName()).append(':').append(el.getLineNumber());
+            if (++printed >= 3) break;
+        }
+        log.warn("[CS-Conversation] 创建会话时设备上下文全空 (IP/UA/deviceId 均为空), userId={}, 调用栈摘要:{}", key, stack);
+    }
+
+    /**
      * 根据地理位置信息、IP和设备码生成默认用户名
      * 格式: "省份·城市 (IP) #设备码后4位"
      * 示例: "广东·深圳 (120.24.35.12) #a3f2"、"北京 (10.0.0.1) #b7e1"、"访客 (127.0.0.1) #f1a8"
@@ -503,24 +544,32 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
     @Override
     @Transactional(rollbackFor = Exception.class)
     public CsConversation getOrCreateConversation(String conversationId, String appId, String userId, String userName) {
+        return getOrCreateConversation(conversationId, appId, userId, userName, null, null, null, null);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public CsConversation getOrCreateConversation(String conversationId, String appId, String userId, String userName,
+                                                  String userIp, String userAgent, String deviceId, String userLang) {
         // 如果指定了conversationId，先尝试查找
         if (oConvertUtils.isNotEmpty(conversationId)) {
             CsConversation existing = getById(conversationId);
             if (existing != null) {
                 return existing;
             }
-            
+
             // 不存在则通过createConversation创建（自动分配）
             // 注意：指定ID的场景已不常见，走统一创建逻辑
-            return createConversation(appId, userId, userName, null, null, null, null, null, null, null, null);
+            return createConversation(appId, userId, userName, null,
+                    userIp, userAgent, deviceId, userLang, null, null, null);
         }
-        
+
         // 没有指定ID，查找用户的活跃会话
         CsConversation active = getActiveConversation(userId, appId);
         if (active != null) {
             return active;
         }
-        
+
         // 使用 Redis 分布式锁防止并发创建重复会话
         String lockKey = "cs:lock:create_conv:" + userId + ":" + appId;
         Boolean locked = redisTemplate.opsForValue().setIfAbsent(lockKey, "1", Duration.ofSeconds(10));
@@ -539,7 +588,8 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             if (active != null) {
                 return active;
             }
-            return createConversation(appId, userId, userName, null, null, null, null, null, null, null, null);
+            return createConversation(appId, userId, userName, null,
+                    userIp, userAgent, deviceId, userLang, null, null, null);
         } finally {
             redisTemplate.delete(lockKey);
         }

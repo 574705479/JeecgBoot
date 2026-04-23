@@ -41,6 +41,16 @@ public interface ICsMessageService {
                               Integer msgType, String extra);
 
     /**
+     * 用户发送消息（带附件 + 访客上下文）
+     *
+     * <p>用于在 WebSocket / HTTP 兜底入口拿到真实 IP/UA/deviceId/userLang 时透传给会话创建逻辑，
+     * 避免「未知访客」工作台展示空白。</p>
+     */
+    CsMessage sendUserMessage(String conversationId, String userId, String userName, String content,
+                              Integer msgType, String extra,
+                              String userIp, String userAgent, String deviceId, String userLang);
+
+    /**
      * 用户发送消息（仅保存+推送，不触发AI回复）
      * 用于FAQ等场景，由预设答案代替AI回复
      *
@@ -51,6 +61,12 @@ public interface ICsMessageService {
      * @return 用户消息
      */
     CsMessage sendUserMessageRaw(String conversationId, String userId, String userName, String content);
+
+    /**
+     * 用户发送消息 Raw（带访客上下文）
+     */
+    CsMessage sendUserMessageRaw(String conversationId, String userId, String userName, String content,
+                                 String userIp, String userAgent, String deviceId, String userLang);
 
     /**
      * 客服发送消息

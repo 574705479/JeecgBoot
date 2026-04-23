@@ -28,6 +28,15 @@ public interface IChatMessageService {
                                    String content, List<String> images);
 
     /**
+     * 保存AI用户消息（带访客上下文）— 用于在 RAG / SSE 异步链路中透传 IP/UA/deviceId/userLang，
+     * 避免 cs_conversation 因「未知访客」而展示空白。
+     */
+    ChatMessage saveAiUserMessage(String conversationId, String appId, String userId,
+                                   String externalUserId, String externalUserName,
+                                   String content, List<String> images,
+                                   String userIp, String userAgent, String deviceId, String userLang);
+
+    /**
      * 保存AI回复消息
      */
     ChatMessage saveAiAssistantMessage(String conversationId, String appId, 

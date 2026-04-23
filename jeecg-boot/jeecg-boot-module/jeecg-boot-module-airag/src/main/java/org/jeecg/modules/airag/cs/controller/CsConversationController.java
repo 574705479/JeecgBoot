@@ -7,8 +7,8 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
 import org.jeecg.common.api.vo.Result;
 import org.jeecg.common.system.base.controller.JeecgController;
-import org.jeecg.common.util.IpUtils;
 import org.jeecg.common.util.oConvertUtils;
+import org.jeecg.modules.airag.cs.util.CsRequestUtil;
 import org.jeecg.modules.airag.cs.entity.CsAgent;
 import org.jeecg.modules.airag.cs.entity.CsCollaborator;
 import org.jeecg.modules.airag.cs.entity.CsConversation;
@@ -117,8 +117,8 @@ public class CsConversationController extends JeecgController<CsConversation, IC
             }
         }
 
-        // 获取用户IP和User-Agent
-        String userIp = IpUtils.getIpAddr(request);
+        // 获取用户IP和User-Agent（统一使用 CsRequestUtil 以正确识别 Nginx X-Real-IP / X-Forwarded-For）
+        String userIp = CsRequestUtil.getClientIp(request);
         String userAgent = request.getHeader("User-Agent");
 
         // 解析浏览器语言（优先前端传递的lang，其次Accept-Language头）
@@ -219,8 +219,17 @@ public class CsConversationController extends JeecgController<CsConversation, IC
         // 注意：不要在 service.getOrCreateConversation 内接入，避免 sendUserMessage 链路误触发。
         boolean willReuse = oConvertUtils.isEmpty(conversationId)
                 && conversationService.getActiveConversation(userId, appId) != null;
+
+        // 兜底：若新建会话需要落库，把 HTTP 请求里的 IP/UA/deviceId/lang 透传给 service，
+        // 避免出现「未知访客」（IP/浏览器/设备码全空）。
+        String userIp = CsRequestUtil.getClientIp(request);
+        String userAgent = request.getHeader("User-Agent");
+        String deviceId = visitorTokenService.extractDeviceId(request);
+        String userLang = parsePreferredLang(request.getHeader("Accept-Language"));
+
         CsConversation conversation = conversationService.getOrCreateConversation(
-                conversationId, appId, userId, userName);
+                conversationId, appId, userId, userName,
+                userIp, userAgent, deviceId, userLang);
         if (willReuse) {
             try {
                 visitorService.touchVisitor(appId, userId, userName, null, false);
@@ -274,6 +283,22 @@ public class CsConversationController extends JeecgController<CsConversation, IC
         }
         encryptConversationFields(conversation);
         return Result.OK(conversation);
+    }
+
+    /**
+     * 解析 Accept-Language 头取首选语言
+     * 例: "zh-CN,zh;q=0.9,en;q=0.8" -> "zh-CN"
+     */
+    private String parsePreferredLang(String acceptLanguage) {
+        if (acceptLanguage == null || acceptLanguage.isEmpty()) {
+            return null;
+        }
+        String first = acceptLanguage.split(",")[0].trim();
+        int semi = first.indexOf(';');
+        if (semi > 0) {
+            first = first.substring(0, semi).trim();
+        }
+        return first.isEmpty() ? null : first;
     }
 
     private CsVisitorTokenPayload resolveVisitorPayload(HttpServletRequest request) {

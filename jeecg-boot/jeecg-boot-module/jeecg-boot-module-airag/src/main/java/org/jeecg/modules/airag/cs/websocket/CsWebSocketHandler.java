@@ -258,7 +258,7 @@ public class CsWebSocketHandler implements WebSocketHandler {
                     break;
 
                 case CsWebSocketMessage.TYPE_MESSAGE:
-                    handleSendMessage(json, userId, userType);
+                    handleSendMessage(session, json, userId, userType);
                     break;
 
                 case CsWebSocketMessage.TYPE_READ:
@@ -319,7 +319,7 @@ public class CsWebSocketHandler implements WebSocketHandler {
     /**
      * 处理发送消息
      */
-    private void handleSendMessage(JSONObject json, String userId, String userType) {
+    private void handleSendMessage(WebSocketSession session, JSONObject json, String userId, String userType) {
         String conversationId = json.getString("conversationId");
         String content = csCryptoUtil.decryptTransport(json.getString("content"));
         String userName = json.getString("userName");
@@ -344,7 +344,13 @@ public class CsWebSocketHandler implements WebSocketHandler {
                     return;
                 }
             }
-            messageService.sendUserMessage(conversationId, userId, userName, content, msgType, extra);
+            // 携带握手期捕获的访客上下文，避免新建会话时 IP/UA/设备码全空
+            String userIp = sessionManager.getClientIp(session);
+            String userAgent = sessionManager.getUserAgent(session);
+            String deviceId = sessionManager.getDeviceId(session);
+            String userLang = sessionManager.getUserLang(session);
+            messageService.sendUserMessage(conversationId, userId, userName, content, msgType, extra,
+                    userIp, userAgent, deviceId, userLang);
         } else {
             // 客服发送消息
             var agent = agentService.getById(userId);

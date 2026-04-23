@@ -129,40 +129,48 @@ public class CsMessageServiceImpl implements ICsMessageService {
 
     @Override
     public CsMessage sendUserMessage(String conversationId, String userId, String userName, String content) {
+        return sendUserMessage(conversationId, userId, userName, content, null, null, null, null);
+    }
+
+    /**
+     * 用户发送消息（4参原始版的访客上下文重载）
+     */
+    private CsMessage sendUserMessage(String conversationId, String userId, String userName, String content,
+                                      String userIp, String userAgent, String deviceId, String userLang) {
         log.info("[CS-Message] 用户发送消息: conversationId={}, userId={}", conversationId, userId);
-        
+
         // 确保会话存在
         CsConversation conversation = conversationService.getOrCreateConversation(
-                conversationId, null, userId, userName);
-        
+                conversationId, null, userId, userName, userIp, userAgent, deviceId, userLang);
+
         // ★ 诊断日志：检查会话状态
-        log.info("[CS-Message] 会话状态: conversationId={}, status={}, ownerAgentId={}, replyMode={}", 
-                conversationId, 
-                conversation.getStatus(), 
-                conversation.getOwnerAgentId(), 
+        log.info("[CS-Message] 会话状态: conversationId={}, status={}, ownerAgentId={}, replyMode={}",
+                conversationId,
+                conversation.getStatus(),
+                conversation.getOwnerAgentId(),
                 conversation.getReplyMode());
-        
+
         // 创建用户消息
         CsMessage userMessage = CsMessage.createUserMessage(conversationId, userId, userName, content);
-        
+
         // 保存到MongoDB
         saveToMongo(userMessage);
-        
+
         // 更新会话最后消息
         conversationService.updateLastMessage(conversationId, content, 0);
-        
+
         // 重置超时提醒标记（用户活跃，取消超时倒计时）
         conversationService.resetTimeoutWarning(conversationId);
-        
+
         // 标记访客发消息时间（用于客服超时未回复精确判断）
         conversationService.updateVisitorLastMsgTime(conversationId);
-        
+
         // 推送给所有相关客服
         pushToAgents(conversation, userMessage);
-        
+
         // 增加客服未读数
         conversationService.incrementUnread(conversationId);
-        
+
         // FAQ关键词匹配（仅未分配会话生效，已有客服接入则跳过）
         if (conversation.getStatus() == CsConversation.STATUS_UNASSIGNED) {
             FaqMatchResult faqResult = tryFaqKeywordMatch(conversationId, content);
@@ -174,37 +182,43 @@ public class CsMessageServiceImpl implements ICsMessageService {
                 return userMessage;
             }
         }
-        
+
         // 根据回复模式处理
-        int replyMode = conversation.getReplyMode() != null ? 
+        int replyMode = conversation.getReplyMode() != null ?
                 conversation.getReplyMode() : CsConversation.REPLY_MODE_AI_AUTO;
-        
+
         switch (replyMode) {
             case CsConversation.REPLY_MODE_AI_AUTO:
                 // AI自动模式：生成并发送AI回复
                 generateAndSendAiReply(conversation, content);
                 break;
-                
+
             case CsConversation.REPLY_MODE_AI_ASSIST:
                 // AI辅助模式：流式生成建议推送给客服（使用客服AI建议应用，支持知识库）
                 generateAiSuggestionStream(conversation, content, null);
                 break;
-                
+
             case CsConversation.REPLY_MODE_MANUAL:
                 // 手动模式：不做任何处理，等待客服回复
                 break;
         }
-        
+
         return userMessage;
     }
 
     @Override
     public CsMessage sendUserMessageRaw(String conversationId, String userId, String userName, String content) {
+        return sendUserMessageRaw(conversationId, userId, userName, content, null, null, null, null);
+    }
+
+    @Override
+    public CsMessage sendUserMessageRaw(String conversationId, String userId, String userName, String content,
+                                        String userIp, String userAgent, String deviceId, String userLang) {
         log.info("[CS-Message] 用户发送消息(Raw，不触发AI): conversationId={}, userId={}", conversationId, userId);
 
         // 确保会话存在
         CsConversation conversation = conversationService.getOrCreateConversation(
-                conversationId, null, userId, userName);
+                conversationId, null, userId, userName, userIp, userAgent, deviceId, userLang);
 
         // 创建用户消息
         CsMessage userMessage = CsMessage.createUserMessage(conversationId, userId, userName, content);
@@ -237,11 +251,19 @@ public class CsMessageServiceImpl implements ICsMessageService {
     @Override
     public CsMessage sendUserMessage(String conversationId, String userId, String userName, String content,
                                      Integer msgType, String extra) {
+        return sendUserMessage(conversationId, userId, userName, content, msgType, extra,
+                null, null, null, null);
+    }
+
+    @Override
+    public CsMessage sendUserMessage(String conversationId, String userId, String userName, String content,
+                                     Integer msgType, String extra,
+                                     String userIp, String userAgent, String deviceId, String userLang) {
         log.info("[CS-Message] 用户发送消息(含附件): conversationId={}, userId={}, msgType={}", conversationId, userId, msgType);
 
         // 确保会话存在
         CsConversation conversation = conversationService.getOrCreateConversation(
-                conversationId, null, userId, userName);
+                conversationId, null, userId, userName, userIp, userAgent, deviceId, userLang);
 
         // 创建用户消息，在保存之前就设置好 msgType 和 extra，避免二次保存导致重复
         CsMessage userMessage = CsMessage.createUserMessage(conversationId, userId, userName, content);

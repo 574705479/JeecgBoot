@@ -355,6 +355,27 @@ public class CsWebSocketSessionManager {
     }
 
     /**
+     * 获取握手期 User-Agent
+     */
+    public String getUserAgent(WebSocketSession session) {
+        return (String) session.getAttributes().get(CsWebSocketInterceptor.ATTR_USER_AGENT);
+    }
+
+    /**
+     * 获取握手期设备指纹（deviceId）
+     */
+    public String getDeviceId(WebSocketSession session) {
+        return (String) session.getAttributes().get(CsWebSocketInterceptor.ATTR_DEVICE_ID);
+    }
+
+    /**
+     * 获取握手期浏览器首选语言
+     */
+    public String getUserLang(WebSocketSession session) {
+        return (String) session.getAttributes().get(CsWebSocketInterceptor.ATTR_USER_LANG);
+    }
+
+    /**
      * 向匹配IP的所有在线访客发送消息并关闭连接
      * 支持精确IP和CIDR段匹配
      *

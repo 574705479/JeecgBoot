@@ -312,7 +312,9 @@ public class CsMessageController {
 
         CsMessage message;
         if ("user".equals(senderType)) {
-            message = messageService.sendUserMessage(conversationId, senderId, senderName, content, msgType, extra);
+            String[] ctx = extractVisitorContext(request);
+            message = messageService.sendUserMessage(conversationId, senderId, senderName, content, msgType, extra,
+                    ctx[0], ctx[1], ctx[2], ctx[3]);
         } else {
             message = messageService.sendAgentMessage(conversationId, senderId, senderName, content, msgType, extra);
         }
@@ -420,7 +422,9 @@ public class CsMessageController {
                 if (conversation != null) {
                     String userId = conversation.getUserId();
                     String userName = conversation.getUserName();
-                    messageService.sendUserMessageRaw(conversationId, userId, userName, question);
+                    String[] ctx = extractVisitorContext(request);
+                    messageService.sendUserMessageRaw(conversationId, userId, userName, question,
+                            ctx[0], ctx[1], ctx[2], ctx[3]);
                 }
             }
 
@@ -550,7 +554,9 @@ public class CsMessageController {
             }
         }
 
-        CsMessage message = messageService.sendUserMessage(conversationId, userId, userName, content, msgType, extra);
+        String[] ctx = extractVisitorContext(request);
+        CsMessage message = messageService.sendUserMessage(conversationId, userId, userName, content, msgType, extra,
+                ctx[0], ctx[1], ctx[2], ctx[3]);
         return Result.OK(encryptMessageForResponse(message));
     }
 
@@ -853,6 +859,29 @@ public class CsMessageController {
         for (CsMessage msg : messages) {
             msg.setContent(csCryptoUtil.encryptTransport(msg.getContent()));
         }
+    }
+
+    /**
+     * 从 HTTP 请求抓取访客上下文 [userIp, userAgent, deviceId, userLang]，
+     * 用于在 sendUserMessage 创建新会话时透传给 service，避免「未知访客」。
+     */
+    private String[] extractVisitorContext(HttpServletRequest request) {
+        String userIp = org.jeecg.modules.airag.cs.util.CsRequestUtil.getClientIp(request);
+        String userAgent = request.getHeader("User-Agent");
+        String deviceId = visitorTokenService.extractDeviceId(request);
+        String userLang = null;
+        String acceptLang = request.getHeader("Accept-Language");
+        if (oConvertUtils.isNotEmpty(acceptLang)) {
+            String first = acceptLang.split(",")[0].trim();
+            int semi = first.indexOf(';');
+            if (semi > 0) {
+                first = first.substring(0, semi).trim();
+            }
+            if (oConvertUtils.isNotEmpty(first)) {
+                userLang = first;
+            }
+        }
+        return new String[]{userIp, userAgent, deviceId, userLang};
     }
 
     private CsVisitorTokenPayload resolveVisitorPayload(HttpServletRequest request) {
