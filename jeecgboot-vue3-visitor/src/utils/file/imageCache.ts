@@ -155,6 +155,37 @@ interface CacheEntry {
   key: string;
   blob: Blob;
   timestamp: number;
+  // 已知图片尺寸（仅 image，video/audio 留空）
+  // 用于"无感刷新"：v-cse-html 渲染前 setAttribute width/height，
+  // 让占位框就是最终尺寸，消除富文本 unsized image 引起的 CLS。
+  // 老缓存可能没有这两个字段（向后兼容），首次访问时缺尺寸属正常，下次访问有。
+  w?: number;
+  h?: number;
+}
+
+const dimsCache = new Map<string, { w: number; h: number }>();
+
+function probeImageDims(blobUrl: string): Promise<{ w: number; h: number } | null> {
+  return new Promise((resolve) => {
+    if (typeof Image === 'undefined') return resolve(null);
+    const img = new Image();
+    let done = false;
+    const finish = (r: { w: number; h: number } | null) => {
+      if (done) return;
+      done = true;
+      img.onload = null;
+      img.onerror = null;
+      resolve(r);
+    };
+    img.onload = () => finish({ w: img.naturalWidth, h: img.naturalHeight });
+    img.onerror = () => finish(null);
+    try {
+      img.src = blobUrl;
+    } catch {
+      finish(null);
+    }
+    setTimeout(() => finish(null), 5000);
+  });
 }
 
 function idbGet(key: string, store: string = STORE_NAME): Promise<CacheEntry | undefined> {
@@ -405,6 +436,146 @@ export function getImageBlobIfReady(url: string): string | null {
   return null;
 }
 
+/**
+ * 首屏阻塞预热（无感刷新关键）：批量从 IDB 把已有缓存 hydrate 到 memoryCache + cseReactiveMap，
+ * 这样 v-for 第一帧渲染时 withImageCache(url) 同步命中内存返回 blob URL，
+ * 避免"空 src / TRANSPARENT_PNG → 真图"的肉眼可见闪烁。
+ *
+ * 性能：一次 IDB readonly transaction 并行 get N 个 key，常见 < 30ms（取决于 blob 大小）。
+ *
+ * @param urls 需要预热的图片 URL 列表（cse:// 或 http(s)，自动跳过不可缓存的、已在内存的）
+ * @returns 命中数量
+ */
+export async function warmupImagesFromIdb(urls: string[]): Promise<number> {
+  // 兜底：先确保 init 完成（initImageCache 已 hydrate memory + dimsCache + cseReactiveMap），
+  // 否则下面 has(k) 早返回会跳过 dims hydrate，导致 v-cse-html 同步读不到尺寸。
+  await whenImageCacheReady();
+  const seen = new Set<string>();
+  const targets: { key: string }[] = [];
+  for (const u of urls) {
+    if (!u || !isCacheableUrl(u)) continue;
+    const k = buildKey(u);
+    if (memoryCache.has(k) || cseReactiveMap.has(k)) continue;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    targets.push({ key: k });
+    if (isCseUrl(u)) {
+      const tk = buildThumbKey(u);
+      if (!memoryCache.has(tk) && !cseReactiveMap.has(tk) && !seen.has(tk)) {
+        seen.add(tk);
+        targets.push({ key: tk });
+      }
+    }
+  }
+  if (targets.length === 0) return 0;
+
+  let hits = 0;
+  const upgradeBacklog: { key: string; blob: Blob; blobUrl: string }[] = [];
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const store = tx.objectStore(STORE_NAME);
+    await Promise.all(
+      targets.map(
+        (t) =>
+          new Promise<void>((resolve) => {
+            const req = store.get(t.key);
+            req.onsuccess = () => {
+              const v = req.result as CacheEntry | undefined;
+              if (v && Date.now() - v.timestamp <= TTL_MS) {
+                try {
+                  const blobUrl = URL.createObjectURL(v.blob);
+                  setMemoryCache(t.key, blobUrl);
+                  cseReactiveMap.set(t.key, blobUrl);
+                  if (typeof v.w === 'number' && typeof v.h === 'number' && v.w > 0 && v.h > 0) {
+                    dimsCache.set(t.key, { w: v.w, h: v.h });
+                  } else {
+                    // 老 entry：排队补探测
+                    upgradeBacklog.push({ key: t.key, blob: v.blob, blobUrl });
+                  }
+                  hits++;
+                } catch {}
+              }
+              resolve();
+            };
+            req.onerror = () => resolve();
+          }),
+      ),
+    );
+  } catch {}
+
+  if (upgradeBacklog.length > 0) {
+    Promise.resolve().then(async () => {
+      for (const item of upgradeBacklog) {
+        try {
+          const dims = await probeImageDims(item.blobUrl);
+          if (dims && dims.w > 0 && dims.h > 0) {
+            dimsCache.set(item.key, dims);
+            await idbPut({ key: item.key, blob: item.blob, timestamp: Date.now(), w: dims.w, h: dims.h });
+          }
+        } catch {}
+      }
+    });
+  }
+  return hits;
+}
+
+/**
+ * 同步获取已预热的图片真实尺寸（仅供 v-cse-html 富文本图片使用）。
+ * 命中 → 渲染时 setAttribute width/height 占位，消除 layout shift。
+ * 未命中 → 老缓存或首次访问，本帧 unsized，下次访问就有。
+ */
+export function getImageDimsIfReady(url: string): { w: number; h: number } | null {
+  if (!url || !isCseUrl(url)) return null;
+  const key = buildKey(url);
+  return dimsCache.get(key) || null;
+}
+
+/**
+ * 视频/音频版预热：与 warmupImagesFromIdb 同构，但走 STORE_NAME_MEDIA + mediaReactive。
+ * v-for 首帧 withMediaCache(url) 同步命中 mediaReactive，<video src> 直接就绪不闪。
+ */
+export async function warmupMediaFromIdb(urls: string[]): Promise<number> {
+  await whenImageCacheReady();
+  const seen = new Set<string>();
+  const targets: { key: string; url: string }[] = [];
+  for (const u of urls) {
+    if (!u || !isCseUrl(u)) continue;
+    if (mediaReactive.has(u) || seen.has(u)) continue;
+    seen.add(u);
+    targets.push({ key: buildMediaKey(u), url: u });
+  }
+  if (targets.length === 0) return 0;
+
+  let hits = 0;
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_NAME_MEDIA, 'readonly');
+    const store = tx.objectStore(STORE_NAME_MEDIA);
+    await Promise.all(
+      targets.map(
+        (t) =>
+          new Promise<void>((resolve) => {
+            const req = store.get(t.key);
+            req.onsuccess = () => {
+              const v = req.result as CacheEntry | undefined;
+              if (v && Date.now() - v.timestamp <= TTL_MS) {
+                try {
+                  const blobUrl = URL.createObjectURL(v.blob);
+                  mediaReactive.set(t.url, blobUrl);
+                  hits++;
+                } catch {}
+              }
+              resolve();
+            };
+            req.onerror = () => resolve();
+          }),
+      ),
+    );
+  } catch {}
+  return hits;
+}
+
 const TRANSPARENT_PNG =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 
@@ -453,10 +624,19 @@ export function getImageFailureState(canonicalUrl: string): { failed: boolean; e
   return { failed: t.failed || o.failed, exhausted: t.exhausted || o.exhausted };
 }
 
-export async function initImageCache(): Promise<void> {
+// 全局 init promise：保证图片缓存模块加载时即开始 hydrate IDB → memory（含 dims），
+// 后续 warmup / v-cse-html / withImageCache 都基于已 hydrate 的状态运行，不再出现
+// "ChatMain 数据回来时 init 还没跑完导致 dimsCache 空" 的竞态。
+let _imageCacheInitPromise: Promise<void> | null = null;
+export function whenImageCacheReady(): Promise<void> {
+  return _imageCacheInitPromise || Promise.resolve();
+}
+
+async function _doInitImageCache(): Promise<void> {
   try {
     const entries = await idbGetAll();
     const now = Date.now();
+    const upgradeBacklog: { key: string; blob: Blob; blobUrl: string }[] = [];
     for (const entry of entries) {
       if (now - entry.timestamp > TTL_MS) {
         idbDelete(entry.key).catch(() => {});
@@ -465,11 +645,51 @@ export async function initImageCache(): Promise<void> {
       try {
         const blobUrl = URL.createObjectURL(entry.blob);
         setMemoryCache(entry.key, blobUrl);
+        // 富文本图片需要 cseReactiveMap 命中才能被 v-cse-html 同步识别
+        cseReactiveMap.set(entry.key, blobUrl);
+        // dims hydrate：v-cse-html 渲染时同步 setAttribute aspect-ratio，
+        // 消除富文本 unsized image 加载后 0→自然高度撑开造成的 CLS。
+        if (typeof entry.w === 'number' && typeof entry.h === 'number' && entry.w > 0 && entry.h > 0) {
+          dimsCache.set(entry.key, { w: entry.w, h: entry.h });
+        } else {
+          // 老 entry 没 w/h：排队后台探测 + 回写 IDB（下次起就有 dims）
+          upgradeBacklog.push({ key: entry.key, blob: entry.blob, blobUrl });
+        }
       } catch {}
     }
     await checkStorageQuota();
+    // 后台升级老 entry 的 dims，不阻塞 init 返回。当前帧 unsized image 仍可能引起一次 CLS，下次刷新起即消除。
+    if (upgradeBacklog.length > 0) {
+      Promise.resolve().then(async () => {
+        for (const item of upgradeBacklog) {
+          try {
+            const dims = await probeImageDims(item.blobUrl);
+            if (dims && dims.w > 0 && dims.h > 0) {
+              dimsCache.set(item.key, dims);
+              await idbPut({ key: item.key, blob: item.blob, timestamp: Date.now(), w: dims.w, h: dims.h });
+            }
+          } catch {}
+        }
+      });
+    }
   } catch {}
 }
+
+export function initImageCache(): Promise<void> {
+  if (!_imageCacheInitPromise) {
+    _imageCacheInitPromise = _doInitImageCache();
+  }
+  return _imageCacheInitPromise;
+}
+
+// 模块加载时立即触发一次 init（幂等、同步发起）：
+// 越早发起 IDB readonly tx，dimsCache / cseReactiveMap 越早 hydrate 完，
+// v-cse-html 第一帧 / withImageCache 同步命中率越高，CLS / 闪烁越接近 0。
+try {
+  if (typeof window !== 'undefined') {
+    initImageCache().catch(() => {});
+  }
+} catch {}
 
 export async function checkStorageQuota(): Promise<void> {
   try {
@@ -529,6 +749,10 @@ async function loadAndCache(url: string, key: string, opts: { thumb?: boolean } 
         return TRANSPARENT_PNG;
       }
       setMemoryCache(key, blobUrl);
+      // 老 entry 已有 w/h 时直接 hydrate 到 dimsCache（v-cse-html 同步可读）
+      if (typeof e.w === 'number' && typeof e.h === 'number' && e.w > 0 && e.h > 0) {
+        dimsCache.set(key, { w: e.w, h: e.h });
+      }
       return blobUrl;
     }
   } catch {}
@@ -594,7 +818,27 @@ async function loadAndCache(url: string, key: string, opts: { thumb?: boolean } 
   }
   clearFailure(key);
   setMemoryCache(key, blobUrl);
-  idbPut({ key, blob, timestamp: Date.now() }).then(() => evictIdbIfNeeded()).catch(() => {});
+  // 异步探测尺寸 → 写入 dims 内存 + IDB（带 w/h）。
+  // 不阻塞 blob URL 的返回（图片立即显示），下次刷新 v-cse-html 就能预占尺寸消除 CLS。
+  const blobRef = blob;
+  probeImageDims(blobUrl)
+    .then((dims) => {
+      if (dims && dims.w > 0 && dims.h > 0) {
+        dimsCache.set(key, dims);
+        idbPut({ key, blob: blobRef, timestamp: Date.now(), w: dims.w, h: dims.h })
+          .then(() => evictIdbIfNeeded())
+          .catch(() => {});
+      } else {
+        idbPut({ key, blob: blobRef, timestamp: Date.now() })
+          .then(() => evictIdbIfNeeded())
+          .catch(() => {});
+      }
+    })
+    .catch(() => {
+      idbPut({ key, blob: blobRef, timestamp: Date.now() })
+        .then(() => evictIdbIfNeeded())
+        .catch(() => {});
+    });
   return blobUrl;
 }
 

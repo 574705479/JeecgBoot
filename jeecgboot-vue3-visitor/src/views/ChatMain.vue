@@ -625,6 +625,8 @@ import {
   getMediaFailureState,
   retryImage,
   getImageFailureState,
+  warmupImagesFromIdb,
+  warmupMediaFromIdb,
 } from '/@/utils/file/imageCache';
 import { compressImage } from '/@/utils/file/compressImage';
 const FileChip = defineAsyncComponent(() => import('/@/components/FileChip.vue'));
@@ -637,7 +639,7 @@ import { resolveBrandPublicUrl } from '/@/utils/brand';
 // 让公共 CSE 解密管线（cseDecrypt.ts / imageCache）也能在访客模式下正确派生 IKM 与注入 X-Visitor-Session
 import { setVisitorCredential, clearVisitorCredential, setDeviceCredential, clearDeviceCredential } from '/@/utils/cse/cseAuthContext';
 import { clearDekCache } from '/@/utils/cse/cseDecrypt';
-import { vCseHtml } from '/@/utils/cs/cseHtmlImg';
+import { vCseHtml, preinjectCseImageDimsInHtml } from '/@/utils/cs/cseHtmlImg';
 import { getBrandSetting, DEFAULT_BRAND } from '/@/settings/brandSetting';
 import { DEFAULT_LOGO_URL, DEFAULT_USER_AVATAR_URL } from '/@/utils/asset';
 
@@ -1603,6 +1605,51 @@ function applyMessageBoardConfigJson(json?: string) {
  * @param opts.commitConversation true 时写 localStorage（fresh 路径，userId 已就绪）；
  *                                false 时跳过写入（cached 路径，userId 可能为空）
  */
+/**
+ * 从 messages 列表里提取所有需要走 IDB 缓存的 URL：
+ *   - attachments[i].url（图 / 视频 / 音频，cse:// 或 http(s)）
+ *   - content 富文本里的 cse://xxxx（v-cse-html 渲染时会用到）
+ * 用于无感刷新预热：v-for 提交前 hydrate IDB → memoryCache，第一帧 src 直接是 blob。
+ */
+function collectMediaUrlsFromMessages(list: any[]): { imgUrls: string[]; mediaUrls: string[] } {
+  const imgSet = new Set<string>();
+  const mediaSet = new Set<string>();
+  // 富文本里 cse://{24~32 hex} 形式的 fid，全文扫一次即可（覆盖 <img src=> / <video src=> / <source src=>）
+  const cseRegex = /cse:\/\/[a-zA-Z0-9_-]+/g;
+  for (const m of list || []) {
+    if (!m) continue;
+    const extra = m.extra;
+    if (typeof extra === 'string' && extra.length > 0) {
+      try {
+        const parsed = JSON.parse(extra);
+        const atts = parsed?.attachments;
+        if (Array.isArray(atts)) {
+          for (const a of atts) {
+            const u = a?.url;
+            if (!u || typeof u !== 'string') continue;
+            const t = String(a?.type || '').toLowerCase();
+            if (t.startsWith('video') || t.startsWith('audio')) {
+              mediaSet.add(u);
+            } else {
+              imgSet.add(u);
+            }
+          }
+        }
+      } catch {}
+    }
+    const content = m.content;
+    if (typeof content === 'string' && content.indexOf('cse://') >= 0) {
+      const matches = content.match(cseRegex);
+      if (matches) {
+        for (const u of matches) {
+          imgSet.add(u);
+        }
+      }
+    }
+  }
+  return { imgUrls: Array.from(imgSet), mediaUrls: Array.from(mediaSet) };
+}
+
 async function applyConversationAndMessages(vo: BootstrapResponse, opts: { commitConversation: boolean }) {
   const conv = vo.conversation;
   if (conv && conv.id) {
@@ -1627,6 +1674,21 @@ async function applyConversationAndMessages(vo: BootstrapResponse, opts: { commi
   const ciphertexts = rawList.map((m: any) => m.content);
   const plaintexts = await decryptMessagesBatch(ciphertexts);
   const list = rawList.map((m: any, i: number) => ({ ...m, content: plaintexts[i] ?? m.content }));
+
+  // ─── 无感刷新关键：消息提交 reactive 前阻塞预热 IDB → 内存 ───
+  // 这样 v-for 第一帧 withImageCache / withMediaCache / v-cse-html 同步命中 blob URL，
+  // 不再出现"空 src / TRANSPARENT_PNG → 真图"的肉眼可见闪烁。
+  // 预热 + dims hydrate：一次 IDB readonly tx，常见 < 30ms（远小于网络 + 解密 80ms+）。
+  try {
+    const { imgUrls, mediaUrls } = collectMediaUrlsFromMessages(list);
+    if (imgUrls.length || mediaUrls.length) {
+      await Promise.all([
+        imgUrls.length ? warmupImagesFromIdb(imgUrls) : Promise.resolve(0),
+        mediaUrls.length ? warmupMediaFromIdb(mediaUrls) : Promise.resolve(0),
+      ]);
+    }
+  } catch {}
+
   const serverIds = new Set(list.map((m: any) => m.id));
   const localAndStreaming = messages.value.filter((m: any) => {
     if (String(m.id).startsWith('local_')) {
@@ -1643,7 +1705,12 @@ async function applyConversationAndMessages(vo: BootstrapResponse, opts: { commi
   historyBeforeId.value = list[0]?.id || null;
   hasMoreHistory.value = !!vo.hasMoreMessages;
   // 渲染完消息立即滚到底（cached/fresh 都触发，stickToBottomGuard 会兜底视频/图片解码后高度变化）
-  nextTick(() => scrollToBottom());
+  nextTick(() => {
+    scrollToBottom();
+    // 通知 App.vue 淡出 visitor-loading skeleton：消息已塞进 DOM、已 warmup 命中 blob、
+    // dims hint 已注入，此刻撤掉 skeleton 不会出现"灰底空白 → 内容"的 layout shift。
+    try { (window as any).__visitorReady?.(); } catch {}
+  });
 }
 
 function applyUnreadReplies(replies?: any[]) {
@@ -4038,7 +4105,7 @@ function renderMessage(content: string) {
       ensureMdLoaded();
       return linkifyPlainText(content);
     }
-    return sanitizeHtml(content);
+    return preinjectCseImageDimsInHtml(sanitizeHtml(content));
   }
   // 2. Markdown 检测
   const hasMarkdown = /!\[[^\]]*]\([^)]*\)|\*\*[^*]+\*\*|```|^\s*#/m.test(content);
@@ -4047,7 +4114,7 @@ function renderMessage(content: string) {
       ensureMdLoaded();
       return linkifyPlainText(content);
     }
-    return sanitizeHtml(_md.render(content));
+    return preinjectCseImageDimsInHtml(sanitizeHtml(_md.render(content)));
   }
   // 3. 检测内联HTML（如 <a>、<img>、<br> 等）
   const hasInlineHtml = /<([a-z][\s\S]*?)>/i.test(content);
@@ -4056,7 +4123,7 @@ function renderMessage(content: string) {
       ensureMdLoaded();
       return linkifyPlainText(content);
     }
-    return sanitizeHtml(_md.render(content));
+    return preinjectCseImageDimsInHtml(sanitizeHtml(_md.render(content)));
   }
   // 4. 纯文本：转义并保留换行，自动识别超链接
   return linkifyPlainText(content);

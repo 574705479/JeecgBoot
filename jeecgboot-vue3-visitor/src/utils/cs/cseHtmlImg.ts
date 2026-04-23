@@ -11,4 +11,5 @@ export {
   resolveCseBlob,
   getCseBlobIfReady,
   clearCseHtmlImgCache,
+  preinjectCseImageDimsInHtml,
 } from '/@/directives/cseHtmlImg';

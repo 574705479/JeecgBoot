@@ -26,9 +26,24 @@ onMounted(() => {
   initImageCache().catch(() => {});
   // 拉品牌（失败不影响业务，使用默认 logo/title）
   loadBrandConfig().catch(() => {});
-  // 移除 index.html 里的占位 loading
-  const el = document.getElementById('visitor-loading');
-  if (el) el.remove();
+  // 不在 App.vue.onMounted 立刻 remove visitor-loading：
+  //   1. ChatMain 还在 await bootstrap → messages 是空 → skeleton 消失会出现一段灰底空白，造成 CLS。
+  //   2. 由 ChatMain 在第一批消息渲染后通过 window.__visitorReady() 主动淡出，平滑接管。
+  //
+  // 兜底：即使 ChatMain 没能调到（极端异常），8 秒后强制移除，避免 skeleton 一直挡在用户面前。
+  (window as any).__visitorReady = () => {
+    const el = document.getElementById('visitor-loading');
+    if (!el) return;
+    el.style.transition = 'opacity 180ms ease-out';
+    el.style.opacity = '0';
+    el.style.pointerEvents = 'none';
+    setTimeout(() => {
+      try { el.remove(); } catch {}
+    }, 220);
+  };
+  setTimeout(() => {
+    try { (window as any).__visitorReady?.(); } catch {}
+  }, 8000);
 });
 </script>
 
