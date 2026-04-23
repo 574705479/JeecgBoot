@@ -5,62 +5,18 @@
       <div class="fatal-desc">{{ fatalErrorMessage }}</div>
     </div>
     <template v-else>
-      <!-- 留言板模式（无在线客服时显示） -->
-      <div v-if="showLeaveMessageBoard" class="leave-message-board">
-        <div class="board-header" :style="headerStyle">
-          <div class="header-info">
-            <img class="app-avatar" :src="chatWindowConfig.logo ? resolveFileUrl(chatWindowConfig.logo) : (appInfo.avatar ? resolveFileUrl(appInfo.avatar) : defaultAvatar)" @error="onImageError" />
-            <div class="app-info">
-              <span class="app-name">{{ chatWindowConfig.pageTitle || appInfo.name || '在线客服' }}</span>
-              <span class="board-subtitle">{{ messageBoardConfig.subtitle || '客服不在线，请留言' }}</span>
-            </div>
-          </div>
-          <div class="header-icons" v-if="chatWindowConfig.headerIcons?.length">
-            <a v-for="(item, idx) in chatWindowConfig.headerIcons" :key="idx"
-               :href="item.link || '#'" target="_blank" rel="noopener" class="header-icon-item">
-              <img v-if="item.icon" :src="resolveFileUrl(item.icon)"
-                   :class="['header-icon-img', { 'header-icon-transparent': item.transparent }]"
-                   :style="{ width: (item.size || 32) + 'px', height: (item.size || 32) + 'px' }" @error="onImageError" />
-              <span class="header-icon-name"
-                    :style="{ fontSize: Math.max(10, Math.round((item.size || 32) * 0.35)) + 'px', maxWidth: Math.max(40, (item.size || 32) * 1.8) + 'px' }">{{ item.name }}</span>
-            </a>
-          </div>
-        </div>
-        <div class="board-body">
-          <a-form :model="leaveMessageForm" layout="vertical">
-            <a-form-item label="留言内容" :rules="[{required: true, message: '请输入留言内容'}]">
-              <a-textarea v-model:value="leaveMessageForm.content" placeholder="请输入您的留言" :rows="4" />
-            </a-form-item>
-            <a-form-item v-if="messageBoardConfig.fields?.name?.show" label="姓名"
-              :rules="messageBoardConfig.fields?.name?.required ? [{required: true, message: '请输入姓名'}] : []">
-              <a-input v-model:value="leaveMessageForm.name" placeholder="请输入姓名" />
-            </a-form-item>
-            <a-form-item v-if="messageBoardConfig.fields?.phone?.show" label="手机"
-              :rules="messageBoardConfig.fields?.phone?.required ? [{required: true, message: '请输入手机号'}] : []">
-              <a-input v-model:value="leaveMessageForm.phone" placeholder="请输入手机号" />
-            </a-form-item>
-            <a-form-item v-if="messageBoardConfig.fields?.email?.show" label="邮箱"
-              :rules="messageBoardConfig.fields?.email?.required ? [{required: true, message: '请输入邮箱'}] : []">
-              <a-input v-model:value="leaveMessageForm.email" placeholder="请输入邮箱" />
-            </a-form-item>
-            <a-form-item v-if="messageBoardConfig.fields?.qq?.show" label="QQ">
-              <a-input v-model:value="leaveMessageForm.qq" placeholder="请输入QQ号" />
-            </a-form-item>
-            <a-form-item v-if="messageBoardConfig.fields?.wechat?.show" label="微信">
-              <a-input v-model:value="leaveMessageForm.wechat" placeholder="请输入微信号" />
-            </a-form-item>
-            <a-form-item>
-              <a-button type="primary" block :loading="submittingLeaveMessage" @click="submitLeaveMessage">
-                提交留言
-              </a-button>
-            </a-form-item>
-          </a-form>
-          <div v-if="leaveMessageSubmitted" class="submit-success">
-            <CheckCircleOutlined style="font-size: 32px; color: #52c41a;" />
-            <p>留言已提交，客服会尽快回复您</p>
-          </div>
-        </div>
-      </div>
+      <!-- 留言板模式（无在线客服时显示）—— Phase 2 拆出独立懒加载组件 -->
+      <LeaveMessageBoard
+        v-if="showLeaveMessageBoard"
+        :messageBoardConfig="messageBoardConfig"
+        :chatWindowConfig="chatWindowConfig"
+        :appInfo="appInfo"
+        :defaultAvatar="defaultAvatar"
+        :headerStyle="headerStyle"
+        :resolveFileUrl="resolveFileUrl"
+        :onImageError="onImageError"
+        :submitFn="submitLeaveMessage"
+      />
 
       <!-- 正常聊天模式 -->
       <template v-else>
@@ -437,13 +393,15 @@
           </div>
         </div>
       </div>
-      <!-- 表情面板 -->
-      <div style="position:relative">
+      <!-- 表情面板（Phase 2：外层 v-if 控制懒加载 mount，首次点表情才拉 EmojiPicker chunk） -->
+      <div style="position:relative" v-if="emojiPickerEverOpened">
         <EmojiPicker :visible="showEmojiPanel" @select="appendEmoji" @close="showEmojiPanel = false" />
       </div>
+      <!-- Phase 2：占位 div（保持原 DOM 结构稳定，避免 emoji 按钮位置漂移） -->
+      <div v-else style="position:relative"></div>
       <!-- 有图片/视频/文件/FAQ功能时，工具栏显示在输入框上方 -->
       <div class="input-toolbar" v-if="chatWindowConfig.sendImage || chatWindowConfig.sendVideo || chatWindowConfig.sendPdf || (chatWindowConfig.faqEnabled && chatWindowConfig.faqList?.length > 0)">
-        <SmileOutlined v-if="chatWindowConfig.sendEmoji" class="toolbar-icon" @click="showEmojiPanel = !showEmojiPanel" title="表情" />
+        <SmileOutlined v-if="chatWindowConfig.sendEmoji" class="toolbar-icon" @click="onToggleEmojiPanel" title="表情" />
         <PictureOutlined v-if="chatWindowConfig.sendImage" class="toolbar-icon" @click="triggerFileInput('image')" title="图片" />
         <VideoCameraOutlined v-if="chatWindowConfig.sendVideo" class="toolbar-icon" @click="triggerFileInput('video')" title="视频" />
         <FilePdfOutlined v-if="chatWindowConfig.sendPdf" class="toolbar-icon" @click="triggerFileInput('pdf')" title="PDF" />
@@ -454,7 +412,7 @@
       </div>
       <!-- 输入行：[表情(仅emoji模式)] + 文本框 + 发送/终止图标 -->
       <div class="input-row">
-        <SmileOutlined v-if="chatWindowConfig.sendEmoji && !chatWindowConfig.sendImage && !chatWindowConfig.sendVideo && !chatWindowConfig.sendPdf && !(chatWindowConfig.faqEnabled && chatWindowConfig.faqList?.length > 0)" class="toolbar-icon inline-emoji-icon" @click="showEmojiPanel = !showEmojiPanel" title="表情" />
+        <SmileOutlined v-if="chatWindowConfig.sendEmoji && !chatWindowConfig.sendImage && !chatWindowConfig.sendVideo && !chatWindowConfig.sendPdf && !(chatWindowConfig.faqEnabled && chatWindowConfig.faqList?.length > 0)" class="toolbar-icon inline-emoji-icon" @click="onToggleEmojiPanel" title="表情" />
         <span class="sound-toggle-btn" @click="toggleSound" :title="soundEnabled ? '关闭提示音' : '开启提示音'">
           <SoundOutlined v-if="soundEnabled" />
           <span v-else class="sound-muted-icon"><SoundOutlined /><span class="mute-line"></span></span>
@@ -620,9 +578,14 @@
 </template>
 
 <script setup lang="ts" name="UserChatPage">
-import { ref, reactive, onMounted, onUnmounted, nextTick, computed, watch } from 'vue';
-import MarkdownIt from 'markdown-it';
-import DOMPurify from 'dompurify';
+import { ref, reactive, onMounted, onUnmounted, nextTick, computed, watch, defineAsyncComponent } from 'vue';
+// Phase 2 懒加载：MarkdownIt + DOMPurify 总计 ~24KB gz，但访客端在「裸首屏」并不需要：
+//   - 用户/系统/纯文本消息走 linkifyPlainText 同步 HTML 转义
+//   - 只有 富文本(FAQ HTML) / Markdown(AI 回复) / 内联 HTML 分支才用得到 md.render + sanitizeHtml
+// 改造策略：
+//   1) onMounted 后台 idle 触发 ensureMdLoaded()（不阻塞首屏 paint）
+//   2) renderMessage 真正命中需要 md 的分支时：若 _mdReady=false 临时兜底 linkifyPlainText
+//   3) _mdReady 是 ref，加载完成后读它的 v-html 表达式自动重渲染 → markdown/富文本会"自动恢复"
 import { message } from 'ant-design-vue';
 import {
   MessageOutlined, SendOutlined, BulbOutlined, CheckCircleOutlined,
@@ -634,8 +597,12 @@ import { defHttp } from '/@/utils/http/axios';
 import axios from 'axios';
 import { useGlobSetting } from '/@/hooks/setting';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
-import { createImgPreview } from '/@/components/Preview';
-import EmojiPicker from '/@/components/EmojiPicker.vue';
+// Phase 2 懒加载策略：以下三个 UI 组件只在用户特定操作触发时才需要
+//   - EmojiPicker：点开「表情」面板时
+//   - FileChip：附件类消息渲染时
+//   - createImgPreview：点击图片预览时（在 openImagePreview 内 await import）
+// 通过 defineAsyncComponent / 动态 import 让首屏裸进入聊天界面时不加载这些 chunk。
+const EmojiPicker = defineAsyncComponent(() => import('/@/components/EmojiPicker.vue'));
 import { computeFileMd5 } from '/@/utils/cs/fileHash';
 import { encryptTransport, decryptTransport, decryptMessage, decryptStorage } from '/@/utils/cs/csEncrypt';
 import { playCsNotificationSound } from '/@/utils/cs/csNotificationSound';
@@ -651,7 +618,10 @@ import {
   getImageFailureState,
 } from '/@/utils/file/imageCache';
 import { compressImage } from '/@/utils/file/compressImage';
-import FileChip from '/@/components/FileChip.vue';
+const FileChip = defineAsyncComponent(() => import('/@/components/FileChip.vue'));
+// Phase 2：留言板分支独立懒加载 —— 仅当 showLeaveMessageBoard=true 时才拉取
+// 留言板模板 + 提交逻辑被提取到独立 chunk，普通聊天链路完全不会加载
+const LeaveMessageBoard = defineAsyncComponent(() => import('/@/components/LeaveMessageBoard.vue'));
 import { isCseUrl } from '/@/utils/cse/cseUrl';
 import { resolveBrandPublicUrl } from '/@/utils/brand';
 // Phase 3.2e：把访客 sessionToken 同步到 cseAuthContext，
@@ -1020,6 +990,12 @@ const messageConnectMode = ref(false);
 
 // ==================== 表情面板 ====================
 const showEmojiPanel = ref(false);
+// Phase 2：用户首次点开表情才 mount EmojiPicker，避免裸首屏拉 5.7KB chunk
+const emojiPickerEverOpened = ref(false);
+function onToggleEmojiPanel() {
+  if (!emojiPickerEverOpened.value) emojiPickerEverOpened.value = true;
+  showEmojiPanel.value = !showEmojiPanel.value;
+}
 function appendEmoji(emoji: string) {
   inputMessage.value += emoji;
 }
@@ -1492,12 +1468,9 @@ async function submitSatisfaction() {
   }
 }
 
-// 留言板相关
-const showLeaveMessageBoard = ref(false);  // 是否显示留言板
+// 留言板相关 —— 表单数据 / 提交状态 / 提交完成态 已迁移到 LeaveMessageBoard 子组件内部
+const showLeaveMessageBoard = ref(false);  // 是否显示留言板（控制是否 mount LeaveMessageBoard）
 const messageBoardConfig = ref<any>({ subtitle: '客服不在线，请留言', fields: {} });
-const leaveMessageForm = ref<any>({ content: '', name: '', phone: '', email: '', qq: '', wechat: '' });
-const submittingLeaveMessage = ref(false);
-const leaveMessageSubmitted = ref(false);
 const unreadReplies = ref<any[]>([]);  // 未读留言回复列表
 
 const handleVisibilityChange = () => {
@@ -1528,6 +1501,13 @@ const connectionStatusText = computed(() => {
 // 初始化
 onMounted(async () => {
   window.addEventListener('resize', onResizeCheck);
+  // Phase 2：首屏 paint 后立刻在 idle 时段后台预热 markdown-it + dompurify，
+  // 这样真正出现 markdown / 富文本消息时通常已 ready，体验上无感知降级
+  if (typeof (window as any).requestIdleCallback === 'function') {
+    (window as any).requestIdleCallback(() => { ensureMdLoaded().catch(() => {}); }, { timeout: 1500 });
+  } else {
+    setTimeout(() => { ensureMdLoaded().catch(() => {}); }, 200);
+  }
   // 首先查询是否需要Token验证
   try {
     const tokenRes = await defHttp.get(
@@ -2286,45 +2266,22 @@ async function loadMessageBoardConfig() {
   }
 }
 
-// 提交留言
-async function submitLeaveMessage() {
-  const form = leaveMessageForm.value;
-  if (!form.content?.trim()) {
-    message.warning('请输入留言内容');
-    return;
-  }
-  // 检查必填字段
-  const fields = messageBoardConfig.value.fields || {};
-  for (const [key, cfg] of Object.entries(fields) as [string, any][]) {
-    if (cfg.show && cfg.required && !form[key]?.trim()) {
-      const labels: Record<string, string> = { name: '姓名', phone: '手机', email: '邮箱', qq: 'QQ', wechat: '微信', image: '图片' };
-      message.warning(`请填写${labels[key] || key}`);
-      return;
-    }
-  }
-
-  submittingLeaveMessage.value = true;
-  try {
-    await httpPost({
-      url: '/cs/leaveMessage/submit',
-      data: {
-        userId: userId.value,
-        content: encryptTransport(form.content),
-        name: form.name,
-        phone: form.phone,
-        email: form.email,
-        qq: form.qq,
-        wechat: form.wechat,
-      },
-    });
-    leaveMessageSubmitted.value = true;
-    message.success('留言已提交');
-  } catch (e) {
-    console.error('[UserChat] 提交留言失败', e);
-    message.error('提交失败，请稍后重试');
-  } finally {
-    submittingLeaveMessage.value = false;
-  }
+// 提交留言（由子组件 LeaveMessageBoard 通过 submitFn prop 调用）
+// 必填字段校验、loading、submitted 状态、message 反馈都在子组件内处理；
+// 这里只负责加密 + 发请求，让子组件不依赖 http / encrypt / auth 模块。
+async function submitLeaveMessage(form: { content: string; name: string; phone: string; email: string; qq: string; wechat: string }) {
+  await httpPost({
+    url: '/cs/leaveMessage/submit',
+    data: {
+      userId: userId.value,
+      content: encryptTransport(form.content),
+      name: form.name,
+      phone: form.phone,
+      email: form.email,
+      qq: form.qq,
+      wechat: form.wechat,
+    },
+  });
 }
 
 // 加载未读留言回复
@@ -3524,21 +3481,36 @@ async function openImagePreview(msg: any, item: any) {
   const usable = resolved.filter(r => r.blobUrl && !r.blobUrl.startsWith('data:'));
   if (!usable.length) return;
   const idx = Math.max(0, usable.findIndex(r => r.cseUrl === targetKey));
+  // Phase 2：Preview 组件按需懒加载（首次点击图片才拉取该 chunk）
+  const { createImgPreview } = await import('/@/components/Preview');
   createImgPreview({
     imageList: usable.map(r => r.blobUrl),
     index: Math.min(idx, usable.length - 1),
-    defaultWidth: 700,
-    rememberState: true,
   });
 }
 
 const mediaViewerVisible = ref(false);
 const mediaViewerList = ref<any[]>([]);
-const md = new MarkdownIt({
-  html: true,
-  linkify: true,
-  typographer: true,
-});
+
+// 懒加载 markdown-it + dompurify（首屏不阻塞，命中后自动重渲染）
+let _md: any = null;
+let _DOMPurify: any = null;
+const _mdReady = ref(false);
+let _mdLoading: Promise<void> | null = null;
+function ensureMdLoaded(): Promise<void> {
+  if (_mdReady.value) return Promise.resolve();
+  if (_mdLoading) return _mdLoading;
+  _mdLoading = (async () => {
+    const [{ default: MarkdownIt }, { default: DP }] = await Promise.all([
+      import('markdown-it'),
+      import('dompurify'),
+    ]);
+    _md = new MarkdownIt({ html: true, linkify: true, typographer: true });
+    _DOMPurify = DP;
+    _mdReady.value = true;
+  })();
+  return _mdLoading;
+}
 
 function openMediaViewer(msg: any) {
   mediaViewerList.value = getMediaAttachments(msg);
@@ -3600,7 +3572,8 @@ const CSE_ALLOWED_URI_REGEXP =
   /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|cse):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
 
 function sanitizeHtml(html: string): string {
-  return DOMPurify.sanitize(html, {
+  if (!_DOMPurify) return html;
+  return _DOMPurify.sanitize(html, {
     ADD_TAGS: ['iframe'],
     ADD_ATTR: ['target', 'allowfullscreen', 'frameborder'],
     ALLOW_DATA_ATTR: false,
@@ -3609,6 +3582,8 @@ function sanitizeHtml(html: string): string {
 }
 
 // 渲染消息内容（支持富文本HTML、Markdown、纯文本）
+// 注意：模板里的 v-html="renderMessage(...)" 会订阅 _mdReady ref，
+// markdown/dompurify 加载完成后会自动重新渲染所有富文本/markdown 消息
 function renderMessage(content: string) {
   if (!content) return '';
   content = content.replace(/#\s*\{\s*domainURL\s*\}/g, globSetting.domainUrl);
@@ -3616,17 +3591,29 @@ function renderMessage(content: string) {
   // 1. 检测是否为完整HTML（TinyMCE富文本，如FAQ答案）— sanitize 后返回
   const isRichHtml = /^\s*<(?:p|div|ul|ol|h[1-6]|table|blockquote)\b/i.test(content.trim());
   if (isRichHtml) {
+    if (!_mdReady.value) {
+      ensureMdLoaded();
+      return linkifyPlainText(content);
+    }
     return sanitizeHtml(content);
   }
   // 2. Markdown 检测
   const hasMarkdown = /!\[[^\]]*]\([^)]*\)|\*\*[^*]+\*\*|```|^\s*#/m.test(content);
   if (hasMarkdown) {
-    return sanitizeHtml(md.render(content));
+    if (!_mdReady.value) {
+      ensureMdLoaded();
+      return linkifyPlainText(content);
+    }
+    return sanitizeHtml(_md.render(content));
   }
   // 3. 检测内联HTML（如 <a>、<img>、<br> 等）
   const hasInlineHtml = /<([a-z][\s\S]*?)>/i.test(content);
   if (hasInlineHtml) {
-    return sanitizeHtml(md.render(content));
+    if (!_mdReady.value) {
+      ensureMdLoaded();
+      return linkifyPlainText(content);
+    }
+    return sanitizeHtml(_md.render(content));
   }
   // 4. 纯文本：转义并保留换行，自动识别超链接
   return linkifyPlainText(content);
@@ -3774,109 +3761,7 @@ watch(() => messages.value.length, () => {
   100% { transform: translateX(-100%); }
 }
 
-/* 留言板样式 */
-.leave-message-board {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  background: #fff;
-  
-  .board-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 16px;
-    background: #667eea;
-    background-size: cover;
-    background-position: center;
-    color: #fff;
-    min-height: 56px;
-    
-    .header-info {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      flex: 1;
-      min-width: 0;
-    }
-    
-    .app-avatar {
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      object-fit: cover;
-      flex-shrink: 0;
-    }
-    
-    .app-info {
-      display: flex;
-      flex-direction: column;
-      min-width: 0;
-    }
-    
-    .app-name {
-      font-size: 15px;
-      font-weight: 600;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    
-    .board-subtitle {
-      font-size: 12px;
-      opacity: 0.85;
-      margin-top: 2px;
-    }
-    
-    .header-icons {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      flex-shrink: 0;
-    }
-    
-    .header-icon-item {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      text-decoration: none;
-      color: #fff;
-    }
-    
-    .header-icon-img {
-      object-fit: contain;
-    }
-    
-    .header-icon-transparent {
-      background: transparent;
-    }
-    
-    .header-icon-name {
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      text-align: center;
-    }
-  }
-  
-  .board-body {
-    flex: 1;
-    padding: 24px 20px;
-    padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
-    overflow-y: auto;
-    
-    .submit-success {
-      text-align: center;
-      padding: 40px 0;
-      
-      p {
-        margin-top: 12px;
-        color: #52c41a;
-        font-size: 15px;
-      }
-    }
-  }
-}
+/* 留言板样式已迁移到 src/components/LeaveMessageBoard.vue (scoped less) */
 
 /* 留言回复卡片 */
 .leave-message-replies {
