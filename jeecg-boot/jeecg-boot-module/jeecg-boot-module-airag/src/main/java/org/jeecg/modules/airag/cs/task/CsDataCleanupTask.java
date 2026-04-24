@@ -52,9 +52,6 @@ public class CsDataCleanupTask {
     private CsVisitorMapper visitorMapper;
 
     @Autowired
-    private CsIpGeoCacheMapper ipGeoCacheMapper;
-
-    @Autowired
     private CsFileHashMapper fileHashMapper;
 
     @Autowired
@@ -119,7 +116,6 @@ public class CsDataCleanupTask {
             cleanInactiveVisitors(logDeadline, results);
 
             // === 第3组: 缓存与辅助 ===
-            cleanIpGeoCache(cacheDeadline, results);
             cleanFileHash(cacheDeadline, results);
             cleanLeaveMessages(cacheDeadline, results);
 
@@ -295,29 +291,6 @@ public class CsDataCleanupTask {
     }
 
     // ==================== 第3组: 缓存与辅助 ====================
-
-    private void cleanIpGeoCache(Date deadline, Map<String, Integer> results) {
-        int total = 0;
-        try {
-            while (true) {
-                LambdaQueryWrapper<CsIpGeoCache> wrapper = new LambdaQueryWrapper<>();
-                wrapper.lt(CsIpGeoCache::getCreateTime, deadline).last("LIMIT " + BATCH_SIZE);
-                List<CsIpGeoCache> batch = ipGeoCacheMapper.selectList(wrapper);
-                if (batch.isEmpty()) break;
-
-                List<String> ids = new ArrayList<>();
-                for (CsIpGeoCache item : batch) ids.add(item.getId());
-                ipGeoCacheMapper.deleteByIds(ids);
-                total += batch.size();
-
-                if (batch.size() < BATCH_SIZE) break;
-                sleep();
-            }
-        } catch (Exception e) {
-            log.error("[CS-Cleanup] 清理IP缓存失败", e);
-        }
-        results.put("ipGeoCache", total);
-    }
 
     private void cleanFileHash(Date deadline, Map<String, Integer> results) {
         int total = 0;

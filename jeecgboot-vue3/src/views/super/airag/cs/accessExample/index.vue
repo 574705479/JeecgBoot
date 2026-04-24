@@ -343,7 +343,18 @@ expireAt: {{ expireAt || '' }}</pre>
                 </div>
               </div>
             </template>
-            <iframe v-else class="preview" :src="accessUrl" />
+            <template v-else>
+              <div class="row" style="margin-bottom: 8px; display: flex; gap: 8px">
+                <a-button size="small" type="link" @click="openInBrowser(accessUrl)">在新标签打开</a-button>
+                <a-button size="small" type="link" @click="copyText(accessUrl)">复制链接</a-button>
+              </div>
+              <iframe
+                class="preview"
+                :src="accessUrl"
+                @load="onPreviewIframeLoad"
+                @error="onPreviewIframeError"
+              />
+            </template>
           </div>
           <div class="card" v-if="accessType === 'iframe'">
             <div class="card-desc">iframe 预览</div>
@@ -358,7 +369,18 @@ expireAt: {{ expireAt || '' }}</pre>
                 </div>
               </div>
             </template>
-            <iframe v-else class="preview" :src="accessUrl" />
+            <template v-else>
+              <div class="row" style="margin-bottom: 8px; display: flex; gap: 8px">
+                <a-button size="small" type="link" @click="openInBrowser(accessUrl)">在新标签打开</a-button>
+                <a-button size="small" type="link" @click="copyText(accessUrl)">复制链接</a-button>
+              </div>
+              <iframe
+                class="preview"
+                :src="accessUrl"
+                @load="onPreviewIframeLoad"
+                @error="onPreviewIframeError"
+              />
+            </template>
           </div>
           <div class="card" v-if="accessType === 'widget'">
             <div class="card-desc">挂件预览（右下角）</div>
@@ -424,6 +446,15 @@ function copyText(text: string) {
   }).catch(() => {
     message.error('复制失败');
   });
+}
+
+function onPreviewIframeLoad(e: Event) {
+  const frame = e.target as HTMLIFrameElement | null;
+  console.info('[AccessPreview] iframe loaded:', frame?.src);
+}
+
+function onPreviewIframeError(e: Event) {
+  console.error('[AccessPreview] iframe load error:', e);
 }
 
 function getOriginUrl() {
@@ -633,10 +664,10 @@ const accessUrl = computed(() => {
     if (source.value) params.set('source', source.value);
     if (agentId.value) params.set('agentId', agentId.value);
     const qs = params.toString();
-    return `${base}/cs/userChat${qs ? '?' + qs : ''}`;
+    return `${base}/cs/userChat/${qs ? '?' + qs : ''}`;
   }
   if (!token.value) {
-    let url = `${base}/cs/userChat?token=短时token&externalUserId=${externalUserId.value}&userName=${userName.value}&source=${source.value}`;
+    let url = `${base}/cs/userChat/?token=短时token&externalUserId=${externalUserId.value}&userName=${userName.value}&source=${source.value}`;
     if (agentId.value) url += `&agentId=${agentId.value}`;
     return url;
   }
@@ -647,7 +678,7 @@ const accessUrl = computed(() => {
     source: source.value,
   });
   if (agentId.value) params.set('agentId', agentId.value);
-  return `${base}/cs/userChat?${params.toString()}`;
+  return `${base}/cs/userChat/?${params.toString()}`;
 });
 
 const tokenDocCurlMarkdown = computed(() => {

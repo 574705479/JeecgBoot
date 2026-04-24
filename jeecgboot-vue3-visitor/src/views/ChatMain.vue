@@ -3669,6 +3669,8 @@ function handleAiStreamComplete(data: any) {
 }
 
 // 滚动到底部（RAF 防抖，同帧多次调用只执行一次）
+// 每次调用除了立即滚底，还会启动一个短期 sticky 窗口，
+// 覆盖 markdown-it / 图片 / 视频等异步渲染撑高的场景。
 function scrollToBottom() {
   if (scrollRafId) return;
   scrollRafId = requestAnimationFrame(() => {
@@ -3678,23 +3680,32 @@ function scrollToBottom() {
       el.scrollTop = el.scrollHeight;
       lastScrollTop = el.scrollTop;
     }
+    // 启一个 1.2s 的短 sticky 窗口：覆盖 markdown-it 异步渲染 / img decode / video metadata
+    startStickToBottomGuard(1200);
   });
 }
 
 /**
- * 启动 stickToBottom 守护：在 STICK_TO_BOTTOM_WINDOW_MS 窗口内监听消息容器尺寸变化，
- * 只要用户没主动滚过，就维持滚动到底部。
- * 解决"刷新后视频/图片异步解码完高度撑大，scrollToBottom 已经过了"的问题。
+ * 启动 stickToBottom 守护：在窗口内监听消息容器尺寸变化，保持滚动到底部。
+ * - 允许重启：每次调用先停掉旧 observer
+ * - 入口判据：只有"启动瞬间在底部"才接管；否则视为用户在向上阅读，不打扰
+ * - 窗口期内用户主动滚离底部（wheel/touch/key 触发 hasUserInteracted）→ 立即放弃 sticky
+ * 解决"收到长消息后 markdown/img/video 异步撑高，scrollToBottom 已经过了"的问题。
  */
-function startStickToBottomGuard() {
-  if (stickToBottomObserver || !messagesRef.value) return;
-  if (typeof ResizeObserver === 'undefined') return;
+function startStickToBottomGuard(windowMs: number = STICK_TO_BOTTOM_WINDOW_MS) {
+  if (typeof ResizeObserver === 'undefined' || !messagesRef.value) return;
+  stopStickToBottomGuard();
+
   const startAt = Date.now();
   const target = messagesRef.value;
+  if (!isMessagesAtBottom()) return;
 
   stickToBottomObserver = new ResizeObserver(() => {
-    if (userScrolledOnce) return;
-    if (Date.now() - startAt > STICK_TO_BOTTOM_WINDOW_MS) {
+    if (Date.now() - startAt > windowMs) {
+      stopStickToBottomGuard();
+      return;
+    }
+    if (hasUserInteracted && !isMessagesAtBottom()) {
       stopStickToBottomGuard();
       return;
     }
@@ -3704,10 +3715,8 @@ function startStickToBottomGuard() {
       lastScrollTop = el.scrollTop;
     }
   });
-  // 同时观察容器和子元素总高度变化（消息卡片 + 视频帧）
   stickToBottomObserver.observe(target);
-  // 兜底定时器，超时自动停掉
-  setTimeout(() => stopStickToBottomGuard(), STICK_TO_BOTTOM_WINDOW_MS + 200);
+  setTimeout(() => stopStickToBottomGuard(), windowMs + 200);
 }
 
 function stopStickToBottomGuard() {

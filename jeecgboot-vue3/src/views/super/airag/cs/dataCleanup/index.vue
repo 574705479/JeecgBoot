@@ -186,7 +186,6 @@ const resultLabels: Record<string, string> = {
   loginLog: '登录日志',
   statusLog: '状态日志',
   visitor: '不活跃访客',
-  ipGeoCache: 'IP 地理缓存',
   fileHash: '文件哈希记录',
   leaveMessage: '已回复留言',
 };
