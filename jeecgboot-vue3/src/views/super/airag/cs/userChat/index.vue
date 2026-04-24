@@ -464,9 +464,11 @@
           :placeholder="aiResponding ? 'AI正在回复，可随时终止...' : '请输入您要咨询的问题...'"
           :auto-size="{ minRows: 1, maxRows: 4 }"
           @keydown="handleKeydown"
+          @compositionstart="handleCompositionStart"
+          @compositionend="handleCompositionEnd"
         />
         <PauseCircleOutlined v-if="aiResponding" class="stop-icon-btn" @click="stopAiReply()" title="终止" />
-        <SendOutlined v-else-if="inputMessage.trim() || attachmentList.length" class="send-icon-btn" @click="sendMessage" title="发送" />
+        <SendOutlined v-else-if="canSend" class="send-icon-btn" @click="sendMessage" title="发送" />
       </div>
     </div>
     <!-- 会话已结束时显示重新开始按钮 -->
@@ -1284,6 +1286,9 @@ const messages = ref<any[]>([]);
 const loading = ref(false);
 const sending = ref(false);
 const inputMessage = ref('');
+// 输入框右侧"发送"按钮显隐：抽成 computed 让结果不变化时不再触发模板 patch，
+// 连续打字阶段（content 始终非空）只触发 inputMessage 自身订阅，不再 diff SendOutlined 节点。
+const canSend = computed(() => !!(inputMessage.value.trim() || attachmentList.value.length));
 const messagesRef = ref<HTMLElement | null>(null);
 const historyPageSize = 100;
 const loadingHistory = ref(false);
@@ -2970,6 +2975,9 @@ function handleWsMessage(data: any) {
 
 // 发送消息
 async function sendMessage() {
+  // 上一条还在发送中（包含 ws.send/http 往返、消息体上屏前的窗口）：
+  // 直接吞掉这次调用，避免连按 Enter 时同一段文本被打入消息流多次。
+  if (sending.value) return;
   ensureAudioCtx();
   const content = inputMessage.value.trim();
   const attachments = attachmentList.value.filter(a => !a.uploading && a.url);
@@ -3032,14 +3040,22 @@ async function sendMessage() {
   };
 
   sending.value = true;
-  
+
+  // 立即清空输入框 / 附件区：连按 Enter 第二次以后 inputMessage.trim() === ''，
+  // 上面的 early return 直接拦截，重复发送从根本上不再可能。
+  // 失败时把内容回填，用户改后可继续重试；成功路径不再需要再次清空。
+  const prevInput = inputMessage.value;
+  const prevAttachments = attachmentList.value.slice();
+  inputMessage.value = '';
+  attachmentList.value = [];
+
   const isAiMode = replyMode.value === 0;
   if (isAiMode) {
     aiResponding.value = true;
     aiTimedOutMessageId = null;
     resetAiTokenTimeout();
   }
-  
+
   try {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
@@ -3064,11 +3080,9 @@ async function sendMessage() {
         },
       });
     }
-    // 发送成功后才展示消息气泡并清空输入
     messages.value.push(localMsg);
-    inputMessage.value = '';
-    attachmentList.value.forEach(a => { if (a.previewUrl) URL.revokeObjectURL(a.previewUrl); });
-    attachmentList.value = [];
+    // 发送成功才释放本次提交的附件预览资源
+    prevAttachments.forEach(a => { if (a.previewUrl) URL.revokeObjectURL(a.previewUrl); });
     await nextTick();
     scrollToBottom();
   } catch (e) {
@@ -3077,20 +3091,38 @@ async function sendMessage() {
     if (isAiMode) {
       stopAiResponding();
     }
+    // 失败回填：用户能直接改/重发，不丢内容。
+    // 仅在用户没在等待期间手动输入新内容时回填，避免覆盖。
+    if (!inputMessage.value) inputMessage.value = prevInput;
+    if (!attachmentList.value.length) attachmentList.value = prevAttachments;
   } finally {
     sending.value = false;
   }
 }
 
+// IME 拼音/选词中：回车只是确认候选词，不应作为发送指令。
+// composition 区间内 keydown.key === 'Enter' 仍会触发，但 e.isComposing 在多数浏览器为 true；
+// 部分输入法（搜狗/QQ 拼音的某些版本）不会置 isComposing，所以并行用本地标志兜底。
+let _imeComposing = false;
+function handleCompositionStart() {
+  _imeComposing = true;
+}
+function handleCompositionEnd() {
+  _imeComposing = false;
+}
+
 // 处理键盘事件
 function handleKeydown(e: KeyboardEvent) {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    // AI回复中时不发送消息，允许用户预输入
-    if (aiResponding.value) return;
-    sendMessage();
-  }
-  // Shift+Enter 允许默认换行行为
+  if (e.key !== 'Enter' || e.shiftKey) return;
+  // 浏览器原生 IME 标记 + 本地标志：任意一个为 true 都视为正在输入法选词
+  if (_imeComposing || (e as any).isComposing || e.keyCode === 229) return;
+  e.preventDefault();
+  // AI 回复中：允许用户预输入，但不发送（避免打断 AI 流式响应）
+  if (aiResponding.value) return;
+  // 上一条还在发送：直接吞掉，避免按住 Enter 时把同一条文本打入队列多次
+  if (sending.value) return;
+  sendMessage();
+  // Shift+Enter 默认换行行为已通过最前面的 return 保留
 }
 
 // 重新开始对话

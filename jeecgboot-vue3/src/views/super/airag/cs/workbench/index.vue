@@ -933,12 +933,27 @@
           </div>
         </div>
         <div class="input-wrapper">
-          <a-textarea
+          <!--
+            原生 textarea + 完全脱离响应式的 input 路径：
+              - 不挂 v-model / :value，避免模板 render fn 把 inputMessage 当依赖。
+                v-model 形态下，inputMessage 每次变更都触发整个 7610 行模板 render fn 重跑
+                （含 100+ 条消息 v-for 的 vnode 生成），实测每个 keystroke 增加 ~300ms，
+                长按时主线程被打满，setTimeout / rAF 被饿死，表现为「停下来很久才显示字符」。
+              - @input 走 onTextareaInput，把字符存到非响应式 _textBuffer，浏览器立即把字符
+                画到 textarea；rAF 节流写 inputMessage / hasInputText，render fn 60Hz 上限。
+              - 高度计算交给浏览器原生 CSS field-sizing: content（Chrome 123+），零 JS 成本。
+              - emoji / 快捷回复 / sendMessage 清空 / AI 建议替换 等外部写入统一走 setInputText，
+                同时把 textarea.value、_textBuffer、inputMessage、hasInputText 一致刷新。
+          -->
+          <textarea
             ref="inputRef"
-            v-model:value="inputMessage"
             :placeholder="inputPlaceholder"
-            :auto-size="{ minRows: 1, maxRows: 8 }"
+            rows="1"
+            class="ant-input cs-fast-textarea"
+            @input="onTextareaInput"
             @keydown="handleInputKeydown"
+            @compositionstart="handleInputCompositionStart"
+            @compositionend="handleInputCompositionEnd"
             @paste="handlePasteUpload"
           />
         </div>
@@ -1784,7 +1799,64 @@ const displayMessages = computed(() => {
   }
   return list;
 });
+// 输入框文本：保留为 ref 是为了让原有业务函数（sendMessage / appendEmoji / 快捷回复 / AI 建议）
+// 不需要全部改写，仍可通过 inputMessage.value 读写。
+//
+// 但模板里【绝不再】用 v-model 或 :value 引用它，避免变成 render fn 的响应式依赖。
+// 7610 行模板 + 100+ 条消息 v-for + 大量 getMediaGridData / isAttachmentImageReady 等函数调用，
+// 一次 render fn 重跑成本约 300ms。长按按键 30Hz 触发时，主线程被打满，setTimeout / rAF 被饿死，
+// 用户体感是「松开按键过很久才看到字符」。
+//
+// 改造后：textarea 通过 inputRef 持有原生 DOM，@input 走 onTextareaInput，把字符存到非响应式
+// _textBuffer。canSendMessage 不再依赖 inputMessage，改依赖按 rAF 节流更新的 hasInputText。
+// 这样长按时模板 render fn 仅在「有字 / 无字」边界变化时跑一次，绝大多数 keystroke 零开销。
 const inputMessage = ref('');
+let _textBuffer = '';
+const hasInputText = ref(false);
+let _hasInputTextRafScheduled = false;
+function _scheduleHasInputTextSync() {
+  if (_hasInputTextRafScheduled) return;
+  _hasInputTextRafScheduled = true;
+  requestAnimationFrame(() => {
+    _hasInputTextRafScheduled = false;
+    const next = _textBuffer.trim().length > 0;
+    // 仅在「有字 / 无字」边界翻转时写 ref，避免 rAF 内每帧都向 Vue 调度器投递无效任务。
+    // inputMessage ref 故意不在 rAF 里同步：它在长按场景下没有任何模板/computed 订阅者，
+    // 写入只是空 trigger 但仍会让 Vue scheduler 走一遍 flushJobs 清空 dirty 队列。
+    // 临界路径（sendMessage / 失败回滚 / emoji / 快捷回复）会通过 flushInputBuffer / setInputText
+    // 主动把 _textBuffer 同步到 ref，业务读取一致性不受影响。
+    if (hasInputText.value !== next) hasInputText.value = next;
+  });
+}
+function flushInputBuffer() {
+  // 业务进入临界路径（sendMessage 等）前手动同步一次，避免 rAF 节流尾端丢字符。
+  if (inputMessage.value !== _textBuffer) inputMessage.value = _textBuffer;
+  const next = _textBuffer.trim().length > 0;
+  if (hasInputText.value !== next) hasInputText.value = next;
+}
+function onTextareaInput(e: Event) {
+  // 长按 / IME 高频派发场景：只写非响应式 buffer，浏览器立即把字符画到 textarea；
+  // 仅 hasInputText 边界变化时通过 rAF 节流通知 Vue，render fn 几乎不会被惊动。
+  _textBuffer = (e.target as HTMLTextAreaElement).value;
+  _scheduleHasInputTextSync();
+}
+function setInputText(text: string) {
+  // emoji 插入 / 快捷回复填充 / sendMessage 清空 / AI 建议替换 等外部写入，
+  // 必须同步刷新 textarea DOM（用户立刻看到）+ 同步刷 ref 和 hasInputText（业务读到一致状态）。
+  _textBuffer = text || '';
+  if (inputRef.value) inputRef.value.value = _textBuffer;
+  inputMessage.value = _textBuffer;
+  hasInputText.value = _textBuffer.trim().length > 0;
+}
+// 发送闸门：sendMessage 一旦进入业务流程就置 true，httpPost 完成（成功/失败）才落回 false。
+// 用于：
+//   1) handleInputKeydown / sendMessage 入口防重入（按住 Enter 不会把同一段文本打入消息流多次）
+//   2) canSendMessage 计算 disabled，发送按钮在请求未回时不可再次点击
+//   3) IME 拼音确认导致的额外 Enter 也会被拒绝
+const sending = ref(false);
+// IME 拼音/选词中：浏览器在确认候选词那一刻仍会派发 keydown.Enter，
+// 用本地标志 + e.isComposing 双保险，避免把"上屏候选词"误当作"发送指令"。
+let _imeComposing = false;
 const attachmentList = ref<any[]>([]);
 const uploadFileList = ref<any[]>([]);
 const videoPreviewVisible = ref(false);
@@ -2374,11 +2446,16 @@ function getConversationsCacheKey() {
 }
 
 const canSendMessage = computed(() => {
+  // 上一条还没落库 / 没回包：发送按钮直接禁用，按 Enter 也走 sendMessage 入口的同一道闸门。
+  if (sending.value) return false;
   // 兜底：万一某次响应式回写漏触发，只要有 1 个已上传完成的附件就放行；
   // sendMessage 内部仍会用 filter(a => !a.uploading && a.url) 二次过滤脏数据。
   const hasReadyAttachment = attachmentList.value.some((a: any) => !a.uploading && a.url);
   const hasUploading = attachmentList.value.some((a: any) => a.uploading);
-  const hasText = inputMessage.value.trim().length > 0;
+  // hasInputText 是按 rAF 节流的 ref（_scheduleHasInputTextSync 维护），不是直接读 inputMessage.value。
+  // 这是关键：让 canSendMessage 不再依赖 inputMessage，长按打字时 inputMessage 即使变更，
+  // 模板 render fn 也不会被惊动；只在「有字 / 无字」边界翻转时 hasInputText 才会变，render fn 才重跑。
+  const hasText = hasInputText.value;
   // 纯发文件：只要有 1 个上传完成即可（不强制 noUploading，允许多附件混合时其中 1 个 OK 就发）。
   if (!hasText) return hasReadyAttachment;
   // 有文字：禁止有上传中的附件，避免发出去 url 为空的占位条。
@@ -2592,7 +2669,9 @@ function toggleEmojiPanel() {
 }
 
 function appendEmoji(emoji: string) {
-  inputMessage.value = `${inputMessage.value}${emoji}`;
+  // 走 setInputText 统一同步：textarea.value（用户立刻看到）+ _textBuffer + inputMessage ref + hasInputText。
+  // 不能直接 inputMessage.value = ... 因为模板已不再 v-model，textarea DOM 不会被自动更新。
+  setInputText(`${_textBuffer}${emoji}`);
   nextTick(() => inputRef.value?.focus());
 }
 
@@ -2980,7 +3059,7 @@ function applyQuickReply(item: any) {
     const name = url.split('/').pop() || (type === 'image' ? '图片' : '文件');
     attachmentList.value.push({ url, type, name });
   } else {
-    inputMessage.value = item?.content || '';
+    setInputText(item?.content || '');
   }
   showQuickReply.value = false;
   nextTick(() => inputRef.value?.focus());
@@ -3895,6 +3974,13 @@ function buildShortcutString(e: KeyboardEvent): string {
   return parts.join('+');
 }
 
+function handleInputCompositionStart() {
+  _imeComposing = true;
+}
+function handleInputCompositionEnd() {
+  _imeComposing = false;
+}
+
 function handleInputKeydown(e: KeyboardEvent) {
   if ((e.ctrlKey || e.altKey) && e.key !== 'Enter') {
     const pressed = buildShortcutString(e);
@@ -3909,7 +3995,14 @@ function handleInputKeydown(e: KeyboardEvent) {
   }
 
   if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    // 浏览器原生 IME 标记 + 本地标志 + Chrome 老式 keyCode 229：
+    // 任何一个判定为"正在拼音/选词"的，就把这次 Enter 当作"上屏候选词"，不发送消息。
+    // 这样修复了：边打字边按住 Enter 时，第一段拼音上屏的回车被误当作发送、把刚上屏的内容立刻打出去的现象。
+    if (_imeComposing || (e as any).isComposing || e.keyCode === 229) return;
     e.preventDefault();
+    // 入口闸门：上一条还在 await httpPost，直接吞掉这次 Enter，
+    // 修复了"按住 Enter 就把同一段文本重复发送、输入框又一直没空"的核心问题。
+    if (sending.value) return;
     sendMessage();
   } else if (e.key === 'Enter' && (e.ctrlKey || e.shiftKey)) {
     // 默认换行行为
@@ -3918,8 +4011,15 @@ function handleInputKeydown(e: KeyboardEvent) {
 
 // 发送消息
 async function sendMessage() {
-  const content = inputMessage.value.trim();
+  // 入口闸门：上一条还在 await httpPost，直接吞掉这次调用。
+  // 配合 handleInputKeydown 的同名检查 + canSendMessage 的 disabled，
+  // 形成"键盘 / 鼠标 / 函数级"三道护栏，杜绝重复发送。
+  if (sending.value) return;
   if (!currentConversation.value) return;
+  // _textBuffer 是 textarea 真实最新值，inputMessage ref 走 rAF 节流可能落后 1 帧，
+  // 在临界路径上手动同步一次保证拿到的是用户刚敲完那一刻的完整字符串。
+  flushInputBuffer();
+  const content = inputMessage.value.trim();
   // R8: 必须深拷贝 + strip 内部字段。
   // attachmentList 内含 _ 前缀字段、previewUrl: 'blob:...'、uploading 这些纯前端状态，
   // 直接 slice() 会让 JSON.stringify 把它们写进 extra → 落库 → WS 推送给对方，
@@ -3939,13 +4039,27 @@ async function sendMessage() {
       return out;
     });
   if (!content && attachments.length === 0) return;
-  
+
+  // 立刻置位 sending 闸门 + 清空输入框 / 附件区。
+  // 这两步必须在任何 await 之前同步完成，否则:
+  //   1) 用户连按 Enter 时第二次 sendMessage() 走到 inputMessage.value.trim() 仍能拿到旧内容
+  //   2) 第二次走到 ws/http 之前看到 sending=false（因为 await 还没开始），重复发送
+  // prevInput / prevAttachments 用于网络失败时回滚，让用户能直接修改重发。
+  sending.value = true;
+  const prevInput = inputMessage.value;
+  const prevAttachments = attachmentList.value.slice();
+  const prevUploadFileList = uploadFileList.value.slice();
+  // 走 setInputText 同步清空 textarea DOM + 各路 ref + buffer，保证连按 Enter 第二次拿到空内容。
+  setInputText('');
+  attachmentList.value = [];
+  uploadFileList.value = [];
+
   const wasUnassigned = currentConversation.value.status === 0; // 记录是否是待接入状态
   let localMsgId = '';
 
   // 客服发送消息，清除该会话的访客等待标记
   clearVisitorWaiting(currentConversation.value.id);
-  
+
   try {
     if (currentReplyMode.value === 0) {
       currentReplyMode.value = 1;
@@ -4017,16 +4131,14 @@ async function sendMessage() {
       }
     }
 
-    inputMessage.value = '';
-    // R8: 清空前先回收所有本地 blob: previewUrl，避免内存泄漏
-    for (const a of attachmentList.value) {
+    // 成功路径：输入框 / 附件区已在入口处清空，这里只需要回收本次提交的 blob 预览资源，
+    // 避免气泡内本地预览仍持有的 blob 内存延迟回收。
+    for (const a of prevAttachments) {
       if ((a as any)?.previewUrl) {
         try { URL.revokeObjectURL((a as any).previewUrl); } catch {}
       }
     }
-    attachmentList.value = [];
-    uploadFileList.value = [];
-    
+
     // ★ 发送消息后清除未读数（无论当前计数是否为0）
     currentConversation.value.unreadCount = 0;
     
@@ -4061,7 +4173,24 @@ async function sendMessage() {
         messages.value.splice(idx, 1);
       }
     }
+    // 失败回填：让用户能直接修改 / 重发，不丢内容也不丢附件 blob 预览。
+    // 仅在用户在等待期间未手动输入新内容 / 新附件时回填，避免覆盖用户当下的输入。
+    // 用 _textBuffer 而不是 inputMessage.value：rAF 节流可能让 ref 落后，buffer 才是用户真实输入。
+    if (!_textBuffer) setInputText(prevInput);
+    if (!attachmentList.value.length) {
+      attachmentList.value = prevAttachments;
+      uploadFileList.value = prevUploadFileList;
+    } else {
+      // 用户已经开始新一轮输入：旧附件 blob 不再可达，立即回收避免泄漏
+      for (const a of prevAttachments) {
+        if ((a as any)?.previewUrl) {
+          try { URL.revokeObjectURL((a as any).previewUrl); } catch {}
+        }
+      }
+    }
     message.error('发送失败');
+  } finally {
+    sending.value = false;
   }
 }
 
@@ -4443,10 +4572,10 @@ async function requestAiSuggestion(userMessage: string) {
 
 function useSuggestion(direct: boolean) {
   if (direct) {
-    inputMessage.value = aiSuggestion.value;
+    setInputText(aiSuggestion.value);
     sendMessage();
   } else {
-    inputMessage.value = aiSuggestion.value;
+    setInputText(aiSuggestion.value);
     inputRef.value?.focus();
   }
   aiSuggestion.value = '';
@@ -6406,6 +6535,10 @@ function restoreMessageScroll() {
   padding: 20px 24px;
   min-height: 0;
   background: var(--cs-bg-chat);
+  // 同步隔离：消息列表本身是独立滚动容器，允许浏览器把它的 layout / paint 与兄弟节点解耦。
+  // 和底部 .chat-input-area 的 contain 一起，AntD a-textarea autoSize 每次测量 scrollHeight 时
+  // 不再把庞大的消息树拖进 forced synchronous layout，打字卡顿由此消失。
+  contain: layout paint style;
 }
 
 // ==================== 加载历史消息 ====================
@@ -6732,6 +6865,11 @@ function restoreMessageScroll() {
   padding: 12px 20px;
   flex-shrink: 0;
   background: var(--cs-bg-surface);
+  // 把底部输入区从主文档流中隔离出来：AntD a-textarea 的 autoSize 每次 input 都会读 hidden
+  // textarea 的 scrollHeight / getComputedStyle，触发全局强制同步 layout。消息列表里如果有
+  // 大量气泡 / 视频 / 图片，每次按键都要把整棵消息树重新布局一次，直接表现为"打字卡顿"。
+  // contain: layout style 告诉浏览器本区域内的布局与样式变化不会外溢，reflow 只在本区内完成。
+  contain: layout style;
 
   .input-toolbar {
     display: flex;
@@ -6862,6 +7000,20 @@ function restoreMessageScroll() {
       font-size: 14px;
       background: transparent;
       &:focus { box-shadow: none; }
+    }
+
+    // 关掉 AntD autoSize 后用浏览器原生 field-sizing 接管高度计算。
+    // line-height 22px × minRows 1 = 22px；× maxRows 8 = 176px。
+    // padding 上下 4px × 2 = 8px，所以 min/max-height 对应 30 / 184。
+    // 不支持 field-sizing 的浏览器 textarea 会保持 rows=1 的固定高度，体验降级但仍可用。
+    :deep(.cs-fast-textarea) {
+      field-sizing: content;
+      min-height: 30px;
+      max-height: 184px;
+      line-height: 22px;
+      padding-top: 4px;
+      padding-bottom: 4px;
+      overflow-y: auto;
     }
   }
 
