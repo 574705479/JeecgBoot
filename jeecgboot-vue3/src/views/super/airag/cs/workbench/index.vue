@@ -6985,6 +6985,10 @@ function restoreMessageScroll() {
   }
 
   .input-wrapper {
+    // 与内部 textarea 同宽，避免只点到左侧小条才出现光标（field-sizing: content 时空 textarea 会按内容缩窄宽度）
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
     background: var(--cs-bg-input);
     border-radius: 12px;
     padding: 6px 12px;
@@ -7007,6 +7011,12 @@ function restoreMessageScroll() {
     // padding 上下 4px × 2 = 8px，所以 min/max-height 对应 30 / 184。
     // 不支持 field-sizing 的浏览器 textarea 会保持 rows=1 的固定高度，体验降级但仍可用。
     :deep(.cs-fast-textarea) {
+      // 必须显式拉满行宽，否则在 field-sizing: content 下会缩成「占位符/首行」宽度，整根灰条只有左侧可点
+      display: block;
+      width: 100%;
+      min-width: 0;
+      max-width: 100%;
+      box-sizing: border-box;
       field-sizing: content;
       min-height: 30px;
       max-height: 184px;
