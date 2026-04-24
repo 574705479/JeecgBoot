@@ -1843,6 +1843,15 @@ async function tryBootstrapFastPath(): Promise<boolean> {
       try { setDeviceCredential(userId.value, appKey.value); } catch {}
     }
 
+    // 鉴权通过 + 黑名单放行，但后端未建出 conversation（例如 bootstrap 子任务 timeout）
+    // → 返回 false 让 onMounted 走 legacy 路径的 initConversation()，靠独立 /cs/conversation/create 重试
+    // 否则 onMounted 后续会调 connectWebSocket()，这里 conversationId 为空会报
+    // "缺少conversationId或userId，无法连接WebSocket"
+    if (!conversationId.value) {
+      console.warn('[bootstrap] fresh 响应缺失 conversation（后端可能仍在创建/异常），回退 legacy 路径');
+      return false;
+    }
+
     return true;
   } catch (e) {
     console.warn('[bootstrap] failed, fallback to legacy', e);
@@ -2941,7 +2950,10 @@ function getWsBaseUrl() {
 
 function connectWebSocket() {
   if (!conversationId.value || !userId.value) {
-    console.warn('缺少conversationId或userId，无法连接WebSocket');
+    console.warn(
+      '[WS] 连接条件不满足，跳过建连: conversationId=' + (conversationId.value || '<empty>')
+      + ', userId=' + (userId.value || '<empty>')
+    );
     return;
   }
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {

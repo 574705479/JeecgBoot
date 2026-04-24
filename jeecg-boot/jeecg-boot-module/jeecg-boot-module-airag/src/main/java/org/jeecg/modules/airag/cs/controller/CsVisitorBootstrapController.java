@@ -180,6 +180,14 @@ public class CsVisitorBootstrapController {
                     return ok(vo);
                 }
                 visitorUserId = devId;
+                // 免 Token 模式下 visitorAppId 沿用全局访客应用配置，
+                // 与 CsConversationController / CsWebSocketInterceptor 行为对齐，
+                // 避免 fConv 任务里 fAppId=null 导致 getOrCreateConversation 无法命中现有会话
+                try {
+                    visitorAppId = visitorTokenService.getGlobalVisitorAppId();
+                } catch (Exception ignore) {
+                    // 非致命：appId 为空时会走默认分支，不影响会话创建
+                }
                 vo.setAuthStatus("device_valid");
             } else {
                 vo.setAuthStatus("no_device_id");

@@ -606,6 +606,8 @@
 						<nonFilteredFileExtension>cmap</nonFilteredFileExtension>
 						<nonFilteredFileExtension>cur</nonFilteredFileExtension>
 						<nonFilteredFileExtension>zip</nonFilteredFileExtension>
+						<!-- ip2region 离线IP库二进制文件 -->
+						<nonFilteredFileExtension>xdb</nonFilteredFileExtension>
                     </nonFilteredFileExtensions>
                 </configuration>
             </plugin>

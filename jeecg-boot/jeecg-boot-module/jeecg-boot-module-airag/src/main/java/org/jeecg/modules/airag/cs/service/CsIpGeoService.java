@@ -1,25 +1,30 @@
 package org.jeecg.modules.airag.cs.service;
 
-import com.alibaba.fastjson.JSONObject;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
-import org.jeecg.modules.airag.cs.entity.CsIpGeoCache;
-import org.jeecg.modules.airag.cs.mapper.CsIpGeoCacheMapper;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.ResponseEntity;
+import org.lionsoul.ip2region.xdb.Searcher;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
 
-import java.util.Date;
+import java.io.InputStream;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
- * IP 地理位置服务
- * 
- * 查询优先级: 本地缓存表 → ip-api.com 免费接口 → 结果回写缓存
- * 
+ * IP 地理位置服务（ip2region 离线库版）
+ *
+ * <p>启动时把 {@code resources/ip2region/ip2region.xdb}（约 11 MB）全量读入内存，
+ * 使用线程安全的 {@link Searcher#newWithBuffer(byte[])} 单例做查询，微秒级返回。</p>
+ *
+ * <p>替换原来的 {@code http://ip-api.com} 外网调用：原实现 {@code new RestTemplate()}
+ * 没配 timeout，国内机房访问 ip-api.com 不通时会退化到 OS TCP 默认值（~130s），
+ * 把 createConversation 拖到 nginx 504。</p>
+ *
+ * <p>兜底策略：xdb 加载失败（文件缺失 / 损坏）时 {@code searcher} 保持为 {@code null}，
+ * {@link #queryGeoByIp(String)} 直接返回空 Map 不抛异常，最坏结果是失去归属地信息，
+ * 不会再拖慢上游调用。</p>
+ *
  * @author jeecg
  * @date 2026-02-06
  */
@@ -27,136 +32,76 @@ import java.util.regex.Pattern;
 @Service
 public class CsIpGeoService {
 
-    /** 内网IP正则 */
+    /** 内网/本地 IP 正则（与历史实现保持一致） */
     private static final Pattern PRIVATE_IP_PATTERN = Pattern.compile(
             "^(127\\.|10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.|0:0:0:0|::1|localhost)"
     );
 
-    /** ip-api.com 免费接口（支持中文） */
-    private static final String IP_API_URL = "http://ip-api.com/json/{ip}?lang=zh-CN&fields=status,country,regionName,city";
+    /** xdb 相对 classpath 路径 */
+    private static final String XDB_LOCATION = "ip2region/ip2region.xdb";
 
-    @Autowired
-    private CsIpGeoCacheMapper ipGeoCacheMapper;
+    /** 线程安全单例。加载失败时保持 null，查询直接返空 Map 兜底 */
+    private volatile Searcher searcher;
+
+    @PostConstruct
+    public void init() {
+        try (InputStream is = new ClassPathResource(XDB_LOCATION).getInputStream()) {
+            byte[] buf = is.readAllBytes();
+            this.searcher = Searcher.newWithBuffer(buf);
+            log.info("[IP-Geo] ip2region 离线库加载成功, size={}KB", buf.length / 1024);
+        } catch (Exception e) {
+            log.error("[IP-Geo] ip2region 初始化失败，IP 归属地功能将返回空结果: {}",
+                    e.getMessage(), e);
+        }
+    }
 
     /**
-     * 根据 IP 查询地理位置
+     * 根据 IP 查询地理位置。
      *
-     * @param ip IP 地址
-     * @return Map 包含: country, province, city；查询失败返回空 Map
+     * @param ip IP 地址；内网 IP / 空值 / 查询失败均安全返回空 Map，不抛异常
+     * @return Map 包含 {@code country / province / city}；查询失败返回空 Map
      */
     public Map<String, String> queryGeoByIp(String ip) {
         Map<String, String> result = new HashMap<>(3);
 
-        if (ip == null || ip.isEmpty() || isPrivateIp(ip)) {
+        if (ip == null || ip.isEmpty() || isPrivateIp(ip) || searcher == null) {
             return result;
         }
 
         try {
-            // 1. 先查本地缓存
-            CsIpGeoCache cached = queryFromCache(ip);
-            if (cached != null) {
-                result.put("country", cached.getCountry());
-                result.put("province", cached.getProvince());
-                result.put("city", cached.getCity());
-                log.debug("[IP-Geo] 命中缓存: ip={}, country={}, province={}, city={}",
-                        ip, cached.getCountry(), cached.getProvince(), cached.getCity());
+            // ip2region 2.x 返回格式: "国家|区域|省|市|ISP"
+            String region = searcher.search(ip);
+            if (region == null || region.isEmpty()) {
                 return result;
             }
-
-            // 2. 调用外部 API
-            result = queryFromApi(ip);
-
-            // 3. 写入缓存
-            if (!result.isEmpty()) {
-                saveToCache(ip, result);
+            String[] parts = region.split("\\|", -1);
+            String country = parts.length > 0 ? nullIfBlankOrZero(parts[0]) : null;
+            String province = parts.length > 2 ? nullIfBlankOrZero(parts[2]) : null;
+            String city = parts.length > 3 ? nullIfBlankOrZero(parts[3]) : null;
+            if (country != null) {
+                result.put("country", country);
             }
-        } catch (Exception e) {
-            log.warn("[IP-Geo] 查询IP地理位置失败: ip={}, error={}", ip, e.getMessage());
-        }
-
-        return result;
-    }
-
-    /**
-     * 从本地缓存查询
-     */
-    private CsIpGeoCache queryFromCache(String ip) {
-        try {
-            LambdaQueryWrapper<CsIpGeoCache> wrapper = new LambdaQueryWrapper<>();
-            wrapper.eq(CsIpGeoCache::getIp, ip).last("LIMIT 1");
-            return ipGeoCacheMapper.selectOne(wrapper);
-        } catch (Exception e) {
-            log.warn("[IP-Geo] 查询缓存失败: ip={}", ip, e);
-            return null;
-        }
-    }
-
-    /**
-     * 调用 ip-api.com 接口
-     */
-    private Map<String, String> queryFromApi(String ip) {
-        Map<String, String> result = new HashMap<>(3);
-        try {
-            RestTemplate restTemplate = new RestTemplate();
-            // 设置超时（使用默认配置，一般3-5秒）
-            String url = IP_API_URL.replace("{ip}", ip);
-            ResponseEntity<String> response = restTemplate.getForEntity(url, String.class);
-
-            if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
-                JSONObject json = JSONObject.parseObject(response.getBody());
-                if ("success".equals(json.getString("status"))) {
-                    String country = json.getString("country");
-                    String regionName = json.getString("regionName");
-                    String city = json.getString("city");
-
-                    if (country != null) {
-                        result.put("country", country);
-                    }
-                    if (regionName != null) {
-                        result.put("province", regionName);
-                    }
-                    if (city != null) {
-                        result.put("city", city);
-                    }
-
-                    // 存储原始响应供调试
-                    result.put("_raw", response.getBody());
-
-                    log.info("[IP-Geo] API查询成功: ip={}, country={}, province={}, city={}",
-                            ip, country, regionName, city);
-                } else {
-                    log.warn("[IP-Geo] API返回失败: ip={}, response={}", ip, response.getBody());
-                }
+            if (province != null) {
+                result.put("province", province);
             }
+            if (city != null) {
+                result.put("city", city);
+            }
+            log.debug("[IP-Geo] 离线查询成功: ip={}, country={}, province={}, city={}",
+                    ip, country, province, city);
         } catch (Exception e) {
-            log.warn("[IP-Geo] 调用ip-api.com失败: ip={}, error={}", ip, e.getMessage());
+            log.warn("[IP-Geo] 离线查询异常: ip={}, error={}", ip, e.getMessage());
         }
         return result;
     }
 
-    /**
-     * 写入本地缓存
-     */
-    private void saveToCache(String ip, Map<String, String> geoData) {
-        try {
-            CsIpGeoCache cache = new CsIpGeoCache();
-            cache.setIp(ip);
-            cache.setCountry(geoData.get("country"));
-            cache.setProvince(geoData.get("province"));
-            cache.setCity(geoData.get("city"));
-            cache.setRawResponse(geoData.get("_raw"));
-            cache.setCreateTime(new Date());
-            ipGeoCacheMapper.insert(cache);
-            log.debug("[IP-Geo] 缓存已写入: ip={}", ip);
-        } catch (Exception e) {
-            // 可能是唯一索引冲突（并发写入同一IP），忽略
-            log.warn("[IP-Geo] 写入缓存失败(可能已存在): ip={}, error={}", ip, e.getMessage());
-        }
+    /** ip2region 对未知字段统一用 "0" 占位；null/空/0 都视为无效 */
+    private static String nullIfBlankOrZero(String v) {
+        if (v == null) return null;
+        String t = v.trim();
+        return (t.isEmpty() || "0".equals(t)) ? null : t;
     }
 
-    /**
-     * 判断是否为内网/本地IP
-     */
     private boolean isPrivateIp(String ip) {
         return PRIVATE_IP_PATTERN.matcher(ip).find();
     }
