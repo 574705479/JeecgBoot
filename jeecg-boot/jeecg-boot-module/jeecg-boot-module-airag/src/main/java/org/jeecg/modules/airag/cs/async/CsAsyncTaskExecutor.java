@@ -1,25 +1,54 @@
 package org.jeecg.modules.airag.cs.async;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
+/**
+ * 客服模块异步任务执行器。
+ *
+ * <p>按用途拆分三个独立线程池，避免相互饿死：</p>
+ * <ul>
+ *   <li><b>ws</b>：WebSocket 推送；追求低延迟，默认 8 线程</li>
+ *   <li><b>mongo</b>：消息落库；追求吞吐 + 隔离 DB 抖动，默认 4 线程</li>
+ *   <li><b>conv</b>：会话状态更新 / FAQ / AI 触发链路，默认 4 线程</li>
+ * </ul>
+ *
+ * <p>所有线程池规格都支持 {@code jeecg.cs.async.*} 配置覆盖，方便不同负载场景调参。</p>
+ */
 @Slf4j
 @Component
 public class CsAsyncTaskExecutor {
-    private static final int MONGO_THREADS = 2;
-    private static final int CONVERSATION_THREADS = 2;
-    private static final int WS_THREADS = 4;
-    private static final int MONGO_QUEUE = 2000;
-    private static final int CONVERSATION_QUEUE = 2000;
-    private static final int WS_QUEUE = 2000;
 
-    private final ThreadPoolExecutor mongoExecutor = buildExecutor("cs-mongo", MONGO_THREADS, MONGO_QUEUE);
-    private final ThreadPoolExecutor conversationExecutor = buildExecutor("cs-conv", CONVERSATION_THREADS, CONVERSATION_QUEUE);
-    private final ThreadPoolExecutor wsExecutor = buildExecutor("cs-ws", WS_THREADS, WS_QUEUE);
+    @Value("${jeecg.cs.async.ws-threads:8}")
+    private int wsThreads;
+
+    @Value("${jeecg.cs.async.mongo-threads:4}")
+    private int mongoThreads;
+
+    @Value("${jeecg.cs.async.conversation-threads:4}")
+    private int conversationThreads;
+
+    @Value("${jeecg.cs.async.queue-size:2000}")
+    private int queueSize;
+
+    private ThreadPoolExecutor mongoExecutor;
+    private ThreadPoolExecutor conversationExecutor;
+    private ThreadPoolExecutor wsExecutor;
+
+    @PostConstruct
+    public void init() {
+        this.mongoExecutor = buildExecutor("cs-mongo", mongoThreads, queueSize);
+        this.conversationExecutor = buildExecutor("cs-conv", conversationThreads, queueSize);
+        this.wsExecutor = buildExecutor("cs-ws", wsThreads, queueSize);
+        log.info("[CS-Async] executors initialized: ws={}, mongo={}, conv={}, queue={}",
+                wsThreads, mongoThreads, conversationThreads, queueSize);
+    }
 
     public void submitMongo(Runnable task) {
         execute(mongoExecutor, task, "mongo");
@@ -34,6 +63,11 @@ public class CsAsyncTaskExecutor {
     }
 
     private void execute(ThreadPoolExecutor executor, Runnable task, String type) {
+        if (executor == null) {
+            // 极端情况下 Spring 尚未完成初始化，fall back 到 caller thread
+            task.run();
+            return;
+        }
         try {
             executor.execute(task);
         } catch (RejectedExecutionException e) {
@@ -42,8 +76,8 @@ public class CsAsyncTaskExecutor {
         }
     }
 
-    private ThreadPoolExecutor buildExecutor(String name, int size, int queueSize) {
-        BlockingQueue<Runnable> queue = new LinkedBlockingQueue<>(queueSize);
+    private ThreadPoolExecutor buildExecutor(String name, int size, int queueCap) {
+        BlockingQueue<Runnable> queue = new LinkedBlockingQueue<>(queueCap);
         ThreadFactory factory = new ThreadFactory() {
             private final AtomicInteger index = new AtomicInteger(1);
 
@@ -74,6 +108,9 @@ public class CsAsyncTaskExecutor {
     }
 
     private void shutdownExecutor(ExecutorService executor, String name) {
+        if (executor == null) {
+            return;
+        }
         executor.shutdown();
         try {
             if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {

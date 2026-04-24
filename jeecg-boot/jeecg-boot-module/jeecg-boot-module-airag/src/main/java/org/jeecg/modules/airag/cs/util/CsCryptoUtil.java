@@ -23,11 +23,39 @@ public class CsCryptoUtil {
     private final SecretKeySpec transportKeySpec;
     private final IvParameterSpec transportIvSpec;
 
+    /**
+     * 每线程复用一个 {@link Cipher} 实例。
+     *
+     * <p>原代码每次加解密都 {@code Cipher.getInstance("AES/CBC/PKCS5Padding")}，
+     * 该调用会走 JCA Provider 查找 + SPI 实例化，JDK 17 上约 50-200μs。
+     * 客服消息主路径单条会用到 5 次（1 次 decryptTransport + 2 次 encryptStorage + 2 次 encryptTransport），
+     * 相当于浪费 1-2ms。</p>
+     *
+     * <p>Cipher 实例在 {@code doFinal} 后可以再次 {@code init}，所以复用后每次只需 {@code init} (~10μs)
+     * + {@code doFinal} (~10μs)。</p>
+     *
+     * <p>注意线程安全：Cipher 实例本身不是线程安全的，必须用 ThreadLocal 隔离。Tomcat 工作线程池
+     * 长期复用线程，持有一个 Cipher 对象（~KB）不会造成泄漏。</p>
+     */
+    private static final ThreadLocal<Cipher> CIPHER_CACHE = ThreadLocal.withInitial(() -> {
+        try {
+            return Cipher.getInstance(CIPHER_ALGORITHM);
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to init AES cipher", e);
+        }
+    });
+
     public CsCryptoUtil(CsCryptoConfig config) {
         this.storageKeySpec = new SecretKeySpec(config.getStorageKey().getBytes(StandardCharsets.UTF_8), AES_ALGORITHM);
         this.storageIvSpec = new IvParameterSpec(config.getStorageIv().getBytes(StandardCharsets.UTF_8));
         this.transportKeySpec = new SecretKeySpec(config.getTransportKey().getBytes(StandardCharsets.UTF_8), AES_ALGORITHM);
         this.transportIvSpec = new IvParameterSpec(config.getTransportIv().getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static Cipher acquire(int mode, SecretKeySpec key, IvParameterSpec iv) throws Exception {
+        Cipher cipher = CIPHER_CACHE.get();
+        cipher.init(mode, key, iv);
+        return cipher;
     }
 
     /**
@@ -38,8 +66,7 @@ public class CsCryptoUtil {
             return plaintext;
         }
         try {
-            Cipher cipher = Cipher.getInstance(CIPHER_ALGORITHM);
-            cipher.init(Cipher.ENCRYPT_MODE, storageKeySpec, storageIvSpec);
+            Cipher cipher = acquire(Cipher.ENCRYPT_MODE, storageKeySpec, storageIvSpec);
             byte[] encrypted = cipher.doFinal(plaintext.getBytes(StandardCharsets.UTF_8));
             return ENC_PREFIX + Base64.getEncoder().encodeToString(encrypted);
         } catch (Exception e) {
@@ -60,8 +87,7 @@ public class CsCryptoUtil {
         }
         try {
             String base64Part = ciphertext.substring(ENC_PREFIX.length());
-            Cipher cipher = Cipher.getInstance(CIPHER_ALGORITHM);
-            cipher.init(Cipher.DECRYPT_MODE, storageKeySpec, storageIvSpec);
+            Cipher cipher = acquire(Cipher.DECRYPT_MODE, storageKeySpec, storageIvSpec);
             byte[] decrypted = cipher.doFinal(Base64.getDecoder().decode(base64Part));
             return new String(decrypted, StandardCharsets.UTF_8);
         } catch (Exception e) {
@@ -78,8 +104,7 @@ public class CsCryptoUtil {
             return data;
         }
         try {
-            Cipher cipher = Cipher.getInstance(CIPHER_ALGORITHM);
-            cipher.init(Cipher.ENCRYPT_MODE, transportKeySpec, transportIvSpec);
+            Cipher cipher = acquire(Cipher.ENCRYPT_MODE, transportKeySpec, transportIvSpec);
             byte[] encrypted = cipher.doFinal(data.getBytes(StandardCharsets.UTF_8));
             return Base64.getEncoder().encodeToString(encrypted);
         } catch (Exception e) {
@@ -96,8 +121,7 @@ public class CsCryptoUtil {
             return ciphertext;
         }
         try {
-            Cipher cipher = Cipher.getInstance(CIPHER_ALGORITHM);
-            cipher.init(Cipher.DECRYPT_MODE, transportKeySpec, transportIvSpec);
+            Cipher cipher = acquire(Cipher.DECRYPT_MODE, transportKeySpec, transportIvSpec);
             byte[] decrypted = cipher.doFinal(Base64.getDecoder().decode(ciphertext));
             return new String(decrypted, StandardCharsets.UTF_8);
         } catch (Exception e) {

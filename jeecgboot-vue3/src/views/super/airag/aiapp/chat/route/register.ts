@@ -13,16 +13,9 @@ const ChatRoutes: RouteRecordRaw[] = [
       ignoreAuth: true,
     },
   },
-  // 新版用户聊天（支持AI和人工客服，不需要appId参数）
-  {
-    path: "/cs/chat",
-    name: "cs-user-chat",
-    component: () => import("/@/views/super/airag/cs/userChat/index.vue"),
-    meta: {
-      title: '在线客服',
-      ignoreAuth: true,
-    },
-  },  
+  // 访客端 /cs/userChat（含 alias /cs/chat）路由已彻底下线，
+  // 由独立子项目 jeecgboot-vue3-visitor 接管，build:with-visitor 会把访客端产物
+  // 输出到 dist/cs/userChat/index.html，由 nginx 优先匹配真实文件直接返回访客端 SPA。
   {
     path: "/ai/app/chatIcon/:appId",
     name: "ai-chatIcon-@appId",

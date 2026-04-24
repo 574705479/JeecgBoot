@@ -112,4 +112,33 @@ public final class CsRedisKeys {
      */
     public static final String REDIS_AGENT_RECENT_LOGIN_PREFIX = "cs:agent:recent_login:";
     public static final int RECENT_LOGIN_TTL_SECONDS = 30;
+
+    // ==================== 离线消息缓冲（Redis Stream） ====================
+
+    /**
+     * 访客侧离线消息缓冲 Stream key 前缀（完整 key 形如 cs:offline:user:{conversationId}）。
+     *
+     * <p>当 WebSocket 推送因用户不在线而失败时，把 {@code CsWebSocketMessage} JSON 序列化后 XADD 进该 Stream；
+     * 用户重连（WS 握手）时 XRANGE 全量读取并串行下推，然后 DEL 清理，用 Stream 替代 Mongo 查最近消息的热路径。</p>
+     *
+     * <p>仅保留消息型 payload（TYPE_MESSAGE / TYPE_AI_STREAM_COMPLETE / TYPE_SYSTEM），
+     * 类似 typing / pong 之类的控制帧不做持久化。</p>
+     */
+    public static final String OFFLINE_USER_STREAM_PREFIX = "cs:offline:user:";
+
+    /**
+     * 客服侧离线消息缓冲 Stream key 前缀（完整 key 形如 cs:offline:agent:{agentId}）。
+     *
+     * <p>主要覆盖"客服侧 DELIVERY_FAILED 通知 / 其他客服发的同事会话消息"等定向场景。</p>
+     */
+    public static final String OFFLINE_AGENT_STREAM_PREFIX = "cs:offline:agent:";
+
+    /** 离线 Stream 单 key 的 TTL（秒）。默认 24h：超过该窗口的消息不再补齐，避免长期积压占内存/磁盘 */
+    public static final long OFFLINE_MESSAGE_TTL_SECONDS = 24 * 60 * 60L;
+
+    /**
+     * 离线 Stream 单 key 保留的最近条数上限（XADD MAXLEN ~）。
+     * 超过该长度 XADD 时自动裁掉最老条目，避免极端用户积压过多消息导致 Redis 内存膨胀。
+     */
+    public static final long OFFLINE_MESSAGE_MAX_LEN = 500L;
 }

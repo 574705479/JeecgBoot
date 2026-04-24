@@ -38,6 +38,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 /**
@@ -93,6 +94,9 @@ public class CsMessageServiceImpl implements ICsMessageService {
     @Autowired
     private CsCryptoUtil csCryptoUtil;
 
+    @Autowired
+    private org.jeecg.modules.airag.cs.service.CsOfflineMessageBuffer offlineMessageBuffer;
+
     // AI建议缓存 (conversationId -> suggestion)，限制最大容量防止内存泄漏
     private static final int MAX_AI_SUGGESTION_CACHE_SIZE = 500;
     private final Map<String, String> aiSuggestionCache = new ConcurrentHashMap<>();
@@ -134,74 +138,74 @@ public class CsMessageServiceImpl implements ICsMessageService {
 
     /**
      * 用户发送消息（4参原始版的访客上下文重载）
+     *
+     * <p>极速路径：先构造 WS payload → 立刻推给客服，再异步落库/更新会话/FAQ/AI。</p>
      */
     private CsMessage sendUserMessage(String conversationId, String userId, String userName, String content,
                                       String userIp, String userAgent, String deviceId, String userLang) {
-        log.info("[CS-Message] 用户发送消息: conversationId={}, userId={}", conversationId, userId);
+        // 热路径降级为 debug：每条消息打 info 级在 Fanout 场景下会串行阻塞 Logback appender
+        log.debug("[CS-Message] 用户发送消息: conversationId={}, userId={}", conversationId, userId);
 
-        // 确保会话存在
-        CsConversation conversation = conversationService.getOrCreateConversation(
+        // 确保会话存在（同步，ID/分配信息是后续推送依赖的基础）
+        final CsConversation conversation = conversationService.getOrCreateConversation(
                 conversationId, null, userId, userName, userIp, userAgent, deviceId, userLang);
 
-        // ★ 诊断日志：检查会话状态
-        log.info("[CS-Message] 会话状态: conversationId={}, status={}, ownerAgentId={}, replyMode={}",
+        log.debug("[CS-Message] 会话状态: conversationId={}, status={}, ownerAgentId={}, replyMode={}",
                 conversationId,
                 conversation.getStatus(),
                 conversation.getOwnerAgentId(),
                 conversation.getReplyMode());
 
-        // 创建用户消息
-        CsMessage userMessage = CsMessage.createUserMessage(conversationId, userId, userName, content);
+        final CsMessage userMessage = CsMessage.createUserMessage(conversationId, userId, userName, content);
 
-        // 保存到MongoDB
-        saveToMongo(userMessage);
+        // 构造 WS payload（一次加密+序列化，后续给客服/离线缓冲共用）
+        final CsWebSocketMessage wsPayload = buildMessageWsPayload(conversationId, userMessage);
 
-        // 更新会话最后消息
-        conversationService.updateLastMessage(conversationId, content, 0);
+        // 同步立即推送给所有在线客服，保证极速感
+        pushToAgents(wsPayload);
 
-        // 重置超时提醒标记（用户活跃，取消超时倒计时）
-        conversationService.resetTimeoutWarning(conversationId);
+        // 异步持久化到 MongoDB
+        asyncTaskExecutor.submitMongo(() -> saveToMongo(userMessage));
 
-        // 标记访客发消息时间（用于客服超时未回复精确判断）
-        conversationService.updateVisitorLastMsgTime(conversationId);
+        // 异步更新会话状态 + FAQ/AI 链路（全部挤到 conversation 线程池，不阻塞 WS 读线程）
+        final Integer originalStatus = conversation.getStatus();
+        final Integer replyMode = conversation.getReplyMode() != null
+                ? conversation.getReplyMode() : CsConversation.REPLY_MODE_AI_AUTO;
+        asyncTaskExecutor.submitConversation(() -> {
+            try {
+                conversationService.updateLastMessage(conversationId, content, 0);
+                conversationService.resetTimeoutWarning(conversationId);
+                conversationService.updateVisitorLastMsgTime(conversationId);
+                conversationService.incrementUnread(conversationId);
 
-        // 推送给所有相关客服
-        pushToAgents(conversation, userMessage);
+                // FAQ 关键词匹配（仅未分配会话生效）
+                if (originalStatus != null && originalStatus == CsConversation.STATUS_UNASSIGNED) {
+                    FaqMatchResult faqResult = tryFaqKeywordMatch(conversationId, content);
+                    if (faqResult.matched) {
+                        return;
+                    }
+                    if (faqResult.humanAgentEnabled && faqResult.faqEnabled) {
+                        sendSmartAssistantNoMatchMessage(conversationId);
+                        return;
+                    }
+                }
 
-        // 增加客服未读数
-        conversationService.incrementUnread(conversationId);
-
-        // FAQ关键词匹配（仅未分配会话生效，已有客服接入则跳过）
-        if (conversation.getStatus() == CsConversation.STATUS_UNASSIGNED) {
-            FaqMatchResult faqResult = tryFaqKeywordMatch(conversationId, content);
-            if (faqResult.matched) {
-                return userMessage;
+                // 按回复模式触发 AI 分支（@Async 方法再次切换到独立线程）
+                switch (replyMode) {
+                    case CsConversation.REPLY_MODE_AI_AUTO:
+                        generateAndSendAiReply(conversation, content);
+                        break;
+                    case CsConversation.REPLY_MODE_AI_ASSIST:
+                        generateAiSuggestionStream(conversation, content, null);
+                        break;
+                    case CsConversation.REPLY_MODE_MANUAL:
+                    default:
+                        break;
+                }
+            } catch (Exception e) {
+                log.error("[CS-Message] 异步会话更新/FAQ/AI 链路失败: conversationId={}", conversationId, e);
             }
-            if (faqResult.humanAgentEnabled && faqResult.faqEnabled) {
-                sendSmartAssistantNoMatchMessage(conversationId);
-                return userMessage;
-            }
-        }
-
-        // 根据回复模式处理
-        int replyMode = conversation.getReplyMode() != null ?
-                conversation.getReplyMode() : CsConversation.REPLY_MODE_AI_AUTO;
-
-        switch (replyMode) {
-            case CsConversation.REPLY_MODE_AI_AUTO:
-                // AI自动模式：生成并发送AI回复
-                generateAndSendAiReply(conversation, content);
-                break;
-
-            case CsConversation.REPLY_MODE_AI_ASSIST:
-                // AI辅助模式：流式生成建议推送给客服（使用客服AI建议应用，支持知识库）
-                generateAiSuggestionStream(conversation, content, null);
-                break;
-
-            case CsConversation.REPLY_MODE_MANUAL:
-                // 手动模式：不做任何处理，等待客服回复
-                break;
-        }
+        });
 
         return userMessage;
     }
@@ -214,37 +218,32 @@ public class CsMessageServiceImpl implements ICsMessageService {
     @Override
     public CsMessage sendUserMessageRaw(String conversationId, String userId, String userName, String content,
                                         String userIp, String userAgent, String deviceId, String userLang) {
-        log.info("[CS-Message] 用户发送消息(Raw，不触发AI): conversationId={}, userId={}", conversationId, userId);
+        log.debug("[CS-Message] 用户发送消息(Raw，不触发AI): conversationId={}, userId={}", conversationId, userId);
 
-        // 确保会话存在
-        CsConversation conversation = conversationService.getOrCreateConversation(
+        // 确保会话存在（同步）
+        final CsConversation conversation = conversationService.getOrCreateConversation(
                 conversationId, null, userId, userName, userIp, userAgent, deviceId, userLang);
 
-        // 创建用户消息
-        CsMessage userMessage = CsMessage.createUserMessage(conversationId, userId, userName, content);
+        final CsMessage userMessage = CsMessage.createUserMessage(conversationId, userId, userName, content);
 
-        // 保存到MongoDB
-        saveToMongo(userMessage);
+        // 极速推送：先构造 payload，再同步推给访客自己和所有客服
+        final CsWebSocketMessage wsPayload = buildMessageWsPayload(conversationId, userMessage);
+        pushToUser(conversationId, conversation != null ? conversation.getUserId() : userId, wsPayload);
+        pushToAgents(wsPayload);
 
-        // 更新会话最后消息
-        conversationService.updateLastMessage(conversationId, content, 0);
+        // 异步落库 + 更新会话状态 + 增未读
+        asyncTaskExecutor.submitMongo(() -> saveToMongo(userMessage));
+        asyncTaskExecutor.submitConversation(() -> {
+            try {
+                conversationService.updateLastMessage(conversationId, content, 0);
+                conversationService.resetTimeoutWarning(conversationId);
+                conversationService.updateVisitorLastMsgTime(conversationId);
+                conversationService.incrementUnread(conversationId);
+            } catch (Exception e) {
+                log.error("[CS-Message] 异步会话更新失败(Raw): conversationId={}", conversationId, e);
+            }
+        });
 
-        // 重置超时提醒标记
-        conversationService.resetTimeoutWarning(conversationId);
-
-        // 标记访客发消息时间（用于客服超时未回复精确判断）
-        conversationService.updateVisitorLastMsgTime(conversationId);
-
-        // 推送给访客自己（因为消息是后端代发的，前端需要通过WebSocket接收）
-        pushToUser(conversationId, userMessage);
-
-        // 推送给所有相关客服
-        pushToAgents(conversation, userMessage);
-
-        // 增加客服未读数
-        conversationService.incrementUnread(conversationId);
-
-        // 不触发AI回复，直接返回
         return userMessage;
     }
 
@@ -259,14 +258,14 @@ public class CsMessageServiceImpl implements ICsMessageService {
     public CsMessage sendUserMessage(String conversationId, String userId, String userName, String content,
                                      Integer msgType, String extra,
                                      String userIp, String userAgent, String deviceId, String userLang) {
-        log.info("[CS-Message] 用户发送消息(含附件): conversationId={}, userId={}, msgType={}", conversationId, userId, msgType);
+        log.debug("[CS-Message] 用户发送消息(含附件): conversationId={}, userId={}, msgType={}", conversationId, userId, msgType);
 
-        // 确保会话存在
-        CsConversation conversation = conversationService.getOrCreateConversation(
+        // 确保会话存在（同步）
+        final CsConversation conversation = conversationService.getOrCreateConversation(
                 conversationId, null, userId, userName, userIp, userAgent, deviceId, userLang);
 
-        // 创建用户消息，在保存之前就设置好 msgType 和 extra，避免二次保存导致重复
-        CsMessage userMessage = CsMessage.createUserMessage(conversationId, userId, userName, content);
+        // 构造消息；保存前就设置好 msgType + extra，避免二次保存导致重复
+        final CsMessage userMessage = CsMessage.createUserMessage(conversationId, userId, userName, content);
         if (msgType != null && msgType != CsMessage.MSG_TYPE_TEXT) {
             userMessage.setMsgType(msgType);
         }
@@ -275,50 +274,50 @@ public class CsMessageServiceImpl implements ICsMessageService {
             userMessage.setExtra(normalizeAttachmentTypes(extra));
         }
 
-        // 保存到MongoDB（一次性，包含附件信息）
-        saveToMongo(userMessage);
+        // 构造 WS payload（一次加密+序列化），同步立即广播给在线客服
+        final CsWebSocketMessage wsPayload = buildMessageWsPayload(conversationId, userMessage);
+        pushToAgents(wsPayload);
 
-        // 更新会话最后消息
-        conversationService.updateLastMessage(conversationId, content, 0);
+        // 异步持久化到 MongoDB（一次性，包含附件信息）
+        asyncTaskExecutor.submitMongo(() -> saveToMongo(userMessage));
 
-        // 重置超时提醒标记
-        conversationService.resetTimeoutWarning(conversationId);
+        // 异步更新会话 + FAQ + AI
+        final Integer originalStatus = conversation.getStatus();
+        final Integer replyMode = conversation.getReplyMode() != null
+                ? conversation.getReplyMode() : CsConversation.REPLY_MODE_AI_AUTO;
+        asyncTaskExecutor.submitConversation(() -> {
+            try {
+                conversationService.updateLastMessage(conversationId, content, 0);
+                conversationService.resetTimeoutWarning(conversationId);
+                conversationService.updateVisitorLastMsgTime(conversationId);
+                conversationService.incrementUnread(conversationId);
 
-        // 标记访客发消息时间（用于客服超时未回复精确判断）
-        conversationService.updateVisitorLastMsgTime(conversationId);
+                if (originalStatus != null && originalStatus == CsConversation.STATUS_UNASSIGNED) {
+                    FaqMatchResult faqResult = tryFaqKeywordMatch(conversationId, content);
+                    if (faqResult.matched) {
+                        return;
+                    }
+                    if (faqResult.humanAgentEnabled && faqResult.faqEnabled) {
+                        sendSmartAssistantNoMatchMessage(conversationId);
+                        return;
+                    }
+                }
 
-        // 推送给所有相关客服
-        pushToAgents(conversation, userMessage);
-
-        // 增加客服未读数
-        conversationService.incrementUnread(conversationId);
-
-        // FAQ关键词匹配（仅未分配会话生效，已有客服接入则跳过）
-        if (conversation.getStatus() == CsConversation.STATUS_UNASSIGNED) {
-            FaqMatchResult faqResult = tryFaqKeywordMatch(conversationId, content);
-            if (faqResult.matched) {
-                return userMessage;
+                switch (replyMode) {
+                    case CsConversation.REPLY_MODE_AI_AUTO:
+                        generateAndSendAiReply(conversation, content);
+                        break;
+                    case CsConversation.REPLY_MODE_AI_ASSIST:
+                        generateAiSuggestionStream(conversation, content, null);
+                        break;
+                    case CsConversation.REPLY_MODE_MANUAL:
+                    default:
+                        break;
+                }
+            } catch (Exception e) {
+                log.error("[CS-Message] 异步会话更新/FAQ/AI 链路失败(含附件): conversationId={}", conversationId, e);
             }
-            if (faqResult.humanAgentEnabled && faqResult.faqEnabled) {
-                sendSmartAssistantNoMatchMessage(conversationId);
-                return userMessage;
-            }
-        }
-
-        // 根据回复模式处理
-        int replyMode = conversation.getReplyMode() != null ?
-                conversation.getReplyMode() : CsConversation.REPLY_MODE_AI_AUTO;
-
-        switch (replyMode) {
-            case CsConversation.REPLY_MODE_AI_AUTO:
-                generateAndSendAiReply(conversation, content);
-                break;
-            case CsConversation.REPLY_MODE_AI_ASSIST:
-                generateAiSuggestionStream(conversation, content, null);
-                break;
-            case CsConversation.REPLY_MODE_MANUAL:
-                break;
-        }
+        });
 
         return userMessage;
     }
@@ -416,34 +415,16 @@ public class CsMessageServiceImpl implements ICsMessageService {
     @Override
     public CsMessage sendAgentMessage(String conversationId, String agentId, String agentName, String content,
                                       Integer msgType, String extra) {
-        log.info("[CS-Message] 客服发送消息: conversationId={}, agentId={}", conversationId, agentId);
-        
-        CsConversation conversation = conversationService.getConversation(conversationId);
+        log.debug("[CS-Message] 客服发送消息: conversationId={}, agentId={}", conversationId, agentId);
+
+        final CsConversation conversation = conversationService.getConversation(conversationId);
         if (conversation == null) {
             log.warn("[CS-Message] 会话不存在，忽略客服消息: conversationId={}", conversationId);
             return null;
         }
-        
-        // ★ 如果会话是待接入状态，客服发送消息时自动接入该会话（排除FAQ系统）
-        if (conversation.getStatus() == CsConversation.STATUS_UNASSIGNED
-                && !"faq_system".equals(agentId)) {
-            boolean assigned = conversationService.assignToAgent(conversationId, agentId);
-            if (assigned) {
-                log.info("[CS-Message] 客服发送消息，自动接入会话: conversationId={}, agentId={}", conversationId, agentId);
-                // 重新获取会话信息
-                conversation = conversationService.getConversation(conversationId);
-            }
-        }
-        
-        // ★ 客服发送消息时，自动切换到手动模式（终止AI自动回复），排除FAQ系统消息
-        if (conversation != null && conversation.getReplyMode() != CsConversation.REPLY_MODE_MANUAL
-                && !"faq_system".equals(agentId)) {
-            conversationService.changeReplyMode(conversationId, CsConversation.REPLY_MODE_MANUAL);
-            log.info("[CS-Message] 客服发送消息，自动切换为手动模式: conversationId={}", conversationId);
-        }
-        
-        // 创建客服消息（用户看到的显示为"客服"）
-        CsMessage agentMessage = CsMessage.createAgentMessage(conversationId, agentId, agentName, content);
+
+        // 构造客服消息（用户看到的显示为"客服"）
+        final CsMessage agentMessage = CsMessage.createAgentMessage(conversationId, agentId, agentName, content);
         agentMessage.setSenderAvatar(resolveAgentAvatar(agentId));
         if (msgType != null) {
             agentMessage.setMsgType(msgType);
@@ -452,29 +433,54 @@ public class CsMessageServiceImpl implements ICsMessageService {
             // 【S-P0-8】保存前规范化 attachments[].type
             agentMessage.setExtra(normalizeAttachmentTypes(extra));
         }
-        agentMessage.setSenderName(agentName); // 显示实际客服名称
-        
-        // 保存到MongoDB（异步）
+        agentMessage.setSenderName(agentName);
+
+        // 构造 WS payload（一次加密+序列化）
+        final CsWebSocketMessage wsPayload = buildMessageWsPayload(conversationId, agentMessage);
+
+        // 异步持久化到 MongoDB
         asyncTaskExecutor.submitMongo(() -> saveToMongo(agentMessage));
 
-        // 更新会话最后消息 + 清除未读 + 清除访客等待标记（异步）
-        String lastMessage = buildMessagePreview(content, msgType, extra);
+        // 异步：分配会话 + 切换手动模式 + 更新最后消息 + 清未读 + 清访客等待标记
+        final Integer originalStatus = conversation.getStatus();
+        final Integer originalReplyMode = conversation.getReplyMode();
+        final String lastMessage = buildMessagePreview(content, msgType, extra);
         asyncTaskExecutor.submitConversation(() -> {
-            conversationService.updateLastMessage(conversationId, lastMessage, 2);
-            conversationService.clearUnread(conversationId);
-            // 客服回复后清除访客等待标记（FAQ自动回复也算已回复）
-            conversationService.clearVisitorLastMsgTime(conversationId);
+            try {
+                // ★ 待接入会话自动接入（排除 FAQ 系统）
+                if (originalStatus != null && originalStatus == CsConversation.STATUS_UNASSIGNED
+                        && !"faq_system".equals(agentId)) {
+                    boolean assigned = conversationService.assignToAgent(conversationId, agentId);
+                    if (assigned) {
+                        log.info("[CS-Message] 客服发送消息，自动接入会话(异步): conversationId={}, agentId={}",
+                                conversationId, agentId);
+                    }
+                }
+                // ★ 客服发言时自动切换手动模式（排除 FAQ 系统）
+                if (originalReplyMode != null && originalReplyMode != CsConversation.REPLY_MODE_MANUAL
+                        && !"faq_system".equals(agentId)) {
+                    conversationService.changeReplyMode(conversationId, CsConversation.REPLY_MODE_MANUAL);
+                    log.info("[CS-Message] 客服发送消息，自动切换为手动模式(异步): conversationId={}", conversationId);
+                }
+                conversationService.updateLastMessage(conversationId, lastMessage, 2);
+                conversationService.clearUnread(conversationId);
+                // 客服回复后清除访客等待标记（FAQ 自动回复也算已回复）
+                conversationService.clearVisitorLastMsgTime(conversationId);
+            } catch (Exception e) {
+                log.error("[CS-Message] 异步会话更新/分配失败: conversationId={}", conversationId, e);
+            }
         });
 
-        // 推送给用户 + 其他客服（异步）
-        CsConversation conversationSnapshot = conversation;
+        // 异步推送：先推访客，再推其他客服；访客不在线时给发送者回"未送达"并把消息压入离线缓冲
         asyncTaskExecutor.submitWs(() -> {
-            boolean delivered = pushToUser(conversationId, agentMessage);
+            boolean delivered = pushToUser(conversationId, conversation.getUserId(), wsPayload);
             if (!delivered) {
-                String userId = conversationSnapshot != null ? conversationSnapshot.getUserId() : null;
+                // 用户不在线：写入 Redis Stream 离线缓冲，重连时秒级补齐
+                offlineMessageBuffer.enqueueForUser(conversationId, wsPayload);
+
                 Map<String, Object> notifyExtra = new HashMap<>();
                 notifyExtra.put("reason", "USER_OFFLINE");
-                notifyExtra.put("userId", userId);
+                notifyExtra.put("userId", conversation.getUserId());
                 notifyExtra.put("messageId", agentMessage.getId());
                 CsWebSocketMessage deliveryFailed = CsWebSocketMessage.builder()
                         .type(CsWebSocketMessage.TYPE_DELIVERY_FAILED)
@@ -483,14 +489,16 @@ public class CsMessageServiceImpl implements ICsMessageService {
                         .extra(notifyExtra)
                         .timestamp(agentMessage.getCreateTime())
                         .build();
-                sessionManager.sendToAgent(agentId, deliveryFailed);
+                boolean notified = sessionManager.sendToAgent(agentId, deliveryFailed);
+                if (!notified) {
+                    // 发送者客服也离线，后续重连时补齐"未送达"告警
+                    offlineMessageBuffer.enqueueForAgent(agentId, deliveryFailed);
+                }
             }
-            pushToOtherAgents(conversationId, agentId, agentMessage);
+            pushToOtherAgents(agentId, wsPayload);
         });
-        
-        // 清除AI建议缓存
+
         aiSuggestionCache.remove(conversationId);
-        
         return agentMessage;
     }
 
@@ -502,23 +510,18 @@ public class CsMessageServiceImpl implements ICsMessageService {
     @Override
     public CsMessage sendSystemMessage(String conversationId, String content, boolean persist) {
         log.info("[CS-Message] 系统消息: conversationId={}, contentLen={}, persist={}", conversationId, content != null ? content.length() : 0, persist);
-        
+
         CsMessage systemMessage = CsMessage.createSystemMessage(conversationId, content);
-        
-        // 只有persist为true时才保存到MongoDB
+
         if (persist) {
             saveToMongo(systemMessage);
         }
-        
-        // 推送给用户
-        pushToUser(conversationId, systemMessage);
-        
-        // 推送给所有客服
-        CsConversation conversation = conversationService.getConversation(conversationId);
-        if (conversation != null) {
-            pushToAgents(conversation, systemMessage);
-        }
-        
+
+        // 一次构造、两处复用
+        CsWebSocketMessage wsPayload = buildMessageWsPayload(conversationId, systemMessage);
+        pushToUser(conversationId, null, wsPayload);
+        pushToAgents(wsPayload);
+
         return systemMessage;
     }
 
@@ -544,12 +547,9 @@ public class CsMessageServiceImpl implements ICsMessageService {
         saveToMongo(aiMessage);
         conversationService.updateLastMessage(conversationId, app.getPrologue(), 1);
 
-        pushToUser(conversationId, aiMessage);
-
-        CsConversation conversation = conversationService.getConversation(conversationId);
-        if (conversation != null) {
-            pushToAgents(conversation, aiMessage);
-        }
+        CsWebSocketMessage wsPayload = buildMessageWsPayload(conversationId, aiMessage);
+        pushToUser(conversationId, null, wsPayload);
+        pushToAgents(wsPayload);
 
         return aiMessage;
     }
@@ -656,14 +656,16 @@ public class CsMessageServiceImpl implements ICsMessageService {
     private CsMessage sendAgentWelcomeMessage(String conversationId, String agentId, String agentName, String content) {
         log.info("[CS-Message] 发送客服欢迎消息: conversationId={}, agentId={}", conversationId, agentId);
 
-        CsConversation conversation = conversationService.getConversation(conversationId);
+        final CsConversation conversation = conversationService.getConversation(conversationId);
         if (conversation == null) {
             return null;
         }
 
-        CsMessage agentMessage = CsMessage.createAgentMessage(conversationId, agentId, agentName, content);
+        final CsMessage agentMessage = CsMessage.createAgentMessage(conversationId, agentId, agentName, content);
         agentMessage.setSenderAvatar(resolveAgentAvatar(agentId));
         agentMessage.setSenderName(agentName);
+
+        final CsWebSocketMessage wsPayload = buildMessageWsPayload(conversationId, agentMessage);
 
         asyncTaskExecutor.submitMongo(() -> saveToMongo(agentMessage));
 
@@ -673,14 +675,15 @@ public class CsMessageServiceImpl implements ICsMessageService {
             conversationService.clearUnread(conversationId);
         });
 
-        CsConversation conversationSnapshot = conversation;
         asyncTaskExecutor.submitWs(() -> {
-            boolean delivered = pushToUser(conversationId, agentMessage);
+            boolean delivered = pushToUser(conversationId, conversation.getUserId(), wsPayload);
             if (!delivered) {
-                String userId = conversationSnapshot.getUserId();
+                // 用户不在线：写入离线缓冲，重连时秒级补齐
+                offlineMessageBuffer.enqueueForUser(conversationId, wsPayload);
+
                 Map<String, Object> notifyExtra = new HashMap<>();
                 notifyExtra.put("reason", "USER_OFFLINE");
-                notifyExtra.put("userId", userId);
+                notifyExtra.put("userId", conversation.getUserId());
                 notifyExtra.put("messageId", agentMessage.getId());
                 CsWebSocketMessage deliveryFailed = CsWebSocketMessage.builder()
                         .type(CsWebSocketMessage.TYPE_DELIVERY_FAILED)
@@ -689,9 +692,12 @@ public class CsMessageServiceImpl implements ICsMessageService {
                         .extra(notifyExtra)
                         .timestamp(agentMessage.getCreateTime())
                         .build();
-                sessionManager.sendToAgent(agentId, deliveryFailed);
+                boolean notified = sessionManager.sendToAgent(agentId, deliveryFailed);
+                if (!notified) {
+                    offlineMessageBuffer.enqueueForAgent(agentId, deliveryFailed);
+                }
             }
-            pushToOtherAgents(conversationId, agentId, agentMessage);
+            pushToOtherAgents(agentId, wsPayload);
         });
 
         aiSuggestionCache.remove(conversationId);
@@ -704,12 +710,13 @@ public class CsMessageServiceImpl implements ICsMessageService {
     public CsMessage sendSmartAssistantMessage(String conversationId, String content, String faqExtraJson) {
         log.info("[CS-Message] 发送智能助手消息: conversationId={}", conversationId);
 
-        CsConversation conversation = conversationService.getConversation(conversationId);
+        final CsConversation conversation = conversationService.getConversation(conversationId);
         if (conversation == null) {
             return null;
         }
 
-        CsMessage saMessage = CsMessage.createSmartAssistantMessage(conversationId, content, faqExtraJson);
+        final CsMessage saMessage = CsMessage.createSmartAssistantMessage(conversationId, content, faqExtraJson);
+        final CsWebSocketMessage wsPayload = buildMessageWsPayload(conversationId, saMessage);
 
         asyncTaskExecutor.submitMongo(() -> saveToMongo(saMessage));
 
@@ -721,8 +728,12 @@ public class CsMessageServiceImpl implements ICsMessageService {
         });
 
         asyncTaskExecutor.submitWs(() -> {
-            pushToUser(conversationId, saMessage);
-            pushToAgents(conversation, saMessage);
+            boolean delivered = pushToUser(conversationId, conversation.getUserId(), wsPayload);
+            if (!delivered) {
+                // 用户不在线：写入离线缓冲，重连时补齐智能助手/FAQ 回复
+                offlineMessageBuffer.enqueueForUser(conversationId, wsPayload);
+            }
+            pushToAgents(wsPayload);
         });
 
         return saMessage;
@@ -1117,21 +1128,19 @@ public class CsMessageServiceImpl implements ICsMessageService {
         
         // 保存到MongoDB
         saveToMongo(message);
-        
+
         // 更新会话最后消息 + 清除未读 + 清除访客等待标记
         conversationService.updateLastMessage(conversationId, content, 2);
         conversationService.clearUnread(conversationId);
         conversationService.clearVisitorLastMsgTime(conversationId);
-        
-        // 推送给用户
-        pushToUser(conversationId, message);
-        
-        // 推送给其他客服
-        pushToOtherAgents(conversationId, agentId, message);
-        
-        // 清除缓存
+
+        // 一次构造 payload，推送给用户和其他客服
+        CsWebSocketMessage wsPayload = buildMessageWsPayload(conversationId, message);
+        pushToUser(conversationId, null, wsPayload);
+        pushToOtherAgents(agentId, wsPayload);
+
         aiSuggestionCache.remove(conversationId);
-        
+
         return message;
     }
 
@@ -1221,35 +1230,103 @@ public class CsMessageServiceImpl implements ICsMessageService {
 
     // ==================== 敏感词校验 ====================
 
+    /**
+     * 敏感词本地缓存 TTL。
+     *
+     * <p>30 秒内管理后台的改动对当前节点不可见，属于可接受权衡：换来热路径省掉
+     * Redis GET + fastjson 解析 + 每个 word 的 toLowerCase 调用（大约 0.5-1.5ms/条消息）。
+     * 如果要求秒级生效，可接 Redis Pub/Sub 广播并调 {@link #invalidateSensitiveWordsCache()}。</p>
+     */
+    private static final long SENSITIVE_CACHE_TTL_MS = 30_000L;
+
+    /** 缓存加载失败的短 backoff，避免 Redis 抖动时把节流拉满。 */
+    private static final long SENSITIVE_CACHE_FAIL_BACKOFF_MS = 5_000L;
+
+    /**
+     * 敏感词快照：一次加载后缓存到本地，热路径只需遍历预先小写化的 words。
+     */
+    private static final class SensitiveWordsSnapshot {
+        final boolean enabled;
+        final String[] lowerWords;
+        final long expireAtMs;
+
+        SensitiveWordsSnapshot(boolean enabled, String[] lowerWords, long expireAtMs) {
+            this.enabled = enabled;
+            this.lowerWords = lowerWords;
+            this.expireAtMs = expireAtMs;
+        }
+    }
+
+    private static final SensitiveWordsSnapshot EMPTY_SENSITIVE_SNAPSHOT =
+            new SensitiveWordsSnapshot(false, new String[0], 0L);
+
+    private final AtomicReference<SensitiveWordsSnapshot> sensitiveCache =
+            new AtomicReference<>(EMPTY_SENSITIVE_SNAPSHOT);
+
     @Override
     public String checkSensitiveWords(String content) {
         if (oConvertUtils.isEmpty(content)) {
             return null;
         }
+        SensitiveWordsSnapshot snap = sensitiveCache.get();
+        long now = System.currentTimeMillis();
+        if (snap.expireAtMs <= now) {
+            snap = reloadSensitiveSnapshot(now);
+        }
+        if (!snap.enabled || snap.lowerWords.length == 0) {
+            return null;
+        }
+        String lowerContent = content.toLowerCase();
+        for (String word : snap.lowerWords) {
+            if (lowerContent.contains(word)) {
+                return word;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 加载最新的敏感词配置并更新缓存。失败时保留上次结果，但缩短过期时间以便快速重试。
+     */
+    private SensitiveWordsSnapshot reloadSensitiveSnapshot(long now) {
+        SensitiveWordsSnapshot fresh;
         try {
             String json = redisTemplate.opsForValue().get(CsRedisKeys.REDIS_SENSITIVE_WORDS);
             if (oConvertUtils.isEmpty(json)) {
-                return null;
-            }
-            JSONObject config = JSON.parseObject(json);
-            if (config == null || !Boolean.TRUE.equals(config.getBoolean("enabled"))) {
-                return null;
-            }
-            JSONArray words = config.getJSONArray("words");
-            if (words == null || words.isEmpty()) {
-                return null;
-            }
-            String lowerContent = content.toLowerCase();
-            for (int i = 0; i < words.size(); i++) {
-                String word = words.getString(i);
-                if (oConvertUtils.isNotEmpty(word) && lowerContent.contains(word.toLowerCase())) {
-                    return word;
+                fresh = new SensitiveWordsSnapshot(false, new String[0], now + SENSITIVE_CACHE_TTL_MS);
+            } else {
+                JSONObject config = JSON.parseObject(json);
+                boolean enabled = config != null && Boolean.TRUE.equals(config.getBoolean("enabled"));
+                JSONArray words = config != null ? config.getJSONArray("words") : null;
+                String[] lowerWords;
+                if (enabled && words != null && !words.isEmpty()) {
+                    List<String> tmp = new ArrayList<>(words.size());
+                    for (int i = 0; i < words.size(); i++) {
+                        String w = words.getString(i);
+                        if (oConvertUtils.isNotEmpty(w)) {
+                            tmp.add(w.toLowerCase());
+                        }
+                    }
+                    lowerWords = tmp.toArray(new String[0]);
+                } else {
+                    lowerWords = new String[0];
                 }
+                fresh = new SensitiveWordsSnapshot(enabled, lowerWords, now + SENSITIVE_CACHE_TTL_MS);
             }
         } catch (Exception e) {
-            log.warn("[CS-Message] 敏感词校验异常", e);
+            log.warn("[CS-Message] 敏感词缓存加载失败，使用上次快照: {}", e.getMessage());
+            SensitiveWordsSnapshot last = sensitiveCache.get();
+            fresh = new SensitiveWordsSnapshot(last.enabled, last.lowerWords, now + SENSITIVE_CACHE_FAIL_BACKOFF_MS);
         }
-        return null;
+        sensitiveCache.set(fresh);
+        return fresh;
+    }
+
+    /**
+     * 手动失效敏感词缓存。后台管理界面在修改敏感词配置后可调用此方法（或发布事件触发）。
+     */
+    public void invalidateSensitiveWordsCache() {
+        sensitiveCache.set(EMPTY_SENSITIVE_SNAPSHOT);
     }
 
     // ==================== 已读状态 ====================
@@ -1491,54 +1568,44 @@ public class CsMessageServiceImpl implements ICsMessageService {
     }
 
     /**
-     * 推送消息给用户
+     * 推送消息给用户（接收已构造好的 WS payload，避免重复加密/序列化）。
+     *
+     * <p>userId 参数允许为 null：调用方已有 conversation 对象时直接传 userId，省一次 DB 查询；
+     * 无法提供时传 null，内部 fallback 到 getById（原行为）。</p>
+     *
+     * <p>注意：payload 实例推送后将被共享给 pushToAgents/pushToOtherAgents，禁止调用 setter。</p>
      */
-    private boolean pushToUser(String conversationId, CsMessage message) {
-        CsWebSocketMessage wsMessage = buildMessageWsPayload(conversationId, message);
-
-        CsConversation conversation = conversationService.getById(conversationId);
-        String userId = conversation != null ? conversation.getUserId() : conversationId;
-
-        return sessionManager.sendToUserByConversation(conversationId, userId, wsMessage);
+    private boolean pushToUser(String conversationId, String userId, CsWebSocketMessage wsMessage) {
+        String effectiveUserId = userId;
+        if (oConvertUtils.isEmpty(effectiveUserId)) {
+            CsConversation conversation = conversationService.getById(conversationId);
+            effectiveUserId = conversation != null ? conversation.getUserId() : conversationId;
+        }
+        return sessionManager.sendToUserByConversation(conversationId, effectiveUserId, wsMessage);
     }
 
     /**
-     * 推送消息给所有在线客服（同事会话功能：所有客服都能看到所有会话）
+     * 推送消息给所有在线客服（同事会话功能：所有客服都能看到所有会话）。
      *
-     * 注意：本方法行为与方法名"All"一致，不区分会话是否已分配，不区分协作者/管理者，
-     * 全员广播由 {@link CsWebSocketSessionManager#sendToAllAgents} 完成。
+     * <p>接收已构造好的 CsWebSocketMessage，不再查 conversation；调用 sendToAllAgents 内部只序列化一次。</p>
      */
-    private void pushToAgents(CsConversation conversation, CsMessage message) {
-        CsWebSocketMessage wsMessage = buildMessageWsPayload(conversation.getId(), message);
-
-        // 广播给所有在线客服（同事会话功能：所有客服都能看到所有会话）
-        log.info("[CS-Message] 广播消息给所有在线客服: conversationId={}", conversation.getId());
+    private void pushToAgents(CsWebSocketMessage wsMessage) {
+        // 热路径每条消息都会调用，降级为 debug 避免 Logback appender 串行阻塞
+        log.debug("[CS-Message] 广播消息给所有在线客服: conversationId={}", wsMessage.getConversationId());
         sessionManager.sendToAllAgents(wsMessage);
     }
 
     /**
-     * 推送消息给其他在线客服（同事会话功能：全员推送，排除发送者本人）
+     * 推送消息给其他在线客服（同事会话功能：全员推送，排除发送者本人）。
      *
-     * 注意：当前实现取所有在线客服后排除发送者，并不单独区分协作者/管理者；
-     * 在线客服一般为数十人量级，使用顺序发送避免 ForkJoinPool 与 IO 调度开销。
+     * <p>单机场景直接从 WebSocket 会话管理器拿在线 agentId 快照，避免走 {@code agentService.getOnlineAgents()}
+     * 的 Redis ZSET + DB IN 查询。</p>
      */
-    private void pushToOtherAgents(String conversationId, String excludeAgentId, CsMessage message) {
-        CsConversation conversation = conversationService.getConversation(conversationId);
-        if (conversation == null) {
+    private void pushToOtherAgents(String excludeAgentId, CsWebSocketMessage wsMessage) {
+        Set<String> agentIds = sessionManager.getOnlineAgentIds();
+        if (agentIds.isEmpty()) {
             return;
         }
-        CsWebSocketMessage wsMessage = buildMessageWsPayload(conversationId, message);
-        
-        // 收集所有在线客服ID（同事会话功能：全员推送，排除发送者）
-        Set<String> agentIds = new HashSet<>();
-        List<CsAgent> onlineAgents = agentService.getOnlineAgents();
-        if (onlineAgents != null) {
-            for (CsAgent agent : onlineAgents) {
-                agentIds.add(agent.getId());
-            }
-        }
-        
-        // 排除发送者并顺序推送（在线客服规模小，顺序发送比 parallelStream 更稳）
         agentIds.remove(excludeAgentId);
         for (String targetAgentId : agentIds) {
             sessionManager.sendToAgent(targetAgentId, wsMessage);
@@ -1642,7 +1709,8 @@ public class CsMessageServiceImpl implements ICsMessageService {
             String errorMsg = "抱歉，AI服务暂时不可用，请稍后再试或联系人工客服。";
             CsMessage errorMessage = CsMessage.createAiMessage(conversationId, aiDisplayName, errorMsg);
             saveToMongo(errorMessage);
-            pushToUser(conversationId, errorMessage);
+            CsWebSocketMessage errorPayload = buildMessageWsPayload(conversationId, errorMessage);
+            pushToUser(conversationId, userId, errorPayload);
         }
     }
     

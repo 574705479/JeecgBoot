@@ -64,6 +64,9 @@ public class CsWebSocketHandler implements WebSocketHandler {
     @Autowired
     private RedisUtil redisUtil;
 
+    @Autowired
+    private org.jeecg.modules.airag.cs.service.CsOfflineMessageBuffer offlineMessageBuffer;
+
     public CsWebSocketHandler(CsWebSocketSessionManager sessionManager,
                               @Lazy ICsMessageService messageService,
                               @Lazy ICsConversationService conversationService,
@@ -131,6 +134,7 @@ public class CsWebSocketHandler implements WebSocketHandler {
         
         // 如果是用户连接，获取会话详情（复用于 welcome 消息和客服通知）
         CsConversation conversation = null;
+        int offlineDelivered = 0;
         if (CsWebSocketInterceptor.USER_TYPE_USER.equals(userType) && oConvertUtils.isNotEmpty(conversationId)) {
             conversation = conversationService.getById(conversationId);
             if (conversation != null) {
@@ -138,9 +142,20 @@ public class CsWebSocketHandler implements WebSocketHandler {
                 extra.put("hasAgent", oConvertUtils.isNotEmpty(conversation.getOwnerAgentId()));
                 extra.put("status", conversation.getStatus());
             }
-            // Phase 3 Sprint 2：握手时下推最近 5 条消息，覆盖 bootstrap 响应到 WS 连接之间的"数据新鲜度缝隙"。
-            // 前端按 messageId 去重合并，已存在的不会覆盖；新到的消息可立刻显示，省去额外 HTTP。
-            attachRecentMessagesToExtra(extra, conversationId);
+            // 优先用 Redis Stream 离线缓冲补齐：离线期间堆积的消息按 FIFO 顺序直接下推；
+            // 如果 Stream 为空（没有堆积）再走 Mongo 读最近 5 条兜底。
+            offlineDelivered = deliverOfflineMessagesToUser(session, conversationId);
+            if (offlineDelivered == 0) {
+                attachRecentMessagesToExtra(extra, conversationId);
+            } else {
+                extra.put("offlineDelivered", offlineDelivered);
+            }
+        } else if (CsWebSocketInterceptor.USER_TYPE_AGENT.equals(userType)) {
+            // 客服重连：补齐定向下发的 DELIVERY_FAILED 等离线通知
+            offlineDelivered = deliverOfflineMessagesToAgent(session, userId);
+            if (offlineDelivered > 0) {
+                extra.put("offlineDelivered", offlineDelivered);
+            }
         }
         
         // 发送连接成功消息
@@ -153,13 +168,66 @@ public class CsWebSocketHandler implements WebSocketHandler {
                 .build();
         session.sendMessage(new TextMessage(JSON.toJSONString(welcome)));
         
-        log.info("[CS-WebSocket] 连接建立: userId={}, userType={}, conversationId={}", 
-                userId, userType, conversationId);
+        log.info("[CS-WebSocket] 连接建立: userId={}, userType={}, conversationId={}, offlineDelivered={}",
+                userId, userType, conversationId, offlineDelivered);
         
         // 如果是用户连接，通知相关客服
         if (CsWebSocketInterceptor.USER_TYPE_USER.equals(userType) && conversation != null) {
             notifyAgentsNewConversation(conversation);
             notifyAgentsUserOnline(conversationId, userId);
+        }
+    }
+
+    /**
+     * 用户握手后，优先消费 Redis Stream 离线缓冲里的消息并按 FIFO 顺序下推。
+     * 成功补齐时返回下推条数（&gt;0），此时跳过 Mongo 兜底；为 0 表示无积压。
+     */
+    private int deliverOfflineMessagesToUser(WebSocketSession session, String conversationId) {
+        if (oConvertUtils.isEmpty(conversationId) || session == null || !session.isOpen()) {
+            return 0;
+        }
+        try {
+            java.util.List<CsWebSocketMessage> offline = offlineMessageBuffer.drainForUser(conversationId);
+            if (offline == null || offline.isEmpty()) {
+                return 0;
+            }
+            int pushed = 0;
+            for (CsWebSocketMessage msg : offline) {
+                if (!session.isOpen()) {
+                    break;
+                }
+                session.sendMessage(new TextMessage(JSON.toJSONString(msg)));
+                pushed++;
+            }
+            return pushed;
+        } catch (Exception e) {
+            log.warn("[CS-WebSocket] 用户离线消息补齐失败: convId={}, err={}", conversationId, e.getMessage());
+            return 0;
+        }
+    }
+
+    /** 客服握手后补齐离线缓冲的定向通知（如 DELIVERY_FAILED） */
+    private int deliverOfflineMessagesToAgent(WebSocketSession session, String agentId) {
+        if (oConvertUtils.isEmpty(agentId) || session == null || !session.isOpen()) {
+            return 0;
+        }
+        try {
+            java.util.List<CsWebSocketMessage> offline = offlineMessageBuffer.drainForAgent(agentId);
+            if (offline == null || offline.isEmpty()) {
+                return 0;
+            }
+            int pushed = 0;
+            for (CsWebSocketMessage msg : offline) {
+                if (!session.isOpen()) {
+                    break;
+                }
+                session.sendMessage(new TextMessage(JSON.toJSONString(msg)));
+                pushed++;
+            }
+            return pushed;
+        } catch (Exception e) {
+            log.warn("[CS-WebSocket] 客服离线消息补齐失败: agentId={}, err={}", agentId, e.getMessage());
+            return 0;
         }
     }
 

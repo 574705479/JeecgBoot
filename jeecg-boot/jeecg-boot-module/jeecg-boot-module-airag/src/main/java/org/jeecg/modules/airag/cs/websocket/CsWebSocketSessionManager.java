@@ -3,6 +3,8 @@ package org.jeecg.modules.airag.cs.websocket;
 import com.alibaba.fastjson.JSON;
 import lombok.extern.slf4j.Slf4j;
 import org.jeecg.common.util.oConvertUtils;
+import org.jeecg.modules.airag.cs.async.CsAsyncTaskExecutor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
@@ -60,6 +62,16 @@ public class CsWebSocketSessionManager {
     private final Map<String, Set<WebSocketSession>> conversationSessions = new ConcurrentHashMap<>();
 
     /**
+     * 每个 WebSocketSession 对应的异步发送器（sessionId -> sender）。
+     * 作用：让 HTTP/业务线程只做"入队"，真正的 session.sendMessage I/O 交给 wsExecutor 里的
+     * 单消费者 drainer 完成，消除多访客扇入同一客服时业务路径被 WS I/O 阻塞的串行。
+     */
+    private final Map<String, CsSessionSender> senders = new ConcurrentHashMap<>();
+
+    @Autowired
+    private CsAsyncTaskExecutor asyncTaskExecutor;
+
+    /**
      * 添加会话
      */
     public void addSession(WebSocketSession session) {
@@ -72,6 +84,7 @@ public class CsWebSocketSessionManager {
         }
 
         sessionUserMap.put(session.getId(), userId);
+        senders.put(session.getId(), new CsSessionSender(session, asyncTaskExecutor::submitWs));
 
         if (CsWebSocketInterceptor.USER_TYPE_AGENT.equals(userType)) {
             WebSocketSession oldSession = agentSessions.put(userId, session);
@@ -103,6 +116,10 @@ public class CsWebSocketSessionManager {
      */
     public void removeSession(WebSocketSession session) {
         String userId = sessionUserMap.remove(session.getId());
+        CsSessionSender sender = senders.remove(session.getId());
+        if (sender != null) {
+            sender.dispose();
+        }
         if (oConvertUtils.isEmpty(userId)) {
             return;
         }
@@ -189,7 +206,8 @@ public class CsWebSocketSessionManager {
                     }
                 }
                 if (sent) {
-                    log.info("[CS-WebSocket] 通过conversationId发送消息成功: conversationId={}, 目标会话数={}", 
+                    // 热路径每条消息都会命中，降级为 debug 避免 Logback appender 串行阻塞
+                    log.debug("[CS-WebSocket] 通过conversationId发送消息成功: conversationId={}, 目标会话数={}",
                             conversationId, convSessions.size());
                     return true;
                 }
@@ -211,7 +229,7 @@ public class CsWebSocketSessionManager {
                     }
                 }
                 if (sent) {
-                    log.info("[CS-WebSocket] 通过userId发送消息成功: userId={}", userId);
+                    log.debug("[CS-WebSocket] 通过userId发送消息成功: userId={}", userId);
                     return true;
                 }
             }
@@ -223,24 +241,36 @@ public class CsWebSocketSessionManager {
 
     /**
      * 发送消息给客服
+     *
+     * @return true 表示已调用 session.sendMessage；false 表示 session 不存在或已关闭（供离线消息缓冲判断）
      */
-    public void sendToAgent(String agentId, Object message) {
+    public boolean sendToAgent(String agentId, Object message) {
         if (oConvertUtils.isEmpty(agentId)) {
             log.debug("[CS-WebSocket] 客服ID为空，跳过发送");
-            return;
+            return false;
         }
         WebSocketSession session = agentSessions.get(agentId);
         if (session == null) {
             log.warn("[CS-WebSocket] 客服会话不存在，无法发送消息: agentId={}, 当前在线客服={}", 
                     agentId, agentSessions.keySet());
-            return;
+            return false;
         }
         if (!session.isOpen()) {
             log.warn("[CS-WebSocket] 客服会话已关闭: agentId={}", agentId);
-            return;
+            return false;
         }
-        log.info("[CS-WebSocket] 发送消息给客服: agentId={}", agentId);
+        log.debug("[CS-WebSocket] 发送消息给客服: agentId={}", agentId);
         sendMessage(session, message);
+        return true;
+    }
+
+    /**
+     * 获取所有在线客服 ID 的快照，供"广播排除发送者"等场景避免重复查 DB。
+     *
+     * <p>返回 agentSessions.keySet() 的副本（HashSet），避免调用方遍历时 ConcurrentModification。</p>
+     */
+    public Set<String> getOnlineAgentIds() {
+        return new java.util.HashSet<>(agentSessions.keySet());
     }
 
     /**
@@ -264,10 +294,31 @@ public class CsWebSocketSessionManager {
     }
 
     /**
-     * 发送已序列化的JSON消息（避免重复序列化）
-     * WebSocketSession.sendMessage 不是线程安全的，需要对同一 session 加锁
+     * 发送已序列化的 JSON 消息（默认走 per-session 异步队列）。
+     *
+     * <p>业务主路径（HTTP 请求、AI 流式等）全部使用此入口：入队后立即返回，
+     * 真正的 {@code session.sendMessage} 由 wsExecutor 上的单消费者 drainer 串行完成。
+     * 这样多访客扇入同一客服时，业务线程不会被 WS I/O 阻塞。</p>
      */
     private void sendRawMessage(WebSocketSession session, String json) {
+        if (session == null || !session.isOpen()) {
+            return;
+        }
+        CsSessionSender sender = senders.get(session.getId());
+        if (sender != null) {
+            sender.enqueue(json);
+            return;
+        }
+        // 兜底：极端情况下 sender 还未注册（理论上不会发生，因为 addSession 先于任何业务推送），
+        // 降级为同步发送以免消息丢失。
+        sendRawSync(session, json);
+    }
+
+    /**
+     * 同步发送原始 JSON；仅用于"发完立刻关连接"的场景（如 IP 拉黑、SSO 踢下线），
+     * 异步入队无法保证 close 之前把帧写入 socket。
+     */
+    private void sendRawSync(WebSocketSession session, String json) {
         if (session == null || !session.isOpen()) {
             return;
         }
@@ -278,7 +329,7 @@ public class CsWebSocketSessionManager {
                 }
             }
         } catch (IOException e) {
-            log.error("[CS-WebSocket] 发送消息失败: {}", e.getMessage());
+            log.error("[CS-WebSocket] 同步发送消息失败: {}", e.getMessage());
         }
     }
 
@@ -408,11 +459,12 @@ public class CsWebSocketSessionManager {
             return 0;
         }
         // 阶段2：统一发送消息并关闭连接
+        // 必须用同步发送：close 之后 session 立即不可写，异步入队的消息会丢
         String json = toJson(message);
         for (WebSocketSession session : matchedSessions) {
             try {
                 if (session.isOpen()) {
-                    sendRawMessage(session, json);
+                    sendRawSync(session, json);
                     session.close(new CloseStatus(4003, "ip_blocked"));
                 }
             } catch (Exception e) {

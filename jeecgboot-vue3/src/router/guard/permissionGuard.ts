@@ -34,7 +34,10 @@ const whitePathList: (PageEnum | string)[] = [LOGIN_PATH, OAUTH2_LOGIN_PAGE_PATH
 export function createPermissionGuard(router: Router) {
   const userStore = useUserStoreWithOut();
   const permissionStore = usePermissionStoreWithOut();
-  const publicRouteNames = new Set(['CsUserChat', 'CsWidgetPreview']);
+  // 访客端 SPA（/cs/userChat、/cs/chat）由独立子项目 jeecgboot-vue3-visitor 接管，
+  // 生产环境 nginx 直接命中 dist/cs/userChat/index.html；
+  // 这里用路径前缀放行，避免开发/预览场景下 vue-router 误拦截触发登录跳转。
+  const publicRouteNames = new Set(['CsWidgetPreview']);
   const publicPathPrefixes = ['/cs/userChat', '/cs/chat', '/cs/widget-preview'];
   const isPublicPath = (to: any) => {
     const path = String(to.path || '');
