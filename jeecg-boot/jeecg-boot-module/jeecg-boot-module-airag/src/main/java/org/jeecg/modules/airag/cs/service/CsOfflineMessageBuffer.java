@@ -13,7 +13,6 @@ import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -187,15 +186,6 @@ public class CsOfflineMessageBuffer {
     }
 
     // ==================== 辅助 ====================
-
-    /** 对一批 conversationId/agentId 并发 drain（如需扩展批量操作使用） */
-    @SuppressWarnings("unused")
-    private List<CsWebSocketMessage> drainBatch(List<String> streamKeys) {
-        if (streamKeys == null || streamKeys.isEmpty()) {
-            return Collections.emptyList();
-        }
-        return new ArrayList<>(Arrays.asList());
-    }
 
     private boolean isPersistent(CsWebSocketMessage payload) {
         String type = payload.getType();

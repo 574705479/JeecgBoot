@@ -50,7 +50,17 @@ export function cleanupImageCache(): void {
 
 const CHAT_WINDOW_CONFIG_CACHE_KEY = 'CS_CHAT_WINDOW_CONFIG';
 
-export function getCachedChatWindowConfig(): Record<string, any> | null {
+/**
+ * 聊天窗口配置（来自后端 `/cs/agent/global/chat-window-settings`）
+ *
+ * 已知字段先按需声明，后续如果定义稳定可以收紧索引签名。
+ */
+export interface ChatWindowConfig {
+  logo?: string;
+  [key: string]: any;
+}
+
+export function getCachedChatWindowConfig(): ChatWindowConfig | null {
   try {
     const raw = localStorage.getItem(CHAT_WINDOW_CONFIG_CACHE_KEY);
     return raw ? JSON.parse(raw) : null;
@@ -59,7 +69,7 @@ export function getCachedChatWindowConfig(): Record<string, any> | null {
   }
 }
 
-export function setCachedChatWindowConfig(config: Record<string, any>): void {
+export function setCachedChatWindowConfig(config: ChatWindowConfig): void {
   try {
     localStorage.setItem(CHAT_WINDOW_CONFIG_CACHE_KEY, JSON.stringify(config));
   } catch {}
