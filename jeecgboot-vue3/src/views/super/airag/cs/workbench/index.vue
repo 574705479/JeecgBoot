@@ -2,276 +2,11 @@
   <div class="cs-workbench" :style="[themeVars, workbenchLayoutStyle]">
     <!-- 左侧会话列表 -->
     <div class="sidebar">
-      <!-- 客服状态栏 -->
-      <div class="agent-bar">
-        <div class="agent-info">
-          <a-avatar :size="32" class="self-agent-avatar" :src="agentAvatar ? withImageCache(getFileAccessHttpUrl(agentAvatar)) : ''">
-            {{ (agentName || '客').charAt(0) }}
-          </a-avatar>
-          <span class="agent-name">{{ agentName }}</span>
-        </div>
-        <div class="agent-actions">
-          <a-switch 
-            v-model:checked="isOnline" 
-            checked-children="在线" 
-            un-checked-children="隐身"
-            @change="toggleOnline"
-          />
-          <a-tooltip title="设置">
-            <SettingOutlined class="setting-icon" @click="showSettingsDrawer = true" />
-          </a-tooltip>
-        </div>
-      </div>
-      <!-- WebSocket 连接状态提示条 -->
-      <transition name="ws-banner">
-        <div v-if="wsShowBanner" class="ws-status-banner" :class="'ws-' + wsStatus">
-          <template v-if="wsStatus === 'connecting'">
-            <LoadingOutlined spin /> 正在连接服务器...
-          </template>
-          <template v-else-if="wsStatus === 'reconnecting'">
-            <LoadingOutlined spin /> 连接断开，正在重连...
-          </template>
-          <template v-else-if="wsStatus === 'disconnected'">
-            <ExclamationCircleOutlined />
-            <template v-if="wsReconnectCountdown > 0"> {{ wsReconnectCountdown }}秒后自动重连</template>
-            <template v-else> 连接已断开</template>
-            <a @click="connectWebSocket()" style="margin-left:8px">立即重连</a>
-          </template>
-          <template v-else-if="wsStatus === 'connected'">
-            <CheckCircleOutlined /> 已重新连接
-          </template>
-        </div>
-      </transition>
+      <CsAgentBar />
+      <CsWsStatusBanner />
       
       <!-- 设置抽屉 -->
-      <a-drawer
-        v-model:open="showSettingsDrawer"
-        title="客服设置"
-        placement="right"
-        :width="360"
-      >
-        <div class="settings-content">
-          <!-- 回复建议应用 -->
-          <div class="setting-item">
-            <div class="setting-label">
-              <ThunderboltOutlined />
-              <span>回复建议应用</span>
-            </div>
-            <div class="setting-desc">AI辅助模式下，为客服生成回复建议</div>
-            <a-select 
-              v-model:value="selectedAppId" 
-              placeholder="选择AI应用"
-              style="width: 100%;"
-              allowClear
-              @change="onAppChange"
-            >
-              <a-select-option v-for="app in aiAppList" :key="app.id" :value="app.id">
-                {{ app.name }}
-              </a-select-option>
-            </a-select>
-          </div>
-
-          <a-divider />
-
-          <!-- AI自动回复开关（全局配置） -->
-          <div class="setting-item">
-            <div class="setting-label">
-              <RobotOutlined />
-              <span>AI自动回复</span>
-              <a-tag color="orange" size="small">全局</a-tag>
-            </div>
-            <div class="setting-desc">开启后，访客进入会话将先由AI自动回复；关闭后，访客默认接入在线客服人工回复</div>
-            <a-switch 
-              v-model:checked="aiEnabled" 
-              checked-children="开启" 
-              un-checked-children="关闭"
-              @change="onAiEnabledChange"
-            />
-          </div>
-
-          <div class="setting-item" v-if="aiEnabled">
-            <div class="setting-label">
-              <RobotOutlined />
-              <span>使用AI开场白</span>
-              <a-tag color="orange" size="small">全局</a-tag>
-            </div>
-            <div class="setting-desc">开启时使用AI应用中的开场白作为欢迎语；关闭则使用自动消息内容作为欢迎语</div>
-            <a-switch
-              v-model:checked="aiPrologueEnabled"
-              checked-children="开启"
-              un-checked-children="关闭"
-              @change="onAiPrologueEnabledChange"
-            />
-          </div>
-          
-          <!-- 访客AI应用（全局配置，仅AI开启时显示） -->
-          <div class="setting-item" v-if="aiEnabled">
-            <div class="setting-label">
-              <RobotOutlined />
-              <span>访客AI应用</span>
-              <a-tag color="orange" size="small">全局</a-tag>
-            </div>
-            <div class="setting-desc">AI自动回复模式下，自动回复访客消息</div>
-            <a-alert 
-              message="此设置为全局配置，修改后将影响所有客服的访客AI回复" 
-              type="warning" 
-              show-icon 
-              style="margin-bottom: 12px; font-size: 12px;"
-            />
-            <a-select 
-              v-model:value="visitorAppId" 
-              placeholder="选择AI应用"
-              style="width: 100%;"
-              allowClear
-              @change="onVisitorAppChange"
-            >
-              <a-select-option v-for="app in aiAppList" :key="app.id" :value="app.id">
-                {{ app.name }}
-              </a-select-option>
-            </a-select>
-          </div>
-
-          <a-divider />
-
-          <!-- 新消息提示音 -->
-          <div class="setting-item">
-            <div class="setting-label">
-              <span>新消息提示音</span>
-            </div>
-            <div class="setting-desc">收到新消息、新会话、转接会话时播放提示音</div>
-            <a-switch
-              v-model:checked="soundEnabled"
-              checked-children="开启"
-              un-checked-children="关闭"
-              @change="onSoundEnabledChange"
-            />
-            <template v-if="soundEnabled">
-              <div class="setting-desc" style="margin-top: 12px">提示音音量（100% 与访客端默认一致；高音量可能失真）</div>
-              <a-slider
-                v-model:value="soundVolumePercent"
-                :min="0"
-                :max="200"
-                :step="5"
-                :marks="soundVolumeSliderMarks"
-                :tooltip="soundVolumeTooltip"
-              />
-            </template>
-          </div>
-
-          <a-divider />
-
-          <!-- 外观主题 -->
-          <div class="setting-item">
-            <div class="setting-label">
-              <BgColorsOutlined />
-              <span>外观主题</span>
-            </div>
-            <div class="setting-desc">选择预设主题或自定义配色</div>
-            <div class="theme-presets">
-              <div
-                v-for="(preset, key) in THEME_PRESETS"
-                :key="key"
-                class="theme-preset-item"
-                :class="{ active: currentThemeKey === key }"
-                @click="selectTheme(String(key))"
-              >
-                <div class="theme-color" :style="{ background: `linear-gradient(135deg, ${preset.brandStart}, ${preset.brandEnd})` }"></div>
-                <span>{{ preset.name }}</span>
-              </div>
-              <div
-                class="theme-preset-item"
-                :class="{ active: currentThemeKey === 'custom' }"
-                @click="selectTheme('custom')"
-              >
-                <div class="theme-color custom-color">
-                  <SettingOutlined />
-                </div>
-                <span>自定义</span>
-              </div>
-            </div>
-            <div class="custom-colors" v-if="currentThemeKey === 'custom'">
-              <div class="color-row">
-                <label>主色调起始</label>
-                <input type="color" :value="customTheme.brandStart" @input="onColorInput('brandStart', $event)" />
-              </div>
-              <div class="color-row">
-                <label>主色调结束</label>
-                <input type="color" :value="customTheme.brandEnd" @input="onColorInput('brandEnd', $event)" />
-              </div>
-              <div class="color-row">
-                <label>页面背景</label>
-                <input type="color" :value="customTheme.bgPage" @input="onColorInput('bgPage', $event)" />
-              </div>
-              <div class="color-row">
-                <label>聊天背景</label>
-                <input type="color" :value="customTheme.bgChat" @input="onColorInput('bgChat', $event)" />
-              </div>
-              <div class="color-row">
-                <label>客服气泡</label>
-                <input type="color" :value="customTheme.bubbleAgent" @input="onColorInput('bubbleAgent', $event)" />
-              </div>
-              <div class="color-row">
-                <label>用户气泡</label>
-                <input type="color" :value="customTheme.bubbleUser" @input="onColorInput('bubbleUser', $event)" />
-              </div>
-              <div class="color-row">
-                <label>AI气泡</label>
-                <input type="color" :value="customTheme.bubbleAi" @input="onColorInput('bubbleAi', $event)" />
-              </div>
-              <div class="color-row">
-                <label>助手气泡</label>
-                <input type="color" :value="customTheme.bubbleAssistant" @input="onColorInput('bubbleAssistant', $event)" />
-              </div>
-              <a-divider style="margin: 8px 0;">面板与文字</a-divider>
-              <div class="color-row">
-                <label>面板背景</label>
-                <input type="color" :value="customTheme.bgSurface" @input="onColorInput('bgSurface', $event)" />
-              </div>
-              <div class="color-row">
-                <label>卡片背景</label>
-                <input type="color" :value="customTheme.bgCard" @input="onColorInput('bgCard', $event)" />
-              </div>
-              <div class="color-row">
-                <label>输入框背景</label>
-                <input type="color" :value="customTheme.bgInput" @input="onColorInput('bgInput', $event)" />
-              </div>
-              <div class="color-row">
-                <label>代码块背景</label>
-                <input type="color" :value="customTheme.bgCode" @input="onColorInput('bgCode', $event)" />
-              </div>
-              <div class="color-row">
-                <label>主文字色</label>
-                <input type="color" :value="customTheme.textPrimary" @input="onColorInput('textPrimary', $event)" />
-              </div>
-              <div class="color-row">
-                <label>次文字色</label>
-                <input type="color" :value="customTheme.textSecondary" @input="onColorInput('textSecondary', $event)" />
-              </div>
-              <div class="color-row">
-                <label>弱文字色</label>
-                <input type="color" :value="customTheme.textMuted" @input="onColorInput('textMuted', $event)" />
-              </div>
-              <div class="color-row">
-                <label>边框色</label>
-                <input type="color" :value="customTheme.border" @input="onColorInput('border', $event)" />
-              </div>
-              <div class="color-row">
-                <label>标题栏起始</label>
-                <input type="color" :value="customTheme.barStart" @input="onColorInput('barStart', $event)" />
-              </div>
-              <div class="color-row">
-                <label>标题栏结束</label>
-                <input type="color" :value="customTheme.barEnd" @input="onColorInput('barEnd', $event)" />
-              </div>
-              <div class="color-row">
-                <label>品牌区文字</label>
-                <input type="color" :value="customTheme.brandText" @input="onColorInput('brandText', $event)" />
-              </div>
-            </div>
-          </div>
-
-        </div>
-      </a-drawer>
+      <CsWorkbenchSettingsDrawer />
 
       <!-- 搜索框 -->
       <div class="search-bar">
@@ -481,62 +216,7 @@
 
     <!-- 中间聊天区域 -->
     <div class="chat-area" v-if="currentConversation">
-      <!-- 聊天头部 -->
-      <div class="chat-header">
-        <div class="chat-user">
-          <a-avatar :size="40" class="visitor-avatar">{{ getDisplayName(currentConversation).charAt(0) }}</a-avatar>
-          <div class="user-info">
-            <div class="user-name">
-              {{ getDisplayName(currentConversation) }}
-              <StarFilled v-if="visitorInfo.star === 1" class="star-icon" />
-              <a-tag v-if="visitorInfo.level === 3" color="gold" size="small">VIP</a-tag>
-              <a-tag v-else-if="visitorInfo.level === 2" color="blue" size="small">重要</a-tag>
-            </div>
-            <div class="user-status">
-              <a-badge :status="userOnline ? 'success' : 'default'" :text="userOnline ? '在线' : '离线'" />
-              <span class="status-divider">|</span>
-              <span class="status-text">{{ getModeName(currentReplyMode) }}模式</span>
-              <span v-if="currentConversation.status === 1 && currentConversation.ownerAgentName" class="status-divider">|</span>
-              <span v-if="currentConversation.status === 1 && currentConversation.ownerAgentName" class="status-text">
-                首次接入: {{ currentConversation.ownerAgentName }}
-              </span>
-            </div>
-            <div v-if="parsedCustomFields.length" class="custom-fields-header">
-              <a-tag v-for="cf in parsedCustomFields" :key="cf.label" color="red" size="small"
-                style="color: #cf1322; background: #fff1f0; border-color: #ffa39e;">
-                {{ cf.label }}: {{ cf.value }}
-              </a-tag>
-            </div>
-          </div>
-        </div>
-        <div class="chat-tools">
-          <a-select 
-            v-model:value="currentReplyMode" 
-            size="small" 
-            style="width: 100px"
-            @change="changeMode"
-            v-if="currentConversation.status === 1"
-          >
-            <a-select-option :value="0">AI自动</a-select-option>
-            <a-select-option :value="1">手动</a-select-option>
-          </a-select>
-          <a-tooltip title="推送满意度评价">
-            <a-button size="small" @click="pushSatisfaction" v-if="currentConversation.status !== 2 && !isColleagueReadonly" :loading="satisfactionPushing" :disabled="satisfactionPushed">
-              <SmileOutlined /> {{ satisfactionPushed ? '已推送' : '评价' }}
-            </a-button>
-          </a-tooltip>
-          <a-button size="small" @click="openTransferModal" v-if="currentConversation.status !== 2 && !isColleagueReadonly">
-            <SwapOutlined /> 转接
-          </a-button>
-          <a-button size="small" danger @click="closeConversation" v-if="currentConversation.status !== 2 && !isColleagueReadonly">
-            结束
-          </a-button>
-          <a-button size="small" type="text" @click="showDetailPanel = !showDetailPanel">
-            <MenuUnfoldOutlined v-if="!showDetailPanel" />
-            <MenuFoldOutlined v-else />
-          </a-button>
-        </div>
-      </div>
+      <CsChatHeader />
 
       <!-- 消息容器 -->
       <div class="chat-body">
@@ -968,37 +648,16 @@
         <CheckCircleOutlined class="ended-icon" />
         <span>会话已结束</span>
       </div>
-      <a-modal v-model:open="videoPreviewVisible" :footer="null" width="720px">
-        <video v-if="videoPreviewUrl" :src="videoPreviewUrl" controls style="width: 100%;" />
-      </a-modal>
-      <a-modal v-model:open="mediaViewerVisible" :footer="null" width="820px" class="media-viewer-modal" title="媒体预览">
-        <div class="media-viewer-header">
-          <span>共 {{ mediaViewerList.length }} 项</span>
-          <span class="media-viewer-tip">点击图片可放大，视频可播放</span>
-        </div>
-        <div class="media-viewer-grid">
-          <div
-            class="media-viewer-item"
-            v-for="(item, index) in mediaViewerList"
-            :key="`${item.url}_${index}`"
-          >
-            <img
-              v-if="item.type === 'image'"
-              :src="getAttachmentThumbUrl(item)"
-              @click="openImagePreviewFromList(mediaViewerList, item)"
-              @error="onAttachmentImageError($event, item)"
-            />
-            <video v-else-if="getAttachmentUrl(item)" :src="getAttachmentUrl(item)" controls preload="metadata" @click="openVideoPreview(item)" />
-          </div>
-        </div>
-      </a-modal>
+      <CsMediaPreviewModals
+        :get-thumb-url="getAttachmentThumbUrl"
+        :get-url="getAttachmentUrl"
+        :on-image-error="onAttachmentImageError"
+        :on-image-click="openImagePreviewFromList"
+      />
     </div>
 
     <!-- 空状态 -->
-    <div class="chat-empty" v-else>
-      <MessageOutlined class="empty-icon large" />
-      <p>选择一个会话开始聊天</p>
-    </div>
+    <CsChatEmptyState v-else />
 
     <!-- 右侧详情面板 -->
     <div class="detail-panel" v-if="currentConversation && showDetailPanel">
@@ -1171,25 +830,13 @@
         </div>
 
         <!-- 拉黑原因弹窗 -->
-        <a-modal
+        <CsBlacklistModal
           v-model:open="banModalVisible"
-          :title="banModalType === 'user' ? '拉黑访客' : '拉黑IP'"
-          @ok="confirmBan"
-          @cancel="banModalVisible = false"
-          :okButtonProps="{ disabled: !banReason.trim() }"
-        >
-          <a-form :label-col="{ span: 5 }" :wrapper-col="{ span: 18 }">
-            <a-form-item v-if="banModalType === 'ip'" label="IP地址">
-              <a-input v-model:value="banIpValue" placeholder="IP或IP段（如192.168.1.0/24）" />
-            </a-form-item>
-            <a-form-item v-if="banModalType === 'user'" label="访客信息">
-              <span>{{ currentConversation?.userName || currentConversation?.userId || '-' }}</span>
-            </a-form-item>
-            <a-form-item label="拉黑原因" required>
-              <a-textarea v-model:value="banReason" :rows="3" placeholder="请输入拉黑原因（必填）" />
-            </a-form-item>
-          </a-form>
-        </a-modal>
+          :type="banModalType"
+          :default-ip="currentConversation?.userIp || ''"
+          :visitor-label="currentConversation?.userName || currentConversation?.userId || ''"
+          @confirm="onBlacklistConfirm"
+        />
 
         <!-- 备注 -->
         <div class="info-section">
@@ -1232,85 +879,47 @@
     </div>
 
     <!-- 移交弹窗 -->
-    <a-modal 
-      v-model:open="showTransferModal" 
-      title="转接会话" 
-      width="480px"
-      :footer="null"
-    >
-      <div class="transfer-content">
-        <div v-if="transferLoading" class="transfer-loading">
-          <a-spin />
-          <span>加载客服列表...</span>
-        </div>
-        <div v-else-if="availableAgents.length === 0" class="transfer-empty">
-          <InboxOutlined class="empty-icon" />
-          <p>暂无其他在线客服</p>
-        </div>
-        <div v-else class="agent-list">
-          <div 
-            v-for="agent in availableAgents" 
-            :key="agent.id" 
-            class="agent-card"
-            @click="doTransfer(agent.id)"
-          >
-            <a-avatar :size="48" :src="getAgentItemAvatarUrl(agent)" class="agent-avatar">
-              {{ agent.nickname?.charAt(0) || '客' }}
-            </a-avatar>
-            <div class="agent-info">
-              <div class="agent-name">{{ agent.nickname || '客服' }}</div>
-              <div class="agent-stats">
-                <span>
-                  <a-badge :status="agent.status === 1 ? 'success' : agent.status === 2 ? 'warning' : 'default'" />
-                  {{ getAgentStatusText(agent.status) }}
-                </span>
-                <span>当前接待: {{ agent.currentSessions || 0 }}/{{ agent.maxSessions || 10 }}</span>
-              </div>
-            </div>
-            <a-button type="primary" size="small" class="transfer-btn">
-              转接
-            </a-button>
-          </div>
-        </div>
-      </div>
-    </a-modal>
+    <CsTransferConversationModal
+      v-model:open="showTransferModal"
+      :loading="transferLoading"
+      :agents="availableAgents"
+      @transfer="doTransfer"
+    />
 
     <!-- 编辑字段弹窗 -->
-    <a-modal 
-      v-model:open="showEditModal" 
-      :title="editModalTitle" 
-      @ok="saveEditField"
-      width="400px"
-    >
-      <a-textarea 
-        v-if="editingField === 'notes'"
-        v-model:value="editValue" 
-        :rows="4"
-        placeholder="请输入备注内容"
-      />
-      <a-input 
-        v-else
-        v-model:value="editValue" 
-        :placeholder="'请输入' + editModalTitle"
-      />
-    </a-modal>
+    <CsVisitorFieldEditModal
+      v-model:open="showEditModal"
+      v-model:value="editValue"
+      :field="editingField"
+      @save="saveEditField"
+    />
 
   </div>
 </template>
 
 <script setup lang="ts">
 defineOptions({ name: 'CsWorkbench' });
-import { ref, computed, unref, onMounted, onUnmounted, onActivated, onDeactivated, watch, nextTick } from 'vue';
+import { ref, computed, unref, onMounted, onUnmounted, onActivated, onDeactivated, watch, nextTick, provide } from 'vue';
+import { CS_WORKBENCH_CONTEXT_KEY, type CsWorkbenchContext, type CsWorkbenchSettings } from './context';
+import { useCsWorkbenchTheme } from './composables/useCsWorkbenchTheme';
+import CsAgentBar from './components/CsAgentBar.vue';
+import CsWsStatusBanner from './components/CsWsStatusBanner.vue';
+import CsChatHeader from './components/CsChatHeader.vue';
+import CsChatEmptyState from './components/CsChatEmptyState.vue';
+import CsWorkbenchSettingsDrawer from './components/CsWorkbenchSettingsDrawer.vue';
+import CsTransferConversationModal from './components/CsTransferConversationModal.vue';
+import CsBlacklistModal from './components/CsBlacklistModal.vue';
+import CsVisitorFieldEditModal from './components/CsVisitorFieldEditModal.vue';
 import { usePageContext } from '/@/hooks/component/usePageContext';
 import { message } from 'ant-design-vue';
 import { 
-  StarFilled, StarOutlined, SwapOutlined, MenuUnfoldOutlined, MenuFoldOutlined,
-  CloseOutlined, EditOutlined, PlusOutlined, InboxOutlined, MessageOutlined,
-  SmileOutlined, ThunderboltOutlined, RobotOutlined, SettingOutlined,
+  StarFilled, StarOutlined,
+  CloseOutlined, EditOutlined, PlusOutlined, InboxOutlined,
+  SmileOutlined, ThunderboltOutlined, RobotOutlined,
   MoreOutlined, DeleteOutlined, PaperClipOutlined, EnvironmentOutlined, GlobalOutlined,
   TeamOutlined, CaretRightOutlined, CaretDownOutlined, DownOutlined, SearchOutlined,
-  CheckCircleOutlined, BgColorsOutlined, UndoOutlined,
-  LoadingOutlined, ExclamationCircleOutlined, PlayCircleOutlined,
+  CheckCircleOutlined, UndoOutlined,
+  LoadingOutlined, PlayCircleOutlined,
   CustomerServiceOutlined, ReloadOutlined
 } from '@ant-design/icons-vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -1342,11 +951,17 @@ import { isCseUrl } from '/@/utils/cse/cseUrl';
 import { compressImage } from '/@/utils/file/compressImage';
 import FileChip from '../components/FileChip.vue';
 import { vCseHtml } from '../utils/cseHtmlImg';
-// ★ 为回复建议保留Markdown渲染能力
-import MarkdownIt from 'markdown-it';
-import DOMPurify from 'dompurify';
-import hljs from 'highlight.js';
 import { useUserStoreWithOut } from '/@/store/modules/user';
+import {
+  stripHtmlTags,
+  buildMessagePreview,
+  renderStreamingText,
+  sanitizeHtml,
+  renderMessage,
+  renderMarkdown,
+} from './render/csMessageRender';
+import { useCsMessageMedia } from './composables/useCsMessageMedia';
+import CsMediaPreviewModals from './components/CsMediaPreviewModals.vue';
 
 const userStore = useUserStoreWithOut();
 const silentRequestOptions = { successMessageMode: 'none' as const };
@@ -1355,149 +970,11 @@ const route = useRoute();
 const router = useRouter();
 
 // ==================== 皮肤主题系统 ====================
-interface ThemeConfig {
-  name: string;
-  brandStart: string;
-  brandEnd: string;
-  brandRgb: string;
-  bgPage: string;
-  bgChat: string;
-  bubbleAgent: string;
-  bubbleAgentEnd: string;
-  bubbleUser: string;
-  bubbleAi: string;
-  bubbleAiEnd: string;
-  bubbleAssistant: string;
-  bubbleAssistantEnd: string;
-  bgSurface: string;
-  bgCard: string;
-  bgInput: string;
-  bgCode: string;
-  textPrimary: string;
-  textSecondary: string;
-  textMuted: string;
-  border: string;
-  brandText: string;
-  barStart: string;
-  barEnd: string;
-}
-
-const LIGHT_COMMON = {
-  bgSurface: '#ffffff', bgCard: '#fafbfc', bgInput: '#f5f6fa',
-  bgCode: '#f0f0f0', textPrimary: '#333333', textSecondary: '#666666',
-  textMuted: '#999999', border: '#eeeeee', brandText: '#ffffff',
-};
-
-const THEME_PRESETS: Record<string, ThemeConfig> = {
-  blue: {
-    name: '经典蓝',
-    brandStart: '#4096ff', brandEnd: '#1677ff', brandRgb: '64, 150, 255',
-    barStart: '#4096ff', barEnd: '#1677ff',
-    bgPage: '#f5f6fa', bgChat: '#f7f8fc',
-    bubbleAgent: '#dbeafe', bubbleAgentEnd: '#e0f0ff',
-    bubbleUser: '#ffffff',
-    bubbleAi: '#e8f4ff', bubbleAiEnd: '#dbeafe',
-    bubbleAssistant: '#e6fffb', bubbleAssistantEnd: '#b5f5ec',
-    ...LIGHT_COMMON,
-  },
-  green: {
-    name: '清新绿',
-    brandStart: '#52c41a', brandEnd: '#389e0d', brandRgb: '82, 196, 26',
-    barStart: '#52c41a', barEnd: '#389e0d',
-    bgPage: '#f6faf3', bgChat: '#f8fcf6',
-    bubbleAgent: '#d9f7be', bubbleAgentEnd: '#e6ffe0',
-    bubbleUser: '#ffffff',
-    bubbleAi: '#e6ffe0', bubbleAiEnd: '#d9f7be',
-    bubbleAssistant: '#e6fffb', bubbleAssistantEnd: '#b5f5ec',
-    ...LIGHT_COMMON,
-  },
-  orange: {
-    name: '活力橙',
-    brandStart: '#fa8c16', brandEnd: '#d46b08', brandRgb: '250, 140, 22',
-    barStart: '#fa8c16', barEnd: '#d46b08',
-    bgPage: '#fffbf5', bgChat: '#fefcf8',
-    bubbleAgent: '#fff7e6', bubbleAgentEnd: '#ffe7ba',
-    bubbleUser: '#ffffff',
-    bubbleAi: '#fff1d6', bubbleAiEnd: '#ffe7ba',
-    bubbleAssistant: '#e6fffb', bubbleAssistantEnd: '#b5f5ec',
-    ...LIGHT_COMMON,
-  },
-  cyan: {
-    name: '科技青',
-    brandStart: '#13c2c2', brandEnd: '#08979c', brandRgb: '19, 194, 194',
-    barStart: '#13c2c2', barEnd: '#08979c',
-    bgPage: '#f5fafa', bgChat: '#f0f9f9',
-    bubbleAgent: '#b5f5ec', bubbleAgentEnd: '#d6fff8',
-    bubbleUser: '#ffffff',
-    bubbleAi: '#d6fff8', bubbleAiEnd: '#b5f5ec',
-    bubbleAssistant: '#e6fffb', bubbleAssistantEnd: '#87e8de',
-    ...LIGHT_COMMON,
-  },
-  rose: {
-    name: '玫瑰粉',
-    brandStart: '#eb2f96', brandEnd: '#c41d7f', brandRgb: '235, 47, 150',
-    barStart: '#eb2f96', barEnd: '#c41d7f',
-    bgPage: '#fff5f8', bgChat: '#fef7fa',
-    bubbleAgent: '#ffd6e7', bubbleAgentEnd: '#ffecf3',
-    bubbleUser: '#ffffff',
-    bubbleAi: '#ffecf3', bubbleAiEnd: '#ffd6e7',
-    bubbleAssistant: '#e6fffb', bubbleAssistantEnd: '#b5f5ec',
-    ...LIGHT_COMMON,
-  },
-  pureWhite: {
-    name: '纯白极简',
-    brandStart: '#4096ff', brandEnd: '#1677ff', brandRgb: '64, 150, 255',
-    barStart: '#ffffff', barEnd: '#f5f5f5',
-    brandText: '#000000',
-    bgPage: '#f7f7f7', bgChat: '#fafafa',
-    bgSurface: '#ffffff', bgCard: '#f9f9f9', bgInput: '#f3f3f3',
-    bgCode: '#ededed',
-    bubbleAgent: '#dbeafe', bubbleAgentEnd: '#e0f0ff',
-    bubbleUser: '#ffffff',
-    bubbleAi: '#e8f4ff', bubbleAiEnd: '#dbeafe',
-    bubbleAssistant: '#e6fffb', bubbleAssistantEnd: '#b5f5ec',
-    textPrimary: '#1a1a1a', textSecondary: '#595959', textMuted: '#a6a6a6',
-    border: '#e8e8e8',
-  },
-};
-
-const THEME_STORAGE_KEY = 'cs-workbench-theme';
-const currentThemeKey = ref('pureWhite');
-const customTheme = ref<ThemeConfig>({ ...THEME_PRESETS.pureWhite });
-
-const activeTheme = computed<ThemeConfig>(() => {
-  if (currentThemeKey.value === 'custom') return customTheme.value;
-  return THEME_PRESETS[currentThemeKey.value] || THEME_PRESETS.pureWhite;
-});
-
-const themeVars = computed(() => {
-  const t = activeTheme.value;
-  return {
-    '--cs-brand-start': t.brandStart,
-    '--cs-brand-end': t.brandEnd,
-    '--cs-brand-rgb': t.brandRgb,
-    '--cs-bg-page': t.bgPage,
-    '--cs-bg-chat': t.bgChat,
-    '--cs-bubble-agent': t.bubbleAgent,
-    '--cs-bubble-agent-end': t.bubbleAgentEnd,
-    '--cs-bubble-user': t.bubbleUser,
-    '--cs-bubble-ai': t.bubbleAi,
-    '--cs-bubble-ai-end': t.bubbleAiEnd,
-    '--cs-bubble-assistant': t.bubbleAssistant,
-    '--cs-bubble-assistant-end': t.bubbleAssistantEnd,
-    '--cs-bg-surface': t.bgSurface,
-    '--cs-bg-card': t.bgCard,
-    '--cs-bg-input': t.bgInput,
-    '--cs-bg-code': t.bgCode,
-    '--cs-text-primary': t.textPrimary,
-    '--cs-text-secondary': t.textSecondary,
-    '--cs-text-muted': t.textMuted,
-    '--cs-border': t.border,
-    '--cs-brand-text': t.brandText,
-    '--cs-bar-start': t.barStart || t.brandStart,
-    '--cs-bar-end': t.barEnd || t.brandEnd,
-  };
-});
+// 主题预设、状态、持久化逻辑已迁出至：
+//   ./theme/presets.ts
+//   ./composables/useCsWorkbenchTheme.ts
+// 设置抽屉内的主题选择 UI 在 components/CsWorkbenchSettingsDrawer.vue
+const { themeVars } = useCsWorkbenchTheme();
 
 /** 与布局顶栏/多标签占位一致的可视高度（关标签等会自动变），无注入时走样式表 fallback */
 const { contentHeight } = usePageContext();
@@ -1512,59 +989,6 @@ const workbenchLayoutStyle = computed(() => {
     maxHeight: px,
   };
 });
-
-function hexToRgb(hex: string): string {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return `${r}, ${g}, ${b}`;
-}
-
-function selectTheme(key: string) {
-  currentThemeKey.value = key;
-  if (key !== 'custom') {
-    customTheme.value = { ...THEME_PRESETS[key] };
-  }
-  saveThemeToStorage();
-}
-
-function updateCustomColor(field: string, value: string) {
-  (customTheme.value as any)[field] = value;
-  if (field === 'brandStart') {
-    customTheme.value.brandRgb = hexToRgb(value);
-  }
-  saveThemeToStorage();
-}
-
-function onColorInput(field: string, e: Event) {
-  const el = e.target as HTMLInputElement;
-  if (el) updateCustomColor(field, el.value);
-}
-
-function saveThemeToStorage() {
-  localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify({
-    key: currentThemeKey.value,
-    custom: customTheme.value,
-  }));
-}
-
-function loadThemeFromStorage() {
-  try {
-    const raw = localStorage.getItem(THEME_STORAGE_KEY);
-    if (raw) {
-      const data = JSON.parse(raw);
-      currentThemeKey.value = data.key || 'pureWhite';
-      if (data.custom) {
-        const merged = { ...THEME_PRESETS.pureWhite, ...data.custom };
-        if (!merged.barStart) { merged.barStart = merged.brandStart; }
-        if (!merged.barEnd) { merged.barEnd = merged.brandEnd; }
-        customTheme.value = merged;
-      }
-    }
-  } catch { /* ignore */ }
-}
-
-loadThemeFromStorage();
 
 function httpGet<T = any>(config: any, options: any = {}) {
   return defHttp.get<T>(config, { ...silentRequestOptions, ...options });
@@ -1859,10 +1283,7 @@ const sending = ref(false);
 let _imeComposing = false;
 const attachmentList = ref<any[]>([]);
 const uploadFileList = ref<any[]>([]);
-const videoPreviewVisible = ref(false);
-const videoPreviewUrl = ref('');
-const mediaViewerVisible = ref(false);
-const mediaViewerList = ref<any[]>([]);
+const csMediaApi = useCsMessageMedia();
 const lastNotifyMap = new Map<string, number>();
 const activeNotifications = new Map<string, Notification>();
 const showEmojiPanel = ref(false);
@@ -1903,8 +1324,6 @@ const ipBlacklisted = ref(false);
 const blacklistLoading = ref(false);
 const banModalVisible = ref(false);
 const banModalType = ref<'user' | 'ip'>('user');
-const banReason = ref('');
-const banIpValue = ref('');
 const savedScrollTop = ref<number | null>(null);
 
 // 访客信息缓存 (key -> visitorInfo)
@@ -1923,18 +1342,10 @@ const newTag = ref('');
 const tagInputRef = ref();
 
 // 字段编辑
+// editModalTitle 与 textarea/input 切换逻辑已迁入 components/CsVisitorFieldEditModal.vue
 const showEditModal = ref(false);
 const editingField = ref('');
 const editValue = ref('');
-const editModalTitle = computed(() => {
-  const titles: Record<string, string> = {
-    nickname: '备注昵称',
-    realName: '真实姓名',
-    phone: '手机号',
-    notes: '备注'
-  };
-  return titles[editingField.value] || '';
-});
 
 // 回复建议
 const aiSuggestion = ref('');
@@ -1958,8 +1369,7 @@ const conversationsCacheTime = new Map<string, number>();
 let conversationsRequestSeq = 0;
 const extraCache = new WeakMap<any, { key: any; value: any }>();
 const mediaGridCache = new WeakMap<any, { key: any; value: { items: any[]; extraCount: number; total: number } }>();
-const renderCache = new Map<string, string>();
-const maxRenderCacheSize = 300;
+// renderCache / maxRenderCacheSize 已迁入 ./render/csMessageRender.ts
 
 // WebSocket
 let ws: WebSocket | null = null;
@@ -1976,7 +1386,14 @@ let wsReconnectAttempts = 0;
 let lastWsMessageAt = 0;
 let lastMessageLoadAt = 0;
 const wsHeartbeatIntervalMs = 15000;
-const wsFallbackPollIntervalMs = 5000;
+// P3：fallback 间隔随 WS 状态动态化。健康状态 30s 兜底（WS 实时推送），
+// 不在线/重连状态 5s 加密感知。阈值固定 5s 与间隔解耦。
+const wsFallbackHealthyMs = 30000;
+const wsFallbackDegradedMs = 5000;
+const wsFallbackTriggeredAfterWsMs = 5000;
+// P2：fallback 内 conv.lastMessageTime 与本地末条/lastMessageLoadAt 的比对容差，
+// 用于吸收前后端 NTP 漂移、避免误触发整体 loadMessages。
+const messageStaleToleranceMs = 3000;
 const wsStatus = ref<'connected' | 'connecting' | 'reconnecting' | 'disconnected'>('connecting');
 const wsShowBanner = ref(false);
 const wsReconnectCountdown = ref(0);
@@ -2067,46 +1484,62 @@ function stopWsHealthCheck() {
 
 function stopFallbackPoll() {
   if (wsFallbackPollTimer) {
-    clearInterval(wsFallbackPollTimer);
+    // P3：改用 setTimeout 自驱动，对应清理也改成 clearTimeout
+    clearTimeout(wsFallbackPollTimer);
     wsFallbackPollTimer = null;
   }
 }
 
+// P3：用 setTimeout 自驱动替代 setInterval。
+//   - 进入 tick 立即把 timer 置 null，防止 stop / 重入冲突
+//   - finally 统一调度下一轮，所有早返回路径都能拿到下次 timer
+//   - 间隔依据 WS 状态动态选择，阈值（5s）固定不变
 function startFallbackPoll() {
   stopFallbackPoll();
-  wsFallbackPollTimer = window.setInterval(async () => {
-    if (document.hidden) return;
-    if (!agentId.value) {
-      try {
-        await loadAgentInfo();
-        if (agentId.value) {
-          connectWebSocket();
-          await loadConversations();
-        }
-      } catch { /* ignore */ }
-      return;
-    }
-    if (loadingConversations.value) return;
-    if (ws && ws.readyState === WebSocket.OPEN && lastWsMessageAt) {
-      const now = Date.now();
-      if (now - lastWsMessageAt < wsFallbackPollIntervalMs) {
+  const tick = async () => {
+    wsFallbackPollTimer = null;
+    try {
+      if (document.hidden) return;
+      if (!agentId.value) {
+        try {
+          await loadAgentInfo();
+          if (agentId.value) {
+            connectWebSocket();
+            await loadConversations();
+          }
+        } catch { /* ignore */ }
         return;
       }
-    }
-    try {
+      if (loadingConversations.value) return;
+      if (ws && ws.readyState === WebSocket.OPEN && lastWsMessageAt) {
+        if (Date.now() - lastWsMessageAt < wsFallbackTriggeredAfterWsMs) {
+          return;
+        }
+      }
       await loadConversations();
       const currentId = currentConversation.value?.id;
       if (!currentId) return;
       const conv = conversations.value.find(c => c.id === currentId);
       if (!conv?.lastMessageTime) return;
-      const lastMsgTime = new Date(conv.lastMessageTime).getTime();
-      if (lastMsgTime > lastMessageLoadAt) {
+      // P2：用本地消息流末条 createTime 与 lastMessageLoadAt 取较大者
+      // 与 conv.lastMessageTime 比对，超过容差才整体重载消息流。
+      const localLast = messages.value[messages.value.length - 1];
+      const localLastTime = localLast?.createTime ? new Date(localLast.createTime).getTime() : 0;
+      const remoteLastTime = new Date(conv.lastMessageTime).getTime();
+      if (remoteLastTime - Math.max(localLastTime, lastMessageLoadAt) > messageStaleToleranceMs) {
         await loadMessages(currentId);
       }
     } catch {
-      // 忽略轮询失败
+      // 忽略轮询失败，下次 tick 仍会被 finally 调度
+    } finally {
+      const nextDelay = (ws && ws.readyState === WebSocket.OPEN)
+        ? wsFallbackHealthyMs
+        : wsFallbackDegradedMs;
+      wsFallbackPollTimer = window.setTimeout(tick, nextDelay);
     }
-  }, wsFallbackPollIntervalMs);
+  };
+  // 首次延迟用降级值（5s），让 onMounted 后较快感知一次
+  wsFallbackPollTimer = window.setTimeout(tick, wsFallbackDegradedMs);
 }
 
 function stopWsCountdown() {
@@ -2354,7 +1787,10 @@ watch(filter, () => {
 
 // Phase 4.2 (M4)：会话列表变化时按 5 分钟去重批量预热访客头像，
 // 让 Electron 长会话场景在切换 filter / 收到新会话时也能立刻命中 IDB 缓存。
-watch(conversations, (list) => {
+// P4：mergeConversations 不再替换数组引用，需要监听 length 变化来感知增删；
+// 同字段更新（lastMessageTime 等）走 watch 内 warmupAvatars 自带的 5min 去重，仍然便宜。
+watch(() => conversations.value.length, () => {
+  const list = conversations.value;
   if (!list || !list.length) return;
   try {
     const urls = list
@@ -2950,43 +2386,18 @@ async function openImagePreviewFromList(list: any[], item: any) {
 }
 
 function openVideoPreview(item: any) {
-  videoPreviewUrl.value = getAttachmentUrl(item);
-  videoPreviewVisible.value = true;
+  csMediaApi.openVideoPreview(getAttachmentUrl(item));
 }
 
 function openFilePreview(item: any) {
-  const url = getAttachmentUrl(item);
-  if (url) {
-    window.open(url, '_blank');
-  }
+  csMediaApi.openFilePreview(getAttachmentUrl(item));
 }
 
 function openMediaViewer(msg: any) {
-  mediaViewerList.value = getMediaAttachments(msg);
-  mediaViewerVisible.value = true;
+  csMediaApi.openMediaViewer(getMediaAttachments(msg));
 }
 
-// 去除HTML标签，提取纯文本
-function stripHtmlTags(html: string): string {
-  if (!html) return '';
-  return html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
-}
-
-function buildMessagePreview(content: string, attachments: any[]) {
-  if (content) {
-    // 去除HTML标签，只保留纯文本摘要用于侧边栏预览
-    const plain = stripHtmlTags(content);
-    return plain || content;
-  }
-  if (!attachments || attachments.length === 0) return '';
-  const labels = new Set<string>();
-  attachments.forEach(att => {
-    if (att.type === 'image') labels.add('图片');
-    else if (att.type === 'video') labels.add('视频');
-    else labels.add('文件');
-  });
-  return `[${Array.from(labels).join('/')}]`;
-}
+// stripHtmlTags / buildMessagePreview 已迁移到 ./render/csMessageRender.ts
 
 function isMessagesAtBottom() {
   const el = messagesEl || messagesRef.value;
@@ -3240,13 +2651,15 @@ async function loadStats() {
 }
 
 // 延迟加载统计数据（防抖，避免频繁调用）
+// P5：500ms → 2000ms，高频 WS 消息时段合并 stats 请求次数；
+// 用户主动操作（接入/转接/结束）UI 自带提示，2s 数字延迟感知影响有限。
 function loadStatsDebounced() {
   if (statsLoadTimer) {
     clearTimeout(statsLoadTimer);
   }
   statsLoadTimer = setTimeout(() => {
     loadStats();
-  }, 500); // 500ms 延迟
+  }, 2000);
 }
 
 // 延迟加载会话列表（防抖，WebSocket 兜底刷新用）
@@ -3349,6 +2762,42 @@ function initWaitingTracking() {
   });
 }
 
+// ============ 会话列表增量 merge ============
+
+// P4：用 id 索引把远端会话列表合并到本地 conversations.value，
+//   - 删除：本地有 / remote 没有，splice 原地删除（保响应式）
+//   - 更新：双方都有，仅 patch 接口字段，保留本地特有字段（lastTalkingAgent、userOnline 等）
+//   - 新增：remote 有 / 本地没有，push 进数组
+// 调用方负责后续 sortConversations() 等副作用。
+function mergeConversations(remote: any[]) {
+  const remoteIds = new Set<string>(remote.map((c: any) => c.id));
+  const localIndex = new Map<string, any>();
+  conversations.value.forEach((c: any) => localIndex.set(c.id, c));
+
+  // 1. 删除：从尾向头遍历，splice 不会影响未遍历的索引
+  for (let i = conversations.value.length - 1; i >= 0; i--) {
+    const c = conversations.value[i];
+    if (!remoteIds.has(c.id)) {
+      conversations.value.splice(i, 1);
+    }
+  }
+
+  // 2. 更新 + 新增
+  remote.forEach((rc: any) => {
+    const local = localIndex.get(rc.id);
+    if (!local) {
+      conversations.value.push(rc);
+    } else {
+      // 仅写入接口返回字段，未在 rc 中出现的本地字段保留不变
+      Object.keys(rc).forEach((k) => {
+        if (local[k] !== rc[k]) {
+          local[k] = rc[k];
+        }
+      });
+    }
+  });
+}
+
 // ============ 加载监控模式客服列表 ============
 
 async function loadMonitorAgents() {
@@ -3432,8 +2881,15 @@ async function loadConversations() {
       }
     });
     
-    conversations.value = newConversations;
+    // P4：增量 merge 替代整数组替换。
+    //   - 保持 conversations.value 数组引用不变，仅在真正增删时触发浅响应
+    //   - 已有项的对象引用保留，仅 patch 接口返回的字段
+    //   - 接口未返回的本地特有字段（lastTalkingAgent、userOnline、_clientKey 等）保留不变
+    //   - unreadCount 维持原行为（服务端值覆盖本地）
+    mergeConversations(newConversations);
     const cacheKey = getConversationsCacheKey();
+    // 缓存仍写入接口快照（newConversations）而非 merge 后状态，避免 watch(filter)
+    // 切换 tab 读缓存时引入残留对象引用。
     conversationsCache.set(cacheKey, newConversations);
     conversationsCacheTime.set(cacheKey, Date.now());
 
@@ -3444,7 +2900,7 @@ async function loadConversations() {
     sortConversations();
 
     // 异步预取昵称（API已返回的不会触发）
-    newConversations.forEach((conv: any) => {
+    conversations.value.forEach((conv: any) => {
       if (!conv.visitorNickname) {
         prefetchVisitorNickname(conv);
       }
@@ -3453,7 +2909,7 @@ async function loadConversations() {
     if (!currentConversation.value) {
       try {
         const lastId = sessionStorage.getItem(lastConversationStorageKey);
-        const lastConv = lastId ? newConversations.find((c: any) => c.id === lastId) : null;
+        const lastConv = lastId ? conversations.value.find((c: any) => c.id === lastId) : null;
         if (lastConv) {
           await selectConversation(lastConv);
         }
@@ -3884,22 +3340,18 @@ async function loadBlacklistStatus(seq?: number) {
 
 function openBanModal(type: 'user' | 'ip') {
   banModalType.value = type;
-  banReason.value = '';
-  if (type === 'ip') {
-    banIpValue.value = currentConversation.value?.userIp || '';
-  }
   banModalVisible.value = true;
 }
 
-async function confirmBan() {
-  if (!banReason.value.trim()) {
+async function onBlacklistConfirm(payload: { type: 'user' | 'ip'; reason: string; ip?: string }) {
+  if (!payload.reason) {
     message.warning('请输入拉黑原因');
     return;
   }
-  if (banModalType.value === 'ip') {
-    await applyBlacklist('ip', banReason.value.trim(), banIpValue.value.trim());
+  if (payload.type === 'ip') {
+    await applyBlacklist('ip', payload.reason, payload.ip || '');
   } else {
-    await applyBlacklist('user', banReason.value.trim());
+    await applyBlacklist('user', payload.reason);
   }
   banModalVisible.value = false;
 }
@@ -4166,6 +3618,9 @@ async function sendMessage() {
       }
       loadStatsDebounced();
     }
+
+    // P1：成功路径标记本地消息流已是最新，避免 fallback 兜底再整体重载消息流
+    lastMessageLoadAt = Date.now();
   } catch (e) {
     if (localMsgId) {
       const idx = messages.value.findIndex(m => m.id === localMsgId);
@@ -4801,6 +4256,9 @@ async function handleWsMessage(data: any) {
             messages.value[localIdx]._matched = true;
           }
         }
+        // P1：当前会话有 WS 消息（无论 push / 替换 local / 完全重复）都视为消息流已最新，
+        // 阻断 fallback 兜底在 5/30 秒后无意义重载消息流。
+        lastMessageLoadAt = Date.now();
       }
       
       // 对会话列表进行重新排序（未读消息优先，然后按时间）
@@ -5627,132 +5085,9 @@ function getMessageClass(msg: any) {
   return msg.senderType === 0 ? 'user' : 'agent';
 }
 
-// 渲染消息内容（与访客端保持一致：简单HTML转义 + 换行转换）
-// ★ 初始化Markdown渲染器（仅用于回复建议）
-const md = new MarkdownIt({
-  html: true,
-  linkify: true,
-  typographer: true,
-  highlight: function (str: string, lang: string) {
-    if (lang && hljs.getLanguage(lang)) {
-      try {
-        return hljs.highlight(str, { language: lang }).value;
-      } catch (__) {}
-    }
-    return '';
-  }
-});
-
-// 将 <img src="/path/..."> 中的路径型 URL 补全为绝对 URL（兼容 Electron 环境）
-function normalizeImgUrls(html: string): string {
-  try {
-    const origin = new URL(globSetting.domainUrl).origin;
-    return html.replace(
-      /(<img[^>]*?\ssrc=["'])(\/[^"']+)(["'])/gi,
-      (_match, pre, path, suf) => `${pre}${origin}${path}${suf}`
-    );
-  } catch { return html; }
-}
-
-/** 纯文本 URL 自动识别：在 HTML 转义前检测 URL，转为可点击的 <a> 标签 */
-function linkifyPlainText(text: string): string {
-  const urlPattern = /(https?:\/\/[^\s<>]*[^\s<>.,;:!?。，；：！？)\]】]|www\.[^\s<>]*[^\s<>.,;:!?。，；：！？)\]】])/gi;
-  let lastIndex = 0;
-  let result = '';
-  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  let match: RegExpExecArray | null;
-  urlPattern.lastIndex = 0;
-  while ((match = urlPattern.exec(text)) !== null) {
-    result += esc(text.slice(lastIndex, match.index));
-    const url = match[0];
-    const href = url.startsWith('www.') ? 'https://' + url : url;
-    result += `<a class="auto-link" href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(url)}</a>`;
-    lastIndex = match.index + url.length;
-  }
-  result += esc(text.slice(lastIndex));
-  return result.replace(/\n/g, '<br>');
-}
-
-// 流式消息轻量渲染（跳过 markdown 解析，完成后由 renderMessage 接管）
-function renderStreamingText(content: string) {
-  return content
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\n/g, '<br>');
-}
-
-// 默认 ALLOWED_URI_REGEXP 拒绝 cse:// → 富文本里的加密图 src 会被剥离；
-// 这里在白名单中加入 cse:，由 v-cse-html 指令负责异步解密为 blob: URL
-const CSE_ALLOWED_URI_REGEXP =
-  /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|cse):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
-
-function sanitizeHtml(html: string): string {
-  return DOMPurify.sanitize(html, {
-    ADD_TAGS: ['iframe'],
-    ADD_ATTR: ['target', 'allowfullscreen', 'frameborder'],
-    ALLOW_DATA_ATTR: false,
-    ALLOWED_URI_REGEXP: CSE_ALLOWED_URI_REGEXP,
-  });
-}
-
-// 渲染消息内容（支持富文本HTML、Markdown、纯文本）
-function renderMessage(content: string) {
-  if (!content) return '';
-  content = content.replace(/#\s*\{\s*domainURL\s*\}/g, globSetting.domainUrl);
-  content = normalizeImgUrls(content);
-  const cached = renderCache.get(content);
-  if (cached) {
-    return cached;
-  }
-  let rendered = '';
-  // 1. 检测是否为完整HTML（TinyMCE富文本，如FAQ答案）— sanitize 后返回
-  const isRichHtml = /^\s*<(?:p|div|ul|ol|h[1-6]|table|blockquote)\b/i.test(content.trim());
-  if (isRichHtml) {
-    rendered = sanitizeHtml(content);
-  } else {
-    // 2. Markdown 检测
-    const hasMarkdown = /!\[[^\]]*]\([^)]*\)|\*\*[^*]+\*\*|```|^\s*#/m.test(content);
-    if (hasMarkdown) {
-      rendered = sanitizeHtml(md.render(content));
-    } else {
-      // 3. 检测内联HTML（如 <a>、<img>、<br> 等）
-      const hasInlineHtml = /<([a-z][\s\S]*?)>/i.test(content);
-      if (hasInlineHtml) {
-        rendered = sanitizeHtml(md.render(content));
-      } else {
-        // 4. 纯文本：转义并保留换行，自动识别超链接
-        rendered = linkifyPlainText(content);
-      }
-    }
-  }
-  if (renderCache.size >= maxRenderCacheSize) {
-    renderCache.clear();
-  }
-  renderCache.set(content, rendered);
-  return rendered;
-}
-
-// ★ 渲染回复建议内容（保留Markdown渲染）
-function renderMarkdown(content: string) {
-  if (!content) return '';
-  content = content.replace(/#\s*\{\s*domainURL\s*\}/g, globSetting.domainUrl);
-  const cached = renderCache.get(content);
-  if (cached) {
-    return cached;
-  }
-  try {
-    const rendered = sanitizeHtml(md.render(content));
-    if (renderCache.size >= maxRenderCacheSize) {
-      renderCache.clear();
-    }
-    renderCache.set(content, rendered);
-    return rendered;
-  } catch (e) {
-    console.error('Markdown渲染失败', e);
-    return renderMessage(content);
-  }
-}
+// renderMessage / renderMarkdown / renderStreamingText / sanitizeHtml /
+// linkifyPlainText / normalizeImgUrls / md(MarkdownIt) / renderCache 等
+// 已迁移到 ./render/csMessageRender.ts，本文件通过 import 直接复用
 
 // 处理AI流式token（RAF 批处理，每帧最多刷新一次 DOM）
 function handleAiStreamToken(data: any) {
@@ -5868,6 +5203,56 @@ function restoreMessageScroll() {
     }
   });
 }
+
+// ==================== 工作台上下文：暴露给 components/* 子组件 ====================
+//
+// 仅提供子组件确实需要的最小集合（只读 ref / computed + 必要 callback）；
+// WebSocket 实例、消息缓冲、sendMessage 等核心业务保留在父级。
+const csWorkbenchSettings: CsWorkbenchSettings = {
+  selectedAppId,
+  visitorAppId,
+  aiEnabled,
+  aiPrologueEnabled,
+  soundEnabled,
+  soundVolumePercent,
+  aiAppList,
+  onAppChange,
+  onVisitorAppChange,
+  onAiEnabledChange,
+  onAiPrologueEnabledChange,
+  onSoundEnabledChange,
+};
+const csWorkbenchContext: CsWorkbenchContext = {
+  agentId,
+  agentName,
+  agentAvatar,
+  isOnline,
+  isColleagueReadonly,
+  currentConversation,
+  visitorInfo,
+  userOnline,
+  parsedCustomFields,
+  currentReplyMode,
+  satisfactionPushing,
+  satisfactionPushed,
+  themeVars,
+  wsStatus,
+  wsShowBanner,
+  wsReconnectCountdown,
+  showDetailPanel,
+  showSettingsDrawer,
+  settings: csWorkbenchSettings,
+  getDisplayName,
+  getModeName,
+  formatTime,
+  toggleOnline,
+  changeMode,
+  pushSatisfaction,
+  openTransferModal,
+  closeConversation,
+  connectWebSocket,
+};
+provide(CS_WORKBENCH_CONTEXT_KEY, csWorkbenchContext);
 </script>
 
 <style lang="less" scoped>
@@ -5951,74 +5336,7 @@ function restoreMessageScroll() {
   z-index: 2;
 }
 
-// ==================== 客服状态栏（渐变品牌色头部） ====================
-.agent-bar {
-  padding: 14px 16px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: linear-gradient(135deg, var(--cs-bar-start), var(--cs-bar-end));
-  border-bottom: 1px solid var(--cs-border);
-
-  .agent-info {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .self-agent-avatar {
-    flex-shrink: 0;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-  }
-
-  .agent-name {
-    font-weight: 600;
-    color: var(--cs-brand-text);
-    font-size: 14px;
-  }
-
-  .agent-actions {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  :deep(.ant-switch) {
-    background: #ff4d4f;
-    &.ant-switch-checked {
-      background: #52c41a;
-    }
-  }
-
-  .setting-icon {
-    font-size: 18px;
-    color: var(--cs-brand-text);
-    cursor: pointer;
-    transition: opacity 0.2s @ease-smooth;
-    &:hover {
-      opacity: 0.7;
-    }
-  }
-}
-
-.ws-status-banner {
-  padding: 4px 12px;
-  font-size: 12px;
-  text-align: center;
-  overflow: hidden;
-}
-.ws-banner-enter-active, .ws-banner-leave-active {
-  transition: all 0.3s ease;
-}
-.ws-banner-enter-from, .ws-banner-leave-to {
-  opacity: 0;
-  max-height: 0;
-  padding: 0 12px;
-}
-.ws-connecting { background: #fffbe6; color: #ad8b00; }
-.ws-reconnecting { background: #fff7e6; color: #d46b08; }
-.ws-disconnected { background: #fff2f0; color: #cf1322; }
-.ws-connected { background: #f6ffed; color: #389e0d; }
+// .agent-bar / .ws-status-banner 样式已迁移到 components/CsAgentBar.vue 与 components/CsWsStatusBanner.vue
 
 // ==================== 搜索框 ====================
 .search-bar {
@@ -6041,96 +5359,7 @@ function restoreMessageScroll() {
 }
 
 // ==================== 设置抽屉 ====================
-.settings-content {
-  .setting-item {
-    margin-bottom: 16px;
-    background: var(--cs-bg-card);
-    border-radius: 10px;
-    padding: 16px;
-
-    .setting-label {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 14px;
-      font-weight: 500;
-      margin-bottom: 8px;
-      color: var(--cs-text-primary);
-      .anticon { color: var(--cs-brand-start); }
-    }
-
-    .setting-desc {
-      font-size: 12px;
-      color: var(--cs-text-muted);
-      margin-bottom: 12px;
-    }
-  }
-
-  .theme-presets {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 10px;
-    margin-top: 8px;
-  }
-
-  .theme-preset-item {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-    cursor: pointer;
-    padding: 8px;
-    border-radius: 8px;
-    border: 2px solid transparent;
-    transition: all 0.2s;
-
-    &:hover { background: var(--cs-bg-input); }
-    &.active { border-color: var(--cs-brand-start, #4096ff); background: rgba(var(--cs-brand-rgb, 64, 150, 255), 0.06); }
-
-    .theme-color {
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.15);
-
-      &.custom-color {
-        background: conic-gradient(#ff4d4f, #fa8c16, #fadb14, #52c41a, #13c2c2, #1677ff, #722ed1, #ff4d4f);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: #fff;
-        font-size: 16px;
-      }
-    }
-
-    span { font-size: 12px; color: var(--cs-text-secondary); }
-  }
-
-  .custom-colors {
-    margin-top: 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .color-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-
-    label { font-size: 13px; color: var(--cs-text-secondary); }
-
-    input[type="color"] {
-      width: 36px;
-      height: 28px;
-      border: 1px solid var(--cs-border);
-      border-radius: 6px;
-      padding: 2px;
-      cursor: pointer;
-      background: none;
-    }
-  }
-}
+// .settings-content / .theme-presets / .color-row 等样式已迁移到 components/CsWorkbenchSettingsDrawer.vue
 
 // ==================== 筛选标签（合并去重） ====================
 .filter-tabs {
@@ -6468,56 +5697,7 @@ function restoreMessageScroll() {
   overflow: hidden;
 }
 
-.chat-header {
-  padding: 14px 20px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-shrink: 0;
-  background: var(--cs-bg-surface);
-  z-index: 1;
-
-  .chat-user {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .user-info {
-    .user-name {
-      font-size: 16px;
-      font-weight: 600;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      color: #222;
-      .star-icon { color: #faad14; }
-    }
-
-    .user-status {
-      font-size: 12px;
-      color: var(--cs-text-muted);
-      margin-top: 2px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      .status-divider { color: #e0e0e0; }
-    }
-    .custom-fields-header {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 4px;
-      margin-top: 4px;
-    }
-  }
-
-  .chat-tools {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-}
+// .chat-header 样式已迁移到 components/CsChatHeader.vue
 
 .chat-body {
   flex: 1;
@@ -7326,41 +6506,8 @@ function restoreMessageScroll() {
   }
 }
 
-.media-viewer-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 10px;
-}
-
-.media-viewer-item {
-  border-radius: 10px;
-  overflow: hidden;
-  background: var(--cs-bg-card);
-  border: 1px solid var(--cs-border);
-  aspect-ratio: 16 / 9;
-  transition: transform 0.15s @ease-smooth, box-shadow 0.15s @ease-smooth;
-  img, video {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    cursor: pointer;
-  }
-  &:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
-  }
-}
-
-.media-viewer-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-  color: var(--cs-text-secondary);
-  font-size: 13px;
-}
-
-.media-viewer-tip { color: var(--cs-text-muted); }
+// .media-viewer-grid / .media-viewer-item / .media-viewer-header / .media-viewer-tip
+// 已迁移到 components/CsMediaPreviewModals.vue
 
 // ==================== 会话结束状态 ====================
 .chat-ended {
@@ -7382,33 +6529,7 @@ function restoreMessageScroll() {
   }
 }
 
-// ==================== 空状态 ====================
-.chat-empty {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  color: var(--cs-text-muted);
-  background: var(--cs-bg-chat);
-  height: 100%;
-
-  :deep(.anticon) {
-    font-size: 72px !important;
-    background: linear-gradient(135deg, var(--cs-brand-start), var(--cs-brand-end));
-    background-clip: text;
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    opacity: 0.3;
-  }
-
-  p {
-    margin-top: 16px;
-    font-size: 15px;
-    color: var(--cs-text-muted);
-    font-weight: 500;
-  }
-}
+// .chat-empty 样式已迁移到 components/CsChatEmptyState.vue
 
 // ==================== 右侧详情面板 ====================
 .detail-panel {
@@ -7551,75 +6672,7 @@ function restoreMessageScroll() {
 }
 
 // ==================== 转接弹窗 ====================
-.transfer-content {
-  min-height: 200px;
-  max-height: 400px;
-  overflow-y: auto;
-}
-
-.transfer-loading, .transfer-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 200px;
-  color: var(--cs-text-muted);
-  gap: 12px;
-}
-
-.agent-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.agent-card {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  background: var(--cs-bg-card);
-  border-radius: 10px;
-  cursor: pointer;
-  transition: all 0.25s @ease-smooth;
-  border: 1px solid transparent;
-
-  &:hover {
-    background: rgba(var(--cs-brand-rgb), 0.05);
-    border-color: var(--cs-brand-start);
-    box-shadow: 0 4px 12px rgba(var(--cs-brand-rgb), 0.1);
-    .transfer-btn { opacity: 1; }
-  }
-
-  .agent-avatar {
-    background: linear-gradient(135deg, var(--cs-brand-start), var(--cs-brand-end));
-    color: #fff;
-    flex-shrink: 0;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-  }
-
-  .agent-info {
-    flex: 1;
-    min-width: 0;
-    .agent-name {
-      font-size: 15px;
-      font-weight: 500;
-      color: var(--cs-text-primary);
-      margin-bottom: 4px;
-    }
-    .agent-stats {
-      display: flex;
-      gap: 16px;
-      font-size: 12px;
-      color: var(--cs-text-muted);
-    }
-  }
-
-  .transfer-btn {
-    opacity: 0;
-    transition: opacity 0.2s @ease-smooth;
-  }
-}
+// .transfer-content / .agent-card 等样式已迁移到 components/CsTransferConversationModal.vue
 
 // ==================== EmojiPicker 协调 ====================
 :deep(.emoji-picker) {
