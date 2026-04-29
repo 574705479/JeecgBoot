@@ -4394,6 +4394,14 @@ async function handleWsMessage(data: any) {
             break;
           }
 
+          // 已结束会话静默处理：访客重新打开旧已结束会话页面时，
+          // 后端可能仍会广播 new_conversation（旧版本兼容），前端兜底过滤。
+          // 不加列表、不弹"新访客接入"提示、不放提示音；统计仍要更新。
+          if (convStatus === 2) {
+            loadStatsDebounced();
+            break;
+          }
+
           // 判断是否应该显示在当前列表
           const shouldAdd = 
             (filter.value === 'mine' && convOwnerAgentId === agentId.value) ||  // 我的：分配给当前客服

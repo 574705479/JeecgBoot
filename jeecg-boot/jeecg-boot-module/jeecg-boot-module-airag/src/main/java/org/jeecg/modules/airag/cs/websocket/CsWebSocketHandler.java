@@ -171,10 +171,17 @@ public class CsWebSocketHandler implements WebSocketHandler {
         log.info("[CS-WebSocket] 连接建立: userId={}, userType={}, conversationId={}, offlineDelivered={}",
                 userId, userType, conversationId, offlineDelivered);
         
-        // 如果是用户连接，通知相关客服
+        // 如果是用户连接，通知相关客服（已结束会话静默处理：访客重打开旧已结束会话不应触发 new_conversation/user_online 广播，
+        // 否则客服列表会突然冒出已结束会话并播放"新访客接入"提示，30 秒后才被 fallback 轮询清理掉）
         if (CsWebSocketInterceptor.USER_TYPE_USER.equals(userType) && conversation != null) {
-            notifyAgentsNewConversation(conversation);
-            notifyAgentsUserOnline(conversationId, userId);
+            Integer convStatus = conversation.getStatus();
+            if (convStatus != null && convStatus == CsConversation.STATUS_CLOSED) {
+                log.info("[CS-WebSocket] 已结束会话访客重连，静默处理: conversationId={}, userId={}",
+                        conversationId, userId);
+            } else {
+                notifyAgentsNewConversation(conversation);
+                notifyAgentsUserOnline(conversationId, userId);
+            }
         }
     }
 
