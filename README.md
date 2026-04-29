@@ -16,6 +16,27 @@
 适用场景：电商售前售后、SaaS 在线咨询、企业官网客服、私域流量沉淀、内部 IT/HR 服务台等。
 
 
+系统组成
+-----------------------------------
+
+整套系统由 **4 个子项目 + 1 套共享中间件** 组成，可独立开发、独立部署、独立升级：
+
+| 子项目 | 路径 | 角色 | 默认端口 | 镜像名 |
+|---|---|---|---|---|
+| 客服后端 | [`jeecg-boot/`](./jeecg-boot/) | 主业务后端：客服模块、AI 引擎、WebSocket 端点（`/ws/cs`）、定时任务 | `8080` | `kefu-system` |
+| 客服管理前端 | [`jeecgboot-vue3/`](./jeecgboot-vue3/) | 管理端 + 客服工作台 + Electron 桌面端宿主，主前端 SPA | `3100`（dev）/ `80`（prod） | `kefu-vue` |
+| 访客端独立项目 | [`jeecgboot-vue3-visitor/`](./jeecgboot-vue3-visitor/) | 极简快加载访客端 SPA（HTML 内联骨架屏，端到端加密），build 后注入主前端 `dist/cs/userChat/` | 与主前端共用 | 无（产物合并发布） |
+| 授权服务 | [`license-server/`](./license-server/) | 独立 License 颁发 / 验证 / 管理后台（含独立 Vue 3 前端），与客服系统通过 HTTP 联动 | 后端 `8090`（dev）/ `8180`（docker），前端 `8181`（docker） | `license-server` + `license-frontend` |
+| 共享中间件 | — | MySQL 8.4 / Redis 8.0 / MongoDB 8.2 / pgvector / MinIO | 见快速启动表格 | 公共镜像 |
+
+**项目编排：**
+
+- 客服核心栈：根目录 [`docker-compose.yml`](./docker-compose.yml)（开发用）+ [`docker-compose.kefu-1.0.0.yml`](./docker-compose.kefu-1.0.0.yml)（生产环境模板，挂载持久化卷）
+- 授权服务：[`license-server/docker-compose.yml`](./license-server/docker-compose.yml)（开发用）+ [`license-server/docker-compose.prod.yml`](./license-server/docker-compose.prod.yml)（生产用）
+- 访客端构建：由 [`jeecgboot-vue3/build/script/buildVisitor.ts`](./jeecgboot-vue3/build/script/buildVisitor.ts) 调起，`pnpm build:nocheck` 生成产物后整体拷贝到主前端 `dist/cs/userChat/`，部署时由 nginx 命中真实文件返回
+- 数据持久化：根目录 `/www/docker-data/kefu/{mysql,redis,mongodb,pgvector,upload,webapp,license-cache}`（见生产 compose）
+
+
 核心特性
 -----------------------------------
 
@@ -66,6 +87,30 @@
 | 缓存 / 分布式锁 | Redis 8.0（端口 6379） + Redisson |
 | 向量库（AI RAG） | PostgreSQL + pgvector（端口 5432） |
 | 对象存储 | MinIO / 阿里 OSS / 本地存储（可切换） |
+
+### 访客端（独立子项目）
+
+| 项 | 选型 |
+|---|---|
+| 框架 | Vue 3 + TypeScript + Vite 6（`jeecgboot-vue3-visitor` 子项目） |
+| 路由 | `vue-router` Hash 模式，单路由 `/` 渲染 `ChatMain.vue`，无鉴权守卫 |
+| 加密 | `@noble/ciphers` + `@noble/hashes`（端到端混合加密，浏览器原生 WebCrypto fallback） |
+| 渲染 | `markdown-it` + `dompurify`（消息富文本安全渲染）、`@tanstack/vue-virtual`（消息流虚拟滚动） |
+| 启动体感 | HTML 内联骨架屏（首字节即可看到完整聊天界面骨架，零外部依赖） |
+| 输出 | build 后产物合并到 `jeecgboot-vue3/dist/cs/userChat/`，与主前端镜像 `kefu-vue` 同包发布 |
+
+### 授权服务（License Server）
+
+独立项目位于 [`license-server/`](./license-server/)，与客服系统解耦，可单独部署、独立销售。
+
+| 项 | 选型 |
+|---|---|
+| 后端 | Spring Boot + JPA + Hibernate + Flyway，独立 MySQL 库 `license_server` |
+| 安全 | JWT（access 2h / refresh 7d）+ HMAC 主密钥（`LICENSE_MASTER_KEY`，HKDF 二次派生） |
+| 限流 | per IP / per License Key 速率限制（激活、心跳验证均独立配额） |
+| 前端 | Vue 3 + TypeScript + Vite + Pinia，集成 wangEditor 富文本与 xterm 终端模拟器 |
+| 业务能力 | License 颁发、激活、续期、吊销；客户档案；套餐计划；Docker 服务下发；服务器信息回传；操作审计日志 |
+| 客服侧对接 | `jeecg-boot-base-core/license-client` 模块，2h 心跳一次，支持坐席 / 知识库 / 应用多维配额校验 |
 
 
 功能模块清单
@@ -220,6 +265,54 @@ cd jeecgboot-vue3
 npm run electron:dev
 ```
 
+#### 5. （可选）启动授权服务 License Server
+
+授权服务是独立项目，与客服系统通过 HTTP 联动。客服侧默认通过 `LICENSE_SERVER_URL` 环境变量指定授权地址（生产配置见 [`docker-compose.kefu-1.0.0.yml`](./docker-compose.kefu-1.0.0.yml) 第 107 行）。
+
+**方式一：Docker Compose 一键启动（推荐）**
+
+```bash
+cd license-server
+docker compose up -d
+```
+
+启动后服务清单：
+
+| 容器 | 端口 | 用途 |
+|---|---|---|
+| `license-mysql` | 13308 | 独立 MySQL（库名 `license_server`） |
+| `license-server` | 8180 | 授权后端 |
+| `license-frontend` | 8181 | 授权管理后台前端 |
+
+**方式二：本地开发模式**
+
+```bash
+# 启动后端（端口 8090）
+cd license-server
+mvn spring-boot:run
+
+# 启动前端（端口由 Vite 默认 5173 / 5174 等自动分配）
+cd license-server/frontend
+pnpm install
+pnpm dev
+```
+
+> **首次部署提醒**：必须配置 `LICENSE_MASTER_KEY` 环境变量（HMAC 主密钥），否则授权服务无法启动；生产环境建议使用 64 字符随机十六进制字符串，妥善保管不可泄露。
+
+
+### 5.（可选）独立调试访客端
+
+主仓库 build 时会自动通过 `jeecgboot-vue3/build/script/buildVisitor.ts` 唤起访客端构建。如果想单独调试访客端 UI：
+
+```bash
+cd jeecgboot-vue3-visitor
+pnpm install
+pnpm dev          # 默认端口 5173，独立调试
+pnpm build:nocheck  # 仅产出 dist，跳过 vue-tsc 类型检查
+```
+
+> 访客端默认通过 hash 路由渲染单页 `ChatMain.vue`，对接的 WebSocket / API 走主前端 vite 代理或 nginx 反向代理转发到 `kefu-system:8080/jeecg-boot`。
+
 
 接入访客端
 -----------------------------------
@@ -267,10 +360,10 @@ http://your-domain/cs/userChat?agentId=xxx
 
 ```
 JeecgBoot/
-├── jeecg-boot/                                       # 后端
+├── jeecg-boot/                                       # 客服后端（kefu-system 镜像）
 │   ├── jeecg-boot-base-core/                         # 基础核心 + License 客户端
 │   ├── jeecg-module-system/                          # 系统管理（用户/角色/菜单）
-│   │   └── jeecg-system-start/                       # 主启动入口
+│   │   └── jeecg-system-start/                       # 主启动入口（Dockerfile 在此）
 │   ├── jeecg-boot-module/
 │   │   └── jeecg-boot-module-airag/                  # AI + 客服核心模块
 │   │       └── src/main/java/org/jeecg/modules/airag/
@@ -286,20 +379,65 @@ JeecgBoot/
 │   │               ├── entity/ mapper/ vo/           # 数据层
 │   │               └── config/ constant/ util/       # 加密、Redis Key、IP 等共享工具
 │   └── db/                                           # 初始化 SQL
-├── jeecgboot-vue3/                                   # 前端
+├── jeecgboot-vue3/                                   # 客服管理前端（kefu-vue 镜像）
 │   ├── src/views/super/airag/cs/                     # 客服功能页面 ★
-│   │   ├── workbench/                                # 客服工作台（5000+ 行）
-│   │   ├── userChat/                                 # 访客端
+│   │   ├── workbench/                                # 客服工作台（拆分后 ~6000 行 + 9 子组件）
+│   │   ├── userChat/                                 # 旧版访客端（保留兼容入口）
 │   │   ├── agent/ subAgent/                          # 客服管理
 │   │   ├── conversation/ messageBoard/               # 会话与留言
 │   │   ├── statistics/                               # 统计分析（4 个子页面）
 │   │   ├── quickReply/ brand/ chatWindowSettings/    # 快捷回复 / 品牌 / 聊天窗口
 │   │   ├── security/                                 # IP 黑/白名单、登录日志
 │   │   └── domainConfig/ accessExample/ dataCleanup/ # 域名 / 接入示例 / 数据清理
-│   └── electron/                                     # 桌面端主进程
-├── docker-compose.yml                                # 本地一键编排
+│   ├── build/script/buildVisitor.ts                  # 访客端构建脚本（产物合并到 dist/cs/userChat）
+│   └── electron/                                     # 桌面端主进程（多窗口 + 托盘 + 自动更新）
+├── jeecgboot-vue3-visitor/                           # 访客端独立子项目 ★
+│   ├── index.html                                    # HTML 内联骨架屏（首字节即可见聊天骨架）
+│   ├── src/
+│   │   ├── views/ChatMain.vue                        # 唯一路由 /，访客端 SPA 主组件
+│   │   ├── router/index.ts                           # 极简路由（hash 模式 + 兜底 redirect）
+│   │   └── crypto/                                   # 端到端混合加密（noble-ciphers / noble-hashes）
+│   └── package.json                                  # 独立依赖（无 ant-design-vue 等管理端依赖，体积小）
+├── license-server/                                   # 授权服务（独立项目）★
+│   ├── src/main/java/com/license/server/
+│   │   └── controller/
+│   │       ├── api/                                  # 对外接口（PlanPublic / LicenseApi）
+│   │       └── admin/                                # 管理后台接口（Auth/Customer/License/Plan/App/...）
+│   ├── src/main/resources/
+│   │   ├── application.yml                           # 端口 8090，独立 MySQL 库
+│   │   └── db/migration/                             # Flyway 增量迁移
+│   ├── frontend/                                     # 授权管理后台前端（Vue 3 + Pinia + wangEditor）
+│   ├── Dockerfile                                    # license-server 镜像
+│   ├── docker-compose.yml                            # 本地一键启动（含 mysql + server + frontend）
+│   └── docker-compose.prod.yml                       # 生产编排
+├── docs/                                             # 系统文档
+│   ├── cse-developer-guide.md                        # CSE 客户端加密 - 开发者指南
+│   ├── cse-runbook.md                                # CSE - 运维 Runbook
+│   ├── cse-tenant-admin-guide.md                     # CSE - 租户管理员使用指南
+│   └── cse-compliance-checklist.md                   # CSE - 等保/PIPL/GDPR 合规自查
+├── docker-compose.yml                                # 客服核心栈（开发用）
+├── docker-compose.kefu-1.0.0.yml                     # 客服核心栈（生产模板，含挂载点 /www/docker-data/kefu/...）
+├── DESIGN.md                                         # 系统设计文档
 └── LICENSE                                           # Apache License 2.0
 ```
+
+
+项目文档
+-----------------------------------
+
+除本 README 外，[`docs/`](./docs/) 目录下还提供面向不同角色的专题文档：
+
+| 文档 | 受众 | 说明 |
+|---|---|---|
+| [`docs/cse-developer-guide.md`](./docs/cse-developer-guide.md) | 开发 | 在 JeecgBoot 上接入端到端文件加密（CSE）的代码集成指南，含 `IStorageUploadService` 用法、加密路径白名单 |
+| [`docs/cse-runbook.md`](./docs/cse-runbook.md) | 运维 / SRE / 安全 | CSE + KMS 端到端加密架构速览、KEK / DEK 密钥管理、启动检查清单、故障排查 |
+| [`docs/cse-tenant-admin-guide.md`](./docs/cse-tenant-admin-guide.md) | 租户管理员 | 纯 GUI 操作手册：在管理后台开启 / 监控 / 自救加密功能 |
+| [`docs/cse-compliance-checklist.md`](./docs/cse-compliance-checklist.md) | 安全 / 法务 | 等保 2.0 三级 / PIPL / GDPR / 商用密码法的关键条款映射表 |
+| [`DESIGN.md`](./DESIGN.md) | 架构 / 全员 | 系统总体设计文档 |
+| [`jeecgboot-vue3/PWA-README.md`](./jeecgboot-vue3/PWA-README.md) | 前端 | 主前端 PWA 渐进式离线缓存配置说明 |
+| [`jeecgboot-vue3/electron.md`](./jeecgboot-vue3/electron.md) | 客户端 | Electron 桌面客户端打包与多窗口架构说明 |
+| [`license-server/frontend/README.md`](./license-server/frontend/README.md) | 授权前端 | 授权管理后台前端开发模板说明 |
+| [`jeecg-boot/jeecg-module-system/jeecg-system-start/src/main/resources/flyway/sql/mysql/README.md`](./jeecg-boot/jeecg-module-system/jeecg-system-start/src/main/resources/flyway/sql/mysql/README.md) | DBA | Flyway 增量 SQL 命名规范与迁移指南 |
 
 
 调试与运维
@@ -321,6 +459,20 @@ JeecgBoot/
 - WebSocket 跨域：`jeecg.cs.ws.allowed-origins=https://a,https://b`
 - 数据保留策略：管理后台「数据清理」页配置对话/日志/缓存的保留天数
 - 客服分配策略：管理后台「会话分配」页配置（最大会话数、超时通知、人工接入按钮等）
+
+
+近期版本
+-----------------------------------
+
+| 版本 | 日期 | 类型 | 关键变更 |
+|---|---|---|---|
+| `kefu-system 1.2.24` + `kefu-vue 1.2.72` | 2026-04-29 | Bug 修复 | 修复访客重新打开已结束会话时，客服侧会突然冒出该会话并弹"新访客接入"提示的问题。后端 WS 不再为 `status=2` 的会话广播 `new_conversation/user_online`；前端兜底过滤 `extra.status===2` 的事件。 |
+| `kefu-vue 1.2.71` | 2026-04-28 | 性能 / 体验 | 优化客服工作台刷新机制：客服发消息后不再触发整列表/消息流重载、滚动位置稳定；WS 健康时兜底轮询间隔从 5s 拉长到 30s（断网降级回 5s）；`/cs/conversation/list` 改为按 ID 增量 merge，避免会话列表 DOM 整体重建；`/cs/conversation/stats` 防抖窗口 500ms → 2000ms。预期 list/stats 接口频率下降约 6 倍。仅前端，后端未动。 |
+| `kefu-vue 1.2.70` | 2026-04-28 | 重构 | 客服工作台前端适度拆分：`workbench/index.vue` 7705 行 → 5986 行，析出 9 个子组件（`CsAgentBar` / `CsWsStatusBanner` / `CsChatHeader` / `CsChatEmptyState` / `CsWorkbenchSettingsDrawer` / `CsTransferConversationModal` / `CsBlacklistModal` / `CsVisitorFieldEditModal` / `CsMediaPreviewModals`）+ 2 个 composables（`useCsWorkbenchTheme` / `useCsMessageMedia`）+ 2 个工具模块（`theme/presets.ts` / `render/csMessageRender.ts`），父级保留消息流 / 会话列表 / 输入区 / WS 核心。 |
+
+> **部署方式**：在 1Panel 修改对应容器版本号后点「同步状态」即可。  
+> **兼容性**：1.2.72/1.2.24 前后端独立升级（旧前端 + 新后端、新前端 + 旧后端均兼容）；1.2.71、1.2.70 仅前端，后端无需重启。  
+> **回滚**：把容器版本号改回上一版本即可，无数据库迁移依赖。
 
 
 开源协议
