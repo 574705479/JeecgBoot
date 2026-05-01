@@ -97,6 +97,15 @@ public class FlywayConfig {
     @Value("${spring.flyway.clean-disabled:true}")
     private Boolean cleanDisabled;
 
+    /**
+     * 是否允许乱序执行迁移脚本（事后补丁场景必须开启）
+     * 场景：当本地存在低版本号的新增脚本（如 V1_0_10），而数据库已应用过更高版本（如 V1_1_x）时，
+     * Flyway 默认会在 validate 阶段抛 "Detected resolved migration not applied to database" 异常，
+     * 导致后续所有脚本（包括 V1_1_6/V1_1_7 等）也无法执行。开启 outOfOrder 后允许补跑历史漏脚本。
+     */
+    @Value("${spring.flyway.out-of-order:true}")
+    private Boolean outOfOrder;
+
     @PostConstruct
     public void migrate() {
         if(!enabled){
@@ -122,6 +131,7 @@ public class FlywayConfig {
                                 .validateOnMigrate(validateOnMigrate)
                                 .baselineOnMigrate(baselineOnMigrate)
                                 .cleanDisabled(cleanDisabled)
+                                .outOfOrder(outOfOrder)
                                 .load();
                         flyway.migrate();
                         log.info("【数据库升级】平台集成了MySQL库的Flyway，数据库版本自动升级! ");
