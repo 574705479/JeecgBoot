@@ -1444,13 +1444,23 @@ const handleBeforeUnload = () => {
 };
 
 const handleAppLogout = () => {
+  // 修复：退出登录是终态，必须把所有 timer + 关键 ref 都重置；
+  // 否则下次 mount 时残留状态会让 onMounted 走"假命中"路径，
+  // 加上残留 timer 抢占 ws session，导致换号后收不到消息。
   closeWebSocket();
+  stopFallbackPoll();
+  agentId.value = '';
+  hasMounted.value = false;
+  isActivating.value = false;
 };
 
 function closeWebSocket() {
   wsManuallyClosed = true;
   stopWsHeartbeat();
   stopWsHealthCheck();
+  // 修复：主动关闭 ws 时一并停止 fallback poll，
+  // 避免 logout 后 setup 闭包 timer 残留导致旧 agentId/旧 ws 状态污染新组件实例。
+  stopFallbackPoll();
   if (wsReconnectTimer) {
     clearTimeout(wsReconnectTimer);
     wsReconnectTimer = null;
@@ -1685,12 +1695,13 @@ onUnmounted(() => {
   // 释放所有视频 blob URL，避免内存泄漏（图片走 LRU 不需此处）
   releaseAllMedia();
   if (mediaReleaseTimer) { clearTimeout(mediaReleaseTimer); mediaReleaseTimer = null; }
-  if (!keepConnectionOnDeactivate) {
-    closeWebSocket();
-    stopFallbackPoll();
-    stopWsHeartbeat();
-    stopWsHealthCheck();
-  }
+  // 修复：onUnmounted 只在组件「真正销毁」时触发（keep-alive 缓存被清空后），
+  // 此时 setup 闭包内的 timer 不再有任何代码路径能 stop，必须无条件强制清理，
+  // 否则旧 timer 会持续持有旧 ws/agentId 引用，导致新组件实例的 ws 被「幽灵 ws」抢占踢出。
+  closeWebSocket();
+  stopFallbackPoll();
+  stopWsHeartbeat();
+  stopWsHealthCheck();
   refreshTimer && clearInterval(refreshTimer);
   stopWsCountdown();
   if (wsConnectedBannerTimer) { clearTimeout(wsConnectedBannerTimer); wsConnectedBannerTimer = null; }
@@ -1817,6 +1828,22 @@ watch(agentId, () => {
     loadQuickReplies(true);
   }
 });
+
+// 修复（兜底）：监听 token 变化，token 切换时主动 close + reconnect ws。
+// 覆盖任何"换号 / token 刷新 / SSO 互踢后重新拿到新 token"场景，
+// 即使 onMounted/onActivated 钩子有遗漏也能兜住，确保新 token 与 ws 鉴权状态一致。
+watch(
+  () => userStore.getToken,
+  (newToken, oldToken) => {
+    if (!hasMounted.value) return;
+    if (!newToken || newToken === oldToken) return;
+    console.log('[CS-WS] token 变化，触发 ws 重连');
+    closeWebSocket();
+    if (agentId.value) {
+      connectWebSocket();
+    }
+  }
+);
 
 // 加载客服信息
 async function loadAgentInfo() {
@@ -4106,7 +4133,13 @@ function connectWebSocket() {
   const token = getToken();
   const wsUrl = `${wsBase}/ws/cs/agent?userId=${agentId.value}&token=${encodeURIComponent(token || '')}`;
   
-  console.log('[CS-WS] 连接WebSocket:', wsUrl);
+  console.log('[CS-WS] connectWebSocket', {
+    agentId: agentId.value,
+    hasToken: !!token,
+    wsState: ws?.readyState,
+    reconnectAttempts: wsReconnectAttempts,
+    url: wsUrl,
+  });
   ws = new WebSocket(wsUrl);
   const thisWs = ws;
   
@@ -4154,10 +4187,25 @@ function connectWebSocket() {
     if (ws === thisWs) {
       ws = null;
       if (event.code === 4002) {
+        // 修复：4002（被另一个会话替换）原本静默不重连，遇到"幽灵 ws 抢占"场景会导致客服收不到消息。
+        // 现改为：保留 banner 提示 + 1.5s 后做一次自愈重连。
+        // 真正的多端登录冲突：1.5s 后新建的 ws 会再次被踢，但用户能看到状态；
+        // 残留 timer 误踢的"假冲突"：1.5s 后幽灵 ws 已自然结束，自愈重连成功。
+        console.warn('[CS-WS] WebSocket 被另一个会话替换 (4002)，1.5s 后尝试自愈重连');
         stopWsHeartbeat();
         stopWsHealthCheck();
-        stopFallbackPoll();
         if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+        if (!wsManuallyClosed) {
+          wsStatus.value = 'reconnecting';
+          wsShowBanner.value = true;
+          setTimeout(() => {
+            if (!wsManuallyClosed && !ws && hasMounted.value && agentId.value) {
+              connectWebSocket();
+            }
+          }, 1500);
+        } else {
+          stopFallbackPoll();
+        }
       } else if (event.code === 4005) {
         stopWsHeartbeat();
         stopWsHealthCheck();

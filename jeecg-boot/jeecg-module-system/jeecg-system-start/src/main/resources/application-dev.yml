@@ -21,7 +21,7 @@ management:
 
 spring:
 #  main:
-#    # 启动加速 (建议开发环境，开启后flyway自动升级失效)
+#    # 启动加速 (建议开发环境，开启后flyflyway自动升级失效)
 #    lazy-initialization: true
   flyway:
     # 是否启用flyway
