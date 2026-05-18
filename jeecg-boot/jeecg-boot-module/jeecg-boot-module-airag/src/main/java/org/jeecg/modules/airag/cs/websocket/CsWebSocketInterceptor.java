@@ -1,5 +1,7 @@
 package org.jeecg.modules.airag.cs.websocket;
 
+import com.auth0.jwt.JWT;
+import com.auth0.jwt.interfaces.DecodedJWT;
 import lombok.extern.slf4j.Slf4j;
 import org.jeecg.common.api.CommonAPI;
 import org.jeecg.common.constant.CommonConstant;
@@ -38,6 +40,8 @@ public class CsWebSocketInterceptor implements HandshakeInterceptor {
     public static final String ATTR_APP_ID = "appId";
     public static final String ATTR_CONVERSATION_ID = "conversationId";
     public static final String ATTR_TOKEN_EXPIRE_AT = "tokenExpireAt";
+    /** A5：客服 token 字符串（仅客服分支写入），SSO 互踢时供 redis del 使用 */
+    public static final String ATTR_AGENT_TOKEN = "agentToken";
     public static final String ATTR_CLIENT_IP = "clientIp";
     public static final String ATTR_USER_AGENT = "userAgent";
     public static final String ATTR_DEVICE_ID = "deviceId";
@@ -131,6 +135,18 @@ public class CsWebSocketInterceptor implements HandshakeInterceptor {
                 }
                 userId = agent.getId();
                 userName = agent.getNickname();
+                // A4：写入 token 过期时间，配合 sessionManager.isSessionExpired + closeExpiredSession(4001) 闭环
+                try {
+                    DecodedJWT decoded = JWT.decode(token);
+                    java.util.Date expireDate = decoded.getExpiresAt();
+                    if (expireDate != null) {
+                        attributes.put(ATTR_TOKEN_EXPIRE_AT, expireDate.getTime());
+                    }
+                } catch (Exception e) {
+                    log.warn("[CS-WebSocket] 解析客服 token 过期时间失败: {}", e.getMessage());
+                }
+                // A5：保存 token 字符串供 SSO 互踢时同步删 redis
+                attributes.put(ATTR_AGENT_TOKEN, token);
                 log.info("[CS-WebSocket] 客服身份验证通过: username={}, agentId={}", username, userId);
             }
 

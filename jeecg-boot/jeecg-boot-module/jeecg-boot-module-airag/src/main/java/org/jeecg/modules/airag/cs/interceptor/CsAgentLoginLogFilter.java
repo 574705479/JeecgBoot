@@ -17,6 +17,7 @@ import org.jeecg.modules.airag.cs.mapper.CsSubAgentMapper;
 import org.jeecg.modules.airag.cs.service.ICsAgentService;
 import org.jeecg.modules.airag.cs.util.CsIpMatchUtil;
 import org.jeecg.modules.airag.cs.util.CsRequestUtil;
+import org.jeecg.modules.airag.cs.websocket.CsWebSocketInterceptor;
 import org.jeecg.modules.airag.cs.websocket.CsWebSocketSessionManager;
 import org.jeecg.common.license.core.LicenseClientService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -155,6 +156,18 @@ public class CsAgentLoginLogFilter implements Filter {
                                         markRecentLogin(agent.getId());
                                         WebSocketSession oldSession = sessionManager.getAgentSession(agent.getId());
                                         if (oldSession != null && oldSession.isOpen()) {
+                                            // A5：清根，先删旧端 redis token，避免旧端 ws 用未失效的 token 重连握手成功后抢回 session
+                                            try {
+                                                Object oldTokenObj = oldSession.getAttributes()
+                                                        .get(CsWebSocketInterceptor.ATTR_AGENT_TOKEN);
+                                                if (oldTokenObj instanceof String && oConvertUtils.isNotEmpty((String) oldTokenObj)) {
+                                                    String oldToken = (String) oldTokenObj;
+                                                    redisTemplate.delete(CommonConstant.PREFIX_USER_TOKEN + oldToken);
+                                                    log.info("[CS-Security] SSO 互踢同步删除旧 token: agentId={}", agent.getId());
+                                                }
+                                            } catch (Exception ex) {
+                                                log.warn("[CS-Security] SSO 互踢删除旧 token 失败: {}", ex.getMessage());
+                                            }
                                             sessionManager.closeAgentSession(
                                                     agent.getId(), oldSession.getId(),
                                                     CLOSE_CODE_KICKED_BY_NEW_LOGIN, "kicked_by_new_login");

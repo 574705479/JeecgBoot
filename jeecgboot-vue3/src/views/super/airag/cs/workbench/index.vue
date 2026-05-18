@@ -1406,7 +1406,24 @@ const handleVisibilityChange = () => {
   if (document.hidden) return;
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     connectWebSocket();
+    nextTick(() => scrollToBottom());
+    return;
   }
+  // B1：ws 报 OPEN 不等于活，PC 休眠唤醒后 ws 可能是僵尸（OS 端口仍开但中间节点已断）。
+  // 主动 ping，5s 内 lastWsMessageAt 没更新就强制 close 触发重连。
+  const beforePing = lastWsMessageAt;
+  try {
+    ws.send(JSON.stringify({ type: 'ping', ts: Date.now() }));
+  } catch {
+    try { ws?.close(); } catch {}
+    return;
+  }
+  setTimeout(() => {
+    if (lastWsMessageAt === beforePing && ws && ws.readyState === WebSocket.OPEN) {
+      console.warn('[CS-WS] visibility ping 5s 内无 pong，判定 ws 僵尸，强制重连');
+      try { ws.close(); } catch {}
+    }
+  }, 5000);
   if (currentConversation.value?.id && Date.now() - lastWsMessageAt > 30000) {
     loadMessages(currentConversation.value.id);
   }
