@@ -8,6 +8,9 @@
  */
 import type { InjectionKey, Ref, ComputedRef } from 'vue';
 import { inject } from 'vue';
+import type { ContinuousRingMode, RingStopCondition } from './composables/useCsContinuousRing';
+
+export type { ContinuousRingMode, RingStopCondition };
 
 /** 当前会话最小契约，子组件仅按需读取其中字段 */
 export interface CsConversation {
@@ -62,11 +65,25 @@ export interface CsWorkbenchSettings {
   soundVolumePercent: Ref<number>;
   aiAppList: Ref<any[]>;
 
+  // 持续响铃配置
+  continuousRingMode: Ref<ContinuousRingMode>;
+  ringStopCondition: Ref<RingStopCondition>;
+  ringIntervalSeconds: Ref<number>;
+  continuousRingActive: ComputedRef<boolean>;
+  isRingPaused: ComputedRef<boolean>;
+  pauseRemainSeconds: Ref<number>;
+
   onAppChange: (id: string | undefined) => Promise<void> | void;
   onVisitorAppChange: (id: string | undefined) => Promise<void> | void;
   onAiEnabledChange: (checked: boolean) => Promise<void> | void;
   onAiPrologueEnabledChange: (checked: boolean) => Promise<void> | void;
   onSoundEnabledChange: (val: boolean) => void;
+
+  onContinuousRingModeChange: (v: ContinuousRingMode) => void;
+  onRingStopConditionChange: (v: RingStopCondition) => void;
+  onRingIntervalChange: (v: number) => void;
+  onPauseRing: (minutes: number) => void;
+  onResumeRing: () => void;
 }
 
 /**

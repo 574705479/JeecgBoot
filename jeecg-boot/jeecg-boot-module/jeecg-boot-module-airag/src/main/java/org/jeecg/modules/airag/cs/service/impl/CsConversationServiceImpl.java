@@ -1201,14 +1201,26 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
         long closedCount = count(new LambdaQueryWrapper<CsConversation>()
                 .eq(CsConversation::getStatus, CsConversation.STATUS_CLOSED)
                 .eq(oConvertUtils.isNotEmpty(agentId), CsConversation::getOwnerAgentId, agentId));
-        
+
         // 总数
         long totalCount = count();
-        
+
+        // 同事会话：其他客服正在处理的会话数（不含自己、不含未分配、不含已关闭）
+        // 用于「同事会话」tab 徽标，不依赖当前 tab，始终展示
+        long colleagueCount = 0L;
+        if (oConvertUtils.isNotEmpty(agentId)) {
+            colleagueCount = count(new LambdaQueryWrapper<CsConversation>()
+                    .ne(CsConversation::getStatus, CsConversation.STATUS_CLOSED)
+                    .isNotNull(CsConversation::getOwnerAgentId)
+                    .ne(CsConversation::getOwnerAgentId, "")
+                    .ne(CsConversation::getOwnerAgentId, agentId));
+        }
+
         stats.put("myCount", myCount);
         stats.put("unassignedCount", unassignedCount);
         stats.put("closedCount", closedCount);
         stats.put("totalCount", totalCount);
+        stats.put("colleagueCount", colleagueCount);
         
         return stats;
     }
@@ -1558,6 +1570,107 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             conversation.setLastMessageTime(new Date());
             updateById(conversation);
             log.info("[CS-Conversation] 重新分配客服失败(无在线客服): conversationId={}", conversationId);
+        }
+    }
+
+    /**
+     * 客服上线 sweep 派单上限：单次最多处理多少条未分配会话。
+     * 大流量场景下避免一次扫太多导致单次任务过长；超出部分等下一次 goOnline / decrementSessions
+     * 触发的 sweep 继续处理。
+     */
+    private static final int SWEEP_LIMIT = 200;
+
+    @Override
+    public int sweepUnassignedToOnlineAgents(String triggerAgentId) {
+        List<CsConversation> list = baseMapper.selectUnassignedForSweep(SWEEP_LIMIT);
+        if (list == null || list.isEmpty()) {
+            return 0;
+        }
+
+        JSONObject assignConfig = getConversationAssignConfig();
+        boolean inheritEnabled = false;
+        int inheritExpireMinutes = 0;
+        if (assignConfig != null) {
+            JSONObject inherit = assignConfig.getJSONObject("inheritLastAgent");
+            if (inherit != null && inherit.getBooleanValue("enabled")) {
+                inheritEnabled = true;
+                inheritExpireMinutes = inherit.getIntValue("expireMinutes");
+            }
+        }
+
+        int assigned = 0;
+        int skipped = 0;
+        for (CsConversation conv : list) {
+            try {
+                String lastAgentId = null;
+                if (inheritEnabled) {
+                    lastAgentId = findLastAgentForUser(conv.getUserId(), inheritExpireMinutes);
+                }
+                CsAgent agent = agentService.assignAgent(lastAgentId);
+                if (agent == null) {
+                    skipped++;
+                    continue;
+                }
+
+                int rows = baseMapper.update(null, new LambdaUpdateWrapper<CsConversation>()
+                        .eq(CsConversation::getId, conv.getId())
+                        .eq(CsConversation::getStatus, CsConversation.STATUS_UNASSIGNED)
+                        .set(CsConversation::getOwnerAgentId, agent.getId())
+                        .set(CsConversation::getStatus, CsConversation.STATUS_ASSIGNED)
+                        .set(CsConversation::getReplyMode, CsConversation.REPLY_MODE_MANUAL)
+                        .set(CsConversation::getAssignTime, new Date())
+                        .set(CsConversation::getUpdateTime, new Date()));
+                if (rows == 0) {
+                    agentService.decrementSessions(agent.getId());
+                    skipped++;
+                    log.debug("[CS-Sweep] CAS 抢占失败，已回滚 currentSessions: convId={}, agentId={}",
+                            conv.getId(), agent.getId());
+                    continue;
+                }
+
+                ensureOwnerCollaborator(conv.getId(), agent.getId());
+                invalidateConvCache(conv.getId());
+
+                broadcastToAllAgents("conversation_assigned",
+                        buildConversationAssignedData(conv.getId(), agent));
+                notifyUser(conv.getId(), "agent_connected",
+                        "客服 " + agent.getNickname() + " 为您服务",
+                        buildAgentConnectedExtra(CsConversation.REPLY_MODE_MANUAL, agent));
+
+                assigned++;
+                log.info("[CS-Sweep] 派单成功: convId={}, agentId={}, agentName={}, triggerBy={}",
+                        conv.getId(), agent.getId(), agent.getNickname(), triggerAgentId);
+            } catch (Exception e) {
+                log.error("[CS-Sweep] 单条派单失败: convId={}, triggerBy={}",
+                        conv.getId(), triggerAgentId, e);
+            }
+        }
+        log.info("[CS-Sweep] complete: triggerBy={}, scanned={}, assigned={}, skipped={}",
+                triggerAgentId, list.size(), assigned, skipped);
+        return assigned;
+    }
+
+    /**
+     * 写入 / 更新 OWNER 协作者记录（与 {@code assignToAgent} 行为对齐）。
+     * 抽离为独立方法以便 sweep 与 assignToAgent 复用同一份逻辑。
+     */
+    private void ensureOwnerCollaborator(String convId, String agentId) {
+        LambdaQueryWrapper<CsCollaborator> q = new LambdaQueryWrapper<>();
+        q.eq(CsCollaborator::getConversationId, convId)
+                .eq(CsCollaborator::getAgentId, agentId);
+        CsCollaborator existing = collaboratorMapper.selectOne(q);
+        if (existing != null) {
+            existing.setRole(CsCollaborator.ROLE_OWNER);
+            existing.setJoinTime(new Date());
+            existing.setLeaveTime(null);
+            collaboratorMapper.updateById(existing);
+        } else {
+            CsCollaborator c = new CsCollaborator();
+            c.setConversationId(convId);
+            c.setAgentId(agentId);
+            c.setRole(CsCollaborator.ROLE_OWNER);
+            c.setJoinTime(new Date());
+            collaboratorMapper.insert(c);
         }
     }
 

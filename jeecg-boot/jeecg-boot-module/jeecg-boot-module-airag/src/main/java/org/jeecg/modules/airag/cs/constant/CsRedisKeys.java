@@ -113,6 +113,17 @@ public final class CsRedisKeys {
     public static final String REDIS_AGENT_RECENT_LOGIN_PREFIX = "cs:agent:recent_login:";
     public static final int RECENT_LOGIN_TTL_SECONDS = 30;
 
+    /**
+     * 客服"升级前状态快照"key 前缀（完整 key 形如 cs:agent:preshutdown:{agentId}），
+     * value 为 String 形式的 status（"1"/"2"/"3"）。
+     *
+     * <p>启动 PostConstruct 在 reset 之前写入；ws 重连时一次性消费。30 分钟 TTL 兜底，
+     * 避免镜像升级窗口里所有非 OFFLINE 客服被强制重置为 OFFLINE 后无法恢复，
+     * 进而导致访客新会话堆积在「未分配」直到客服手动开关一次。</p>
+     */
+    public static final String REDIS_AGENT_PRESHUTDOWN_PREFIX = "cs:agent:preshutdown:";
+    public static final long PRESHUTDOWN_TTL_MINUTES = 30L;
+
     // ==================== 离线消息缓冲（Redis Stream） ====================
 
     /**

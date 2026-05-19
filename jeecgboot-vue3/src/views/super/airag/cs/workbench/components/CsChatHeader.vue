@@ -1,7 +1,13 @@
 <template>
   <div class="chat-header" v-if="conversation">
     <div class="chat-user">
-      <a-avatar :size="40" class="visitor-avatar">{{ ctx.getDisplayName(conversation).charAt(0) }}</a-avatar>
+      <a-avatar
+        :size="40"
+        class="visitor-avatar"
+        :class="{ 'is-online': ctx.userOnline.value }"
+      >
+        {{ ctx.getDisplayName(conversation).charAt(0) }}
+      </a-avatar>
       <div class="user-info">
         <div class="user-name">
           {{ ctx.getDisplayName(conversation) }}
@@ -145,5 +151,12 @@ function toggleDetailPanel() {
     align-items: center;
     gap: 6px;
   }
+}
+
+// 在线访客头像背景：与左侧会话列表项「visitor-avatar」品牌色渐变一致；
+// 离线时不写样式，保留 ant-design <a-avatar> 默认灰色，与原截图体验一致。
+.visitor-avatar.is-online {
+  background: linear-gradient(135deg, var(--cs-brand-start), var(--cs-brand-end));
+  color: #fff;
 }
 </style>

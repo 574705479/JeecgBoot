@@ -354,6 +354,20 @@ public interface ICsConversationService extends IService<CsConversation> {
     void retryAssignAgent(String conversationId, String preferredAgentId);
 
     /**
+     * 客服上线时触发：扫描 humanAgentMode=0 的未分配会话，按 assignAgent 算法分配给在线客服。
+     *
+     * <p>实现采用「内联 CAS 抢占」而非复用 {@link #assignToAgent}，避免 assignAgent +
+     * assignToAgent 双重 incrementSessions 导致 currentSessions 计数翻倍。失败时回滚
+     * decrementSessions，保证 currentSessions 计数最终一致。</p>
+     *
+     * <p>不动智能助手「人工客服」流程（humanAgentMode=1 完全跳过）。</p>
+     *
+     * @param triggerAgentId 触发本次 sweep 的客服 ID（仅用于日志，不强制分配给该客服）
+     * @return 实际成功派单的会话数
+     */
+    int sweepUnassignedToOnlineAgents(String triggerAgentId);
+
+    /**
      * 复用会话时，如果 userName 是默认的"访客"，则根据 IP 和设备码重新生成
      *
      * @param conversation 会话对象

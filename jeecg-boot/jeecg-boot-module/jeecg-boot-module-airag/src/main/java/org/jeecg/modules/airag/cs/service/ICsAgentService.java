@@ -141,4 +141,21 @@ public interface ICsAgentService extends IService<CsAgent> {
      * @param agentId 客服ID
      */
     void markAgentHeartbeat(String agentId);
+
+    /**
+     * ws 重连时调用：从 Redis preshutdown 快照恢复客服状态。
+     *
+     * <p>触发时机：客服浏览器在镜像升级窗口里被强制断连，新容器启动后自动 ws 重连成功，
+     * 由 {@code CsWebSocketHandler.afterConnectionEstablished} 在 {@code addSession} 之后调用。</p>
+     *
+     * <ul>
+     *   <li>仅在 {@code cs_agent.status==OFFLINE} 时生效，避免覆盖客服已经手动切换过的状态</li>
+     *   <li>快照命中后立即 DEL（一次性消费），并发 ws 重连时第二者读到 null 就跳过</li>
+     *   <li>ONLINE/BUSY 都恢复为 ONLINE（current_sessions 已被 reset 为 0），并触发已有 sweep 派发累积未分配会话</li>
+     *   <li>INVISIBLE 恢复为 INVISIBLE，不派单</li>
+     * </ul>
+     *
+     * @param agentId 客服ID
+     */
+    void restoreFromPreshutdownSnapshot(String agentId);
 }

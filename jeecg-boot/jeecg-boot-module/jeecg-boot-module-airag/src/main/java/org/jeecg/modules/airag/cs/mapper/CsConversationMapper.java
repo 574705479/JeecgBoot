@@ -87,6 +87,20 @@ public interface CsConversationMapper extends BaseMapper<CsConversation> {
     List<CsConversation> selectUnassigned(@Param("limit") int limit);
 
     /**
+     * 客服上线 sweep 派单专用：仅普通未分配会话（humanAgentMode=0/NULL），按活跃度排序
+     * 排除 humanAgentMode=1（访客需主动转人工的会话），保留智能助手转人工流程
+     * COALESCE 兼容新建会话尚无消息时 last_message_time 为 NULL 的情况
+     */
+    @Select("SELECT * FROM cs_conversation " +
+            "WHERE status = 0 " +
+            "  AND (human_agent_mode IS NULL OR human_agent_mode = 0) " +
+            "  AND (agent_id IS NULL OR agent_id = '') " +
+            "  AND (deleted = 0 OR deleted IS NULL) " +
+            "ORDER BY COALESCE(last_message_time, create_time) DESC " +
+            "LIMIT #{limit}")
+    List<CsConversation> selectUnassignedForSweep(@Param("limit") int limit);
+
+    /**
      * 获取客服工作量统计
      */
     @Select("SELECT c.agent_id AS agentId, " +

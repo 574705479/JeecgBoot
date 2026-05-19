@@ -110,6 +110,80 @@
             :marks="soundVolumeSliderMarks"
             :tooltip="soundVolumeTooltip"
           />
+
+          <a-divider style="margin: 12px 0; font-size: 12px;">持续响铃</a-divider>
+
+          <div class="sub-row sub-row--col">
+            <div class="sub-text">
+              <div class="sub-title">持续响铃模式</div>
+              <div class="sub-tip">开启后，每隔 N 秒响铃一次，直到满足下方「停止条件」</div>
+            </div>
+            <a-radio-group
+              v-model:value="continuousRingModeModel"
+              button-style="solid"
+              size="small"
+              @change="onContinuousRingModeChangeProxy"
+            >
+              <a-radio-button value="off">关闭</a-radio-button>
+              <a-radio-button value="on_blur">仅失焦/被遮挡时</a-radio-button>
+              <a-radio-button value="always">始终响</a-radio-button>
+            </a-radio-group>
+          </div>
+
+          <template v-if="settings.continuousRingActive.value">
+            <div class="sub-row sub-row--col">
+              <div class="sub-text">
+                <div class="sub-title">停止条件</div>
+                <div class="sub-tip">
+                  <strong>回复任一即停</strong>：客服回复任意一个会话后立即停止响铃<br/>
+                  <strong>全部回复才停</strong>：所有未回复访客都处理完才停止响铃
+                </div>
+              </div>
+              <a-radio-group
+                v-model:value="ringStopConditionModel"
+                button-style="solid"
+                size="small"
+                @change="onRingStopConditionChangeProxy"
+              >
+                <a-radio-button value="any_one">回复任一即停</a-radio-button>
+                <a-radio-button value="all_visitors">全部回复才停</a-radio-button>
+              </a-radio-group>
+            </div>
+
+            <div class="sub-row">
+              <div class="sub-text"><div class="sub-title">响铃间隔</div></div>
+              <a-select
+                v-model:value="ringIntervalSecondsModel"
+                style="width: 110px;"
+                size="small"
+                @change="onRingIntervalChangeProxy"
+              >
+                <a-select-option :value="3">3 秒</a-select-option>
+                <a-select-option :value="5">5 秒</a-select-option>
+                <a-select-option :value="10">10 秒</a-select-option>
+                <a-select-option :value="15">15 秒</a-select-option>
+              </a-select>
+            </div>
+
+            <a-button
+              v-if="!settings.isRingPaused.value"
+              block
+              size="small"
+              style="margin-top: 8px;"
+              @click="onPauseRingClick"
+            >
+              暂停响铃 5 分钟
+            </a-button>
+            <a-alert
+              v-else
+              type="info"
+              show-icon
+              closable
+              style="margin-top: 8px;"
+              :message="`已暂停响铃，剩余 ${formatPauseRemain(settings.pauseRemainSeconds.value)}`"
+              @close="onResumeRingClick"
+            />
+          </template>
         </template>
       </div>
 
@@ -235,7 +309,7 @@ import {
   ThunderboltOutlined, RobotOutlined,
   BgColorsOutlined, SettingOutlined,
 } from '@ant-design/icons-vue';
-import { useCsWorkbenchContext } from '../context';
+import { useCsWorkbenchContext, type ContinuousRingMode, type RingStopCondition } from '../context';
 import { useCsWorkbenchTheme } from '../composables/useCsWorkbenchTheme';
 
 defineOptions({ name: 'CsWorkbenchSettingsDrawer' });
@@ -274,6 +348,19 @@ const soundVolumePercentModel = computed({
   set: (v: number) => { settings.soundVolumePercent.value = v; },
 });
 
+const continuousRingModeModel = computed({
+  get: () => settings.continuousRingMode.value,
+  set: (v: ContinuousRingMode) => { settings.continuousRingMode.value = v; },
+});
+const ringStopConditionModel = computed({
+  get: () => settings.ringStopCondition.value,
+  set: (v: RingStopCondition) => { settings.ringStopCondition.value = v; },
+});
+const ringIntervalSecondsModel = computed({
+  get: () => settings.ringIntervalSeconds.value,
+  set: (v: number) => { settings.ringIntervalSeconds.value = v; },
+});
+
 const soundVolumeSliderMarks: Record<number, string> = { 0: '0%', 100: '100%', 200: '200%' };
 const soundVolumeTooltip = { formatter: (v?: number) => (v != null ? `${v}%` : '') };
 
@@ -291,6 +378,31 @@ function onAiPrologueEnabledChange(v: any) {
 }
 function onSoundEnabledChange(v: any) {
   settings.onSoundEnabledChange(Boolean(v));
+}
+
+function onContinuousRingModeChangeProxy(e: any) {
+  const v = (e?.target?.value ?? e) as ContinuousRingMode;
+  settings.onContinuousRingModeChange(v);
+}
+function onRingStopConditionChangeProxy(e: any) {
+  const v = (e?.target?.value ?? e) as RingStopCondition;
+  settings.onRingStopConditionChange(v);
+}
+function onRingIntervalChangeProxy(v: any) {
+  settings.onRingIntervalChange(Number(v));
+}
+function onPauseRingClick() {
+  settings.onPauseRing(5);
+}
+function onResumeRingClick() {
+  settings.onResumeRing();
+}
+
+function formatPauseRemain(sec: number): string {
+  const s = Math.max(0, Math.floor(sec));
+  const mm = Math.floor(s / 60);
+  const ss = s % 60;
+  return `${mm}:${String(ss).padStart(2, '0')}`;
 }
 </script>
 
@@ -317,6 +429,43 @@ function onSoundEnabledChange(v: any) {
       font-size: 12px;
       color: var(--cs-text-muted);
       margin-bottom: 12px;
+    }
+  }
+
+  .sub-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 12px;
+
+    &.sub-row--col {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+    }
+
+    .sub-text {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .sub-title {
+      font-size: 13px;
+      color: var(--cs-text-primary);
+      font-weight: 500;
+    }
+
+    .sub-tip {
+      font-size: 12px;
+      color: var(--cs-text-muted);
+      line-height: 1.6;
+      margin-top: 2px;
+
+      strong {
+        color: var(--cs-text-secondary);
+        font-weight: 600;
+      }
     }
   }
 

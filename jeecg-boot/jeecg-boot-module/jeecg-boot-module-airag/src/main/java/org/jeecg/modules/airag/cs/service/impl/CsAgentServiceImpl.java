@@ -19,6 +19,7 @@ import org.jeecg.modules.airag.cs.service.ICsAgentStatusLogService;
 import org.jeecg.modules.airag.cs.websocket.CsWebSocketMessage;
 import org.jeecg.modules.airag.cs.websocket.CsWebSocketSessionManager;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,6 +30,9 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 客服管理服务实现
@@ -56,8 +60,33 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
     @Autowired
     private ICsAgentStatusLogService agentStatusLogService;
 
+    @Autowired
+    private org.jeecg.modules.airag.cs.async.CsAsyncTaskExecutor asyncTaskExecutor;
+
+    /**
+     * 客服会话服务（用于上线 sweep 派单）。
+     * <p>{@link org.jeecg.modules.airag.cs.service.ICsConversationService} 自身也注入了
+     * {@link ICsAgentService}，构成循环依赖；@Lazy 让 Spring 延迟解析这条边。</p>
+     */
+    @Autowired
+    @Lazy
+    private org.jeecg.modules.airag.cs.service.ICsConversationService conversationService;
+
+    /**
+     * sweep 防抖：同一 agentId 在 SWEEP_DEDUP_MS 内连续 goOnline 只触发一次 sweep。
+     * 典型重复触发：「显式接入会话」内部调 self-online、或「decrementSessions → online」良性循环
+     * 与「主动上线」短时叠加。
+     * <p>注意：该 map 仅在单 JVM 内有效；多实例部署时由 sweep 内的 CAS UPDATE 兜底，不会重复分配。</p>
+     */
+    private final ConcurrentMap<String, Long> lastSweepTrigger = new ConcurrentHashMap<>();
+    private static final long SWEEP_DEDUP_MS = 5000L;
+
     @PostConstruct
     public void resetAllAgentsOnStartup() {
+        // 镜像升级窗口：先把当前非 OFFLINE 客服快照到 Redis（30 分钟 TTL），
+        // 让 ws 重连时能恢复升级前状态，避免访客新会话堆积在「未分配」。
+        snapshotPreshutdownState();
+
         long count = count(new LambdaQueryWrapper<CsAgent>()
                 .ne(CsAgent::getStatus, CsAgent.STATUS_OFFLINE));
         if (count > 0) {
@@ -72,6 +101,33 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
             redisTemplate.delete(CsRedisKeys.REDIS_AGENT_ONLINE_ZSET);
         } catch (Exception e) {
             log.warn("[CS-Agent] 启动时清空在线 ZSET 失败（非致命）: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 启动 reset 之前把 status!=OFFLINE 的客服快照到 Redis。
+     * <p>关键不变量：仅快照非 OFFLINE 的客服。多次连续重启时（升级失败后又重启），
+     * 第二次启动 DB 已经全 OFFLINE，notOffline 为空 → 不写新快照 → 旧快照保留 →
+     * 客服 ws 重连仍能恢复升级前的真实状态。</p>
+     * <p>整个方法被 try-catch 兜底，Redis 不可用时降级为现状（不影响 reset 主流程）。</p>
+     */
+    private void snapshotPreshutdownState() {
+        try {
+            List<CsAgent> notOffline = list(new LambdaQueryWrapper<CsAgent>()
+                    .select(CsAgent::getId, CsAgent::getStatus)
+                    .ne(CsAgent::getStatus, CsAgent.STATUS_OFFLINE));
+            if (notOffline.isEmpty()) {
+                return;
+            }
+            for (CsAgent a : notOffline) {
+                String key = CsRedisKeys.REDIS_AGENT_PRESHUTDOWN_PREFIX + a.getId();
+                redisTemplate.opsForValue().set(key, String.valueOf(a.getStatus()),
+                        CsRedisKeys.PRESHUTDOWN_TTL_MINUTES, TimeUnit.MINUTES);
+            }
+            log.info("[CS-Agent] preshutdown 快照写入: count={}, ttl={}min",
+                    notOffline.size(), CsRedisKeys.PRESHUTDOWN_TTL_MINUTES);
+        } catch (Exception e) {
+            log.warn("[CS-Agent] preshutdown 快照失败（非致命）: {}", e.getMessage());
         }
     }
 
@@ -129,6 +185,33 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
         broadcastAgentStatusChanged(agentId, CsAgent.STATUS_ONLINE, "在线");
 
         agentStatusLogService.logStatusChange(agentId, CsAgentStatusLog.STATUS_ONLINE, CsAgentStatusLog.TRIGGER_MANUAL);
+
+        triggerSweepUnassigned(agentId);
+    }
+
+    /**
+     * 客服上线后异步 sweep 派单未分配会话。
+     *
+     * <p>同 agentId 5 秒内防抖；走 cs-conv 线程池避免阻塞当前事务（{@link #goOnline} 带
+     * {@code @Transactional}，sweep 自身不参与该事务，避免长事务持锁）。</p>
+     */
+    private void triggerSweepUnassigned(String agentId) {
+        long now = System.currentTimeMillis();
+        Long prev = lastSweepTrigger.put(agentId, now);
+        if (prev != null && now - prev < SWEEP_DEDUP_MS) {
+            log.debug("[CS-Agent] sweep 防抖跳过: agentId={}, gap={}ms", agentId, now - prev);
+            return;
+        }
+        asyncTaskExecutor.submitConversation(() -> {
+            try {
+                int n = conversationService.sweepUnassignedToOnlineAgents(agentId);
+                if (n > 0) {
+                    log.info("[CS-Agent] 上线 sweep 派单完成: triggerBy={}, assigned={}", agentId, n);
+                }
+            } catch (Exception e) {
+                log.error("[CS-Agent] 上线 sweep 失败: triggerBy={}", agentId, e);
+            }
+        });
     }
 
     @Override
@@ -165,6 +248,62 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
         broadcastAgentStatusChanged(agentId, newStatus, statusText);
 
         agentStatusLogService.logStatusChange(agentId, newStatus, triggerSource);
+    }
+
+    @Override
+    public void restoreFromPreshutdownSnapshot(String agentId) {
+        if (oConvertUtils.isEmpty(agentId)) {
+            return;
+        }
+        String key = CsRedisKeys.REDIS_AGENT_PRESHUTDOWN_PREFIX + agentId;
+        String value;
+        try {
+            value = redisTemplate.opsForValue().get(key);
+        } catch (Exception e) {
+            log.warn("[CS-Agent] 读取 preshutdown 快照失败: agentId={}, err={}", agentId, e.getMessage());
+            return;
+        }
+        if (oConvertUtils.isEmpty(value)) {
+            return;
+        }
+        // 一次性消费：DEL 在前，避免并发 ws 重连重复触发 goOnline / sweep
+        try {
+            redisTemplate.delete(key);
+        } catch (Exception e) {
+            log.warn("[CS-Agent] DEL preshutdown 快照失败: agentId={}, err={}", agentId, e.getMessage());
+        }
+
+        CsAgent agent = getById(agentId);
+        if (agent == null || agent.getStatus() == null) {
+            return;
+        }
+        // 守卫：只在 OFFLINE 时才恢复，避免覆盖客服已经手动切换过的状态
+        if (agent.getStatus() != CsAgent.STATUS_OFFLINE) {
+            log.info("[CS-Agent] 跳过快照恢复(已非 OFFLINE): agentId={}, current={}",
+                    agentId, agent.getStatus());
+            return;
+        }
+
+        int prev;
+        try {
+            prev = Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            log.warn("[CS-Agent] preshutdown 快照值非法: agentId={}, value={}", agentId, value);
+            return;
+        }
+
+        if (prev == CsAgent.STATUS_INVISIBLE) {
+            // INVISIBLE → goOffline(MANUAL) 把 status 置为 INVISIBLE，不派单
+            goOffline(agentId);
+            log.info("[CS-Agent] 快照恢复为隐身: agentId={}", agentId);
+        } else if (prev == CsAgent.STATUS_ONLINE || prev == CsAgent.STATUS_BUSY) {
+            // BUSY 在 reset 后 current_sessions=0，恢复为 ONLINE 即可。
+            // goOnline 内部会触发 sweep 派发累积未分配会话。
+            goOnline(agentId);
+            log.info("[CS-Agent] 快照恢复为在线: agentId={}, prev={}", agentId, prev);
+        } else {
+            log.warn("[CS-Agent] preshutdown 快照值未识别: agentId={}, prev={}", agentId, prev);
+        }
     }
 
     @Override

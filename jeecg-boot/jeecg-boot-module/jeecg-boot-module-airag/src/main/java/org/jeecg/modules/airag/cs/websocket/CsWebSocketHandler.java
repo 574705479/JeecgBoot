@@ -126,6 +126,19 @@ public class CsWebSocketHandler implements WebSocketHandler {
         }
 
         sessionManager.addSession(session);
+
+        // 客服 ws 握手成功后尝试从 preshutdown 快照恢复升级前状态。
+        // 必须放在 addSession 之后：restore 内部 goOnline 会异步触发 sweep,
+        // sweep 完成后广播 conversation_assigned 给本客服，session 在池中才能送达。
+        if (CsWebSocketInterceptor.USER_TYPE_AGENT.equals(userType)) {
+            try {
+                agentService.restoreFromPreshutdownSnapshot(userId);
+            } catch (Exception e) {
+                log.warn("[CS-WebSocket] preshutdown 快照恢复失败(非致命): agentId={}, err={}",
+                        userId, e.getMessage());
+            }
+        }
+
         String conversationId = sessionManager.getConversationId(session);
         
         // 构建extra信息

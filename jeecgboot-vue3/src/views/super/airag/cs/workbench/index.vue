@@ -63,7 +63,7 @@
           :class="{ active: filter === 'monitor' }"
           @click="filter = 'monitor'"
         >
-          <TeamOutlined /> 同事会话 <span class="count" v-if="filter === 'monitor' && monitorCount > 0">{{ monitorCount }}</span>
+          <TeamOutlined /> 同事会话 <span class="count" v-if="colleagueCount > 0">{{ colleagueCount }}</span>
         </div>
       </div>
 
@@ -961,6 +961,7 @@ import {
   renderMarkdown,
 } from './render/csMessageRender';
 import { useCsMessageMedia } from './composables/useCsMessageMedia';
+import { useCsContinuousRing } from './composables/useCsContinuousRing';
 import CsMediaPreviewModals from './components/CsMediaPreviewModals.vue';
 
 const userStore = useUserStoreWithOut();
@@ -1075,6 +1076,11 @@ const visitorLastMsgTime = new Map<string, number>();
 const timeoutNotifiedSet = new Set<string>();
 let waitingTimerHandle: ReturnType<typeof setInterval> | null = null;
 
+// 音频上下文（声明上移至此，便于持续响铃 composable 在初始化时引用）
+let audioCtx: AudioContext | null = null;
+let lastSoundTime = 0;
+const SOUND_THROTTLE_MS = 1500;
+
 // 会话列表
 const filter = ref('mine');
 const conversations = ref<any[]>([]);
@@ -1098,14 +1104,13 @@ const showScrollToBottom = ref(false);
 
 // 统计
 // 统计数据（从后端获取）
-const statsData = ref({ myCount: 0, unassignedCount: 0, closedCount: 0 });
+const statsData = ref({ myCount: 0, unassignedCount: 0, closedCount: 0, colleagueCount: 0 });
 const myCount = computed(() => statsData.value.myCount);
 const _unassignedCount = computed(() => statsData.value.unassignedCount); // 待接入标签已隐藏
 const _closedCount = computed(() => statsData.value.closedCount); // 已结束标签已隐藏
-const monitorCount = computed(() => {
-  if (filter.value !== 'monitor') return 0;
-  return monitorGroups.value.reduce((sum, g) => sum + g.conversations.length, 0);
-});
+// 「同事会话」徽标：来自后端 stats.colleagueCount（其他客服正在处理且未关闭，不含自己/未分配），
+// 不依赖当前 tab，始终展示
+const colleagueCount = computed(() => statsData.value.colleagueCount);
 
 // ============ 监控模式：按客服分组 ============
 const monitorAgentList = ref<any[]>([]); // 监控模式下的所有客服列表
@@ -1663,6 +1668,42 @@ watch(() => route.query.conversationId, async (newId) => {
   router.replace({ query: {} });
 });
 
+// ============ 持续响铃 composable ============
+// 在「新消息提示音」总开关之上提供两层细粒度控制：
+//   1) 持续响铃模式（off / on_blur / always）
+//   2) 停止条件（any_one / all_visitors）
+// 入队是无条件的（仅看 isMyConv + 模式 ≠ off），是否实际播放由 tick 实时判定焦点。
+const ring = useCsContinuousRing({
+  isOnWorkbench: () => route.path === '/cs/workbench',
+  isSoundEnabled: () => soundEnabled.value,
+  isInForeground: () => document.visibilityState === 'visible' && document.hasFocus(),
+  playOnce: () => {
+    try {
+      if (!audioCtx) audioCtx = new AudioContext();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const mult = Math.max(0, Math.min(CS_NOTIFY_MAX_GAIN, soundVolumePercent.value / 100));
+      playCsNotificationSound(audioCtx, mult);
+    } catch { /* 忽略音频播放异常 */ }
+  },
+  hasAnyMyVisitorWaiting: () => {
+    for (const [cid] of visitorLastMsgTime) {
+      const c = conversations.value.find((x: any) => x.id === cid);
+      if (!c) continue;
+      if (!c.ownerAgentId || c.ownerAgentId === agentId.value) return true;
+    }
+    return false;
+  },
+  collectMyWaitingConvIds: () => {
+    const ids: string[] = [];
+    for (const [cid] of visitorLastMsgTime) {
+      const c = conversations.value.find((x: any) => x.id === cid);
+      if (!c) continue;
+      if (!c.ownerAgentId || c.ownerAgentId === agentId.value) ids.push(cid);
+    }
+    return ids;
+  },
+});
+
 // 初始化
 onMounted(async () => {
   await loadAgentInfo();          // 获取 agentId（WebSocket 连接依赖此值）
@@ -1742,6 +1783,8 @@ onUnmounted(() => {
     audioCtx.close();
     audioCtx = null;
   }
+  // 持续响铃：组件销毁，停 timer / 清队列 / 同步停闪
+  ring.onUnmount();
 });
 
 onActivated(async () => {
@@ -1802,6 +1845,15 @@ onDeactivated(() => {
   // 离开菜单时断开连接
   closeWebSocket();
   stopFallbackPoll();
+  // 持续响铃：真正离开工作台时停响（keepConnectionOnDeactivate 分支由 watch route.path 处理）
+  ring.clearAllRing();
+});
+
+// 路由离开 /cs/workbench 时主动停止持续响铃（keep-alive 缓存场景）
+watch(() => route.path, (newPath) => {
+  if (newPath !== '/cs/workbench') {
+    ring.clearAllRing();
+  }
 });
 
 watch(filter, () => {
@@ -2686,7 +2738,8 @@ async function loadStats() {
       statsData.value = {
         myCount: res.myCount || 0,
         unassignedCount: res.unassignedCount || 0,
-        closedCount: res.closedCount || 0
+        closedCount: res.closedCount || 0,
+        colleagueCount: res.colleagueCount || 0
       };
     }
   } catch (e) {
@@ -2695,15 +2748,28 @@ async function loadStats() {
 }
 
 // 延迟加载统计数据（防抖，避免频繁调用）
-// P5：500ms → 2000ms，高频 WS 消息时段合并 stats 请求次数；
-// 用户主动操作（接入/转接/结束）UI 自带提示，2s 数字延迟感知影响有限。
+// 高频事件（message/typing/visitor_updated 等）走此路径，500ms 内合并请求；
+// 用户主动操作（接入/转接/结束）UI 自带提示，500ms 数字延迟基本无感。
 function loadStatsDebounced() {
   if (statsLoadTimer) {
     clearTimeout(statsLoadTimer);
   }
   statsLoadTimer = setTimeout(() => {
     loadStats();
-  }, 2000);
+  }, 500);
+}
+
+// 关键事件快速刷新统计（assigned/closed/transferred 等会话归属变化）。
+// 内部 100ms 微缓冲：
+//   1) 后端 broadcast 在事务内发出（commit 前），100ms 留给事务 commit，避免拉到旧值
+//   2) 同时 clearTimeout 自动合并 100ms 内的多次触发，防止短时高 QPS
+function loadStatsImmediate() {
+  if (statsLoadTimer) {
+    clearTimeout(statsLoadTimer);
+  }
+  statsLoadTimer = setTimeout(() => {
+    loadStats();
+  }, 100);
 }
 
 // 延迟加载会话列表（防抖，WebSocket 兜底刷新用）
@@ -2939,6 +3005,15 @@ async function loadConversations() {
 
     // 初始化访客等待追踪
     initWaitingTracking();
+
+    // 持续响铃：刷新 / 切换会话列表后按当前停止条件重建队列，避免漏响
+    if (ring.continuousRingMode.value !== 'off') {
+      if (ring.ringStopCondition.value === 'all_visitors') {
+        if (visitorLastMsgTime.size > 0) ring.ensureTimerStarted();
+      } else {
+        ring.rebuildPendingFromVisitorWaiting();
+      }
+    }
 
     // 按星标置顶排序
     sortConversations();
@@ -3555,6 +3630,9 @@ async function sendMessage() {
 
   // 客服发送消息，清除该会话的访客等待标记
   clearVisitorWaiting(currentConversation.value.id);
+  // 持续响铃：本会话已回复 → dequeue（any_one 模式立即停响整个响铃；
+  // all_visitors 模式仍需所有访客都回复才停）
+  ring.dequeueContinuousRing(currentConversation.value.id);
 
   try {
     if (currentReplyMode.value === 0) {
@@ -4263,6 +4341,8 @@ async function handleWsMessage(data: any) {
         // 客服回复 → 清除访客等待标记
         if (data.senderType === 2) {
           clearVisitorWaiting(data.conversationId);
+          // 持续响铃：任意客服回执（覆盖多标签同步、协作客服替我回复）都让本标签 dequeue
+          ring.dequeueContinuousRing(data.conversationId);
         }
         
         // 如果不是当前会话，增加未读数
@@ -4343,6 +4423,15 @@ async function handleWsMessage(data: any) {
         }
         if (isMyConv) {
           notifyNewMessage(conv, data);
+          // 持续响铃：访客消息无条件入队（入队仅看 isMyConv + 模式 ≠ off，
+          // 是否实际播放由 tick 内 focusMatchesMode 实时判定）
+          if (ring.continuousRingMode.value !== 'off') {
+            if (ring.ringStopCondition.value === 'all_visitors') {
+              ring.ensureTimerStarted();
+            } else {
+              ring.enqueueContinuousRing(data.conversationId);
+            }
+          }
         }
       }
       break;
@@ -4430,8 +4519,8 @@ async function handleWsMessage(data: any) {
           });
         }
 
-        // 延迟刷新统计数据（防抖）
-        loadStatsDebounced();
+        // 关键事件：会话归属变化，100ms 微缓冲后立即刷新 my/colleague 徽标
+        loadStatsImmediate();
         // 监控模式：刷新整个列表和客服状态
         if (filter.value === 'monitor') {
           loadConversations();
@@ -4549,6 +4638,8 @@ async function handleWsMessage(data: any) {
         
         // 清除超时等待标记
         clearVisitorWaiting(conversationId);
+        // 持续响铃：会话被关闭，dequeue
+        ring.dequeueContinuousRing(conversationId);
 
         const closedConv = conversations.value.find(c => c.id === conversationId);
         if (closedConv) {
@@ -4575,8 +4666,8 @@ async function handleWsMessage(data: any) {
           console.log('[Workbench] 会话不在当前列表，仅更新统计');
         }
         
-        // 刷新统计数据
-        loadStatsDebounced();
+        // 关键事件：会话已结束，100ms 微缓冲后立即刷新 my/colleague/closed 徽标
+        loadStatsImmediate();
         // 监控模式：刷新客服列表以更新 currentSessions
         if (filter.value === 'monitor') {
           loadMonitorAgents();
@@ -4641,8 +4732,11 @@ async function handleWsMessage(data: any) {
             currentConversation.value = null;
           }
           
-          // 刷新统计数据
-          loadStatsDebounced();
+          // 持续响铃：会话已转出，dequeue 避免幽灵响铃
+          ring.dequeueContinuousRing(conversationId);
+          
+          // 关键事件：会话归属变化，100ms 微缓冲后立即刷新 my/colleague 徽标
+          loadStatsImmediate();
         }
         // 如果是其他客服（旁观者）
         else {
@@ -4670,8 +4764,8 @@ async function handleWsMessage(data: any) {
             }
           }
 
-          // 刷新统计数据
-          loadStatsDebounced();
+          // 关键事件：会话归属变化，100ms 微缓冲后立即刷新 colleague 徽标
+          loadStatsImmediate();
         }
         // 监控模式：刷新整个列表和客服状态
         if (filter.value === 'monitor') {
@@ -4919,9 +5013,7 @@ async function handleWsMessage(data: any) {
   }
 }
 
-let audioCtx: AudioContext | null = null;
-let lastSoundTime = 0;
-const SOUND_THROTTLE_MS = 1500;
+// audioCtx / lastSoundTime / SOUND_THROTTLE_MS 已在顶部声明区上移，避免在 ring composable 实例化前被引用
 
 function playNotificationSound() {
   if (!soundEnabled.value) return;
@@ -5289,11 +5381,23 @@ const csWorkbenchSettings: CsWorkbenchSettings = {
   soundEnabled,
   soundVolumePercent,
   aiAppList,
+  // 持续响铃配置
+  continuousRingMode: ring.continuousRingMode,
+  ringStopCondition: ring.ringStopCondition,
+  ringIntervalSeconds: ring.ringIntervalSeconds,
+  continuousRingActive: ring.continuousRingActive,
+  isRingPaused: ring.isRingPaused,
+  pauseRemainSeconds: ring.pauseRemainSeconds,
   onAppChange,
   onVisitorAppChange,
   onAiEnabledChange,
   onAiPrologueEnabledChange,
   onSoundEnabledChange,
+  onContinuousRingModeChange: ring.onContinuousRingModeChange,
+  onRingStopConditionChange: ring.onRingStopConditionChange,
+  onRingIntervalChange: ring.onRingIntervalChange,
+  onPauseRing: ring.onPauseRing,
+  onResumeRing: ring.onResumeRing,
 };
 const csWorkbenchContext: CsWorkbenchContext = {
   agentId,
