@@ -925,7 +925,6 @@ import {
 import { useRoute, useRouter } from 'vue-router';
 import { defHttp } from '/@/utils/http/axios';
 import { useGlobSetting } from '/@/hooks/setting';
-import { ElectronEnum } from '/@/enums/jeecgEnum';
 import { getFileAccessHttpUrl } from '/@/utils/common/compUtils';
 import { getBrandSetting } from '/@/settings/brandSetting';
 import { resolveBrandPublicUrl } from '/@/utils/brand';
@@ -951,7 +950,9 @@ import { isCseUrl } from '/@/utils/cse/cseUrl';
 import { compressImage } from '/@/utils/file/compressImage';
 import FileChip from '../components/FileChip.vue';
 import { vCseHtml } from '../utils/cseHtmlImg';
+import { storeToRefs } from 'pinia';
 import { useUserStoreWithOut } from '/@/store/modules/user';
+import { useCsStore } from '/@/store/modules/cs';
 import {
   stripHtmlTags,
   buildMessagePreview,
@@ -961,10 +962,22 @@ import {
   renderMarkdown,
 } from './render/csMessageRender';
 import { useCsMessageMedia } from './composables/useCsMessageMedia';
-import { useCsContinuousRing } from './composables/useCsContinuousRing';
 import CsMediaPreviewModals from './components/CsMediaPreviewModals.vue';
 
 const userStore = useUserStoreWithOut();
+const csStore = useCsStore();
+// 持续响铃 / 访客等待相关状态（state owner = csStore）：
+//   - state ref 用 storeToRefs 拿到 Ref，传给 csWorkbenchSettings 满足 Ref<...> 契约 + v-model 绑定。
+//   - computed 用本地 computed wrapper（storeToRefs 对 setup-store computed 返回联合类型，
+//     无法直接赋给 context.ts 中 ComputedRef<boolean>）。
+const {
+  continuousRingMode: csContinuousRingMode,
+  ringStopCondition: csRingStopCondition,
+  ringIntervalSeconds: csRingIntervalSeconds,
+  pauseRemainSeconds: csPauseRemainSeconds,
+} = storeToRefs(csStore);
+const csContinuousRingActive = computed(() => csStore.continuousRingActive);
+const csIsRingPaused = computed(() => csStore.isRingPaused);
 const silentRequestOptions = { successMessageMode: 'none' as const };
 const globSetting = useGlobSetting();
 const route = useRoute();
@@ -1054,25 +1067,64 @@ function readSoundVolumePercent(): number {
   if (!Number.isFinite(n)) return 100;
   return Math.max(0, Math.min(200, n));
 }
-const soundEnabled = ref(localStorage.getItem(SOUND_STORAGE_KEY) !== 'false');
-const soundVolumePercent = ref(readSoundVolumePercent());
-watch(soundVolumePercent, (v) => {
-  localStorage.setItem(SOUND_VOLUME_STORAGE_KEY, String(v));
+// 声音偏好统一在 csStore 维护（同时持久化到 localStorage），
+// 工作台保留同名 ref/setter 以保持现有 UI 双向绑定语义
+const soundEnabled = computed({
+  get: () => csStore.soundEnabled,
+  set: (v: boolean) => {
+    csStore.setSoundEnabled(v);
+    try {
+      localStorage.setItem(SOUND_STORAGE_KEY, String(v));
+    } catch (_) {
+      /* ignore */
+    }
+  },
 });
+const soundVolumePercent = computed({
+  get: () => csStore.soundVolumePercent,
+  set: (v: number) => {
+    const n = Math.max(0, Math.min(200, v | 0));
+    csStore.setSoundVolume(n);
+    try {
+      localStorage.setItem(SOUND_VOLUME_STORAGE_KEY, String(n));
+    } catch (_) {
+      /* ignore */
+    }
+  },
+});
+// 兼容历史：从工作台旧 key 读取一次同步到 csStore（若 csStore 已有 cs.* key 则跳过）
+(function syncLegacySoundPrefs() {
+  try {
+    const legacyEnabled = localStorage.getItem(SOUND_STORAGE_KEY);
+    if (legacyEnabled !== null) {
+      csStore.setSoundEnabled(legacyEnabled !== 'false');
+    }
+    const legacyVolume = localStorage.getItem(SOUND_VOLUME_STORAGE_KEY);
+    if (legacyVolume !== null) {
+      const n = parseInt(legacyVolume, 10);
+      if (Number.isFinite(n)) csStore.setSoundVolume(Math.max(0, Math.min(200, n)));
+    }
+  } catch (_) {
+    /* ignore */
+  }
+})();
 const soundVolumeSliderMarks: Record<number, string> = { 0: '0%', 100: '100%', 200: '200%' };
 const soundVolumeTooltip = { formatter: (v?: number) => (v != null ? `${v}%` : '') };
 function onSoundEnabledChange(val: boolean) {
-  localStorage.setItem(SOUND_STORAGE_KEY, String(val));
+  try {
+    localStorage.setItem(SOUND_STORAGE_KEY, String(val));
+  } catch (_) {
+    /* ignore */
+  }
 }
 const aiEnabled = ref(true);  // AI自动回复开关
 const aiPrologueEnabled = ref(true); // AI开场白开关
 
 // 客服超时未回复配置
 const agentTimeoutConfig = ref({ enabled: false, seconds: 20 });
-// 访客等待回复时长（conversationId -> 等待秒数），每秒刷新
+// 访客等待回复时长（conversationId -> 等待秒数），每秒刷新（UI 私有状态）
+// 数据源已切到 csStore.visitorLastMsgTime（background 接管访客等待全局状态）。
 const visitorWaitingSeconds = ref<Record<string, number>>({});
-// 访客最后发消息时间戳（conversationId -> timestamp ms），客服回复后清除
-const visitorLastMsgTime = new Map<string, number>();
 const timeoutNotifiedSet = new Set<string>();
 let waitingTimerHandle: ReturnType<typeof setInterval> | null = null;
 
@@ -1289,8 +1341,6 @@ let _imeComposing = false;
 const attachmentList = ref<any[]>([]);
 const uploadFileList = ref<any[]>([]);
 const csMediaApi = useCsMessageMedia();
-const lastNotifyMap = new Map<string, number>();
-const activeNotifications = new Map<string, Notification>();
 const showEmojiPanel = ref(false);
 const messagesRef = ref<HTMLElement | null>(null);
 const inputRef = ref();
@@ -1399,9 +1449,19 @@ const wsFallbackTriggeredAfterWsMs = 5000;
 // P2：fallback 内 conv.lastMessageTime 与本地末条/lastMessageLoadAt 的比对容差，
 // 用于吸收前后端 NTP 漂移、避免误触发整体 loadMessages。
 const messageStaleToleranceMs = 3000;
-const wsStatus = ref<'connected' | 'connecting' | 'reconnecting' | 'disconnected'>('connecting');
-const wsShowBanner = ref(false);
-const wsReconnectCountdown = ref(0);
+// WS 状态由 CsBackgroundService 写入 csStore，这里以 computed 暴露给 banner UI
+const wsStatus = computed({
+  get: () => csStore.wsStatus as 'connected' | 'connecting' | 'reconnecting' | 'disconnected',
+  set: (v) => csStore.setWsStatus(v),
+});
+const wsShowBanner = computed({
+  get: () => csStore.wsShowBanner,
+  set: (v) => csStore.setWsBanner(v),
+});
+const wsReconnectCountdown = computed({
+  get: () => csStore.wsReconnectCountdown,
+  set: (v) => csStore.setWsReconnectCountdown(v),
+});
 let hasConnectedOnce = false;
 let wsConnectedBannerTimer: number | null = null;
 let wsCountdownTimer: number | null = null;
@@ -1409,27 +1469,8 @@ let wsCountdownTimer: number | null = null;
 const handleVisibilityChange = () => {
   if (!hasMounted.value) return;
   if (document.hidden) return;
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
-    connectWebSocket();
-    nextTick(() => scrollToBottom());
-    return;
-  }
-  // B1：ws 报 OPEN 不等于活，PC 休眠唤醒后 ws 可能是僵尸（OS 端口仍开但中间节点已断）。
-  // 主动 ping，5s 内 lastWsMessageAt 没更新就强制 close 触发重连。
-  const beforePing = lastWsMessageAt;
-  try {
-    ws.send(JSON.stringify({ type: 'ping', ts: Date.now() }));
-  } catch {
-    try { ws?.close(); } catch {}
-    return;
-  }
-  setTimeout(() => {
-    if (lastWsMessageAt === beforePing && ws && ws.readyState === WebSocket.OPEN) {
-      console.warn('[CS-WS] visibility ping 5s 内无 pong，判定 ws 僵尸，强制重连');
-      try { ws.close(); } catch {}
-    }
-  }, 5000);
-  if (currentConversation.value?.id && Date.now() - lastWsMessageAt > 30000) {
+  // ws 健康探测已迁出至 CsBackgroundService，这里只关心当前会话 UI 副作用
+  if (currentConversation.value?.id && lastWsMessageAt && Date.now() - lastWsMessageAt > 30000) {
     loadMessages(currentConversation.value.id);
   }
   nextTick(() => scrollToBottom());
@@ -1453,28 +1494,23 @@ const handleElectronNavigate = async (e: Event) => {
   }
 };
 
-const handleNetworkOnline = () => {
-  if (!hasMounted.value) return;
-  connectWebSocket();
-};
-
-const handleBeforeUnload = () => {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    wsManuallyClosed = true;
-    ws.close(1000, 'page_refresh');
-  }
-};
-
+// network online / beforeunload / app-logout 全部由 CsBackgroundService 统一处理
+const handleNetworkOnline = () => { /* moved to CsBackgroundService */ };
+const handleBeforeUnload = () => { /* moved to CsBackgroundService */ };
 const handleAppLogout = () => {
-  // 修复：退出登录是终态，必须把所有 timer + 关键 ref 都重置；
-  // 否则下次 mount 时残留状态会让 onMounted 走"假命中"路径，
-  // 加上残留 timer 抢占 ws session，导致换号后收不到消息。
-  closeWebSocket();
-  stopFallbackPoll();
+  // 工作台只负责自身 UI 状态重置，ws/store 重置由 CsBackgroundService 处理
   agentId.value = '';
   hasMounted.value = false;
   isActivating.value = false;
 };
+
+// 跨菜单通知点击：在工作台内尝试切换到目标会话
+function handleNotificationClick(payload: any) {
+  const id = payload?.conversationId;
+  if (!id) return;
+  const found = conversations.value.find((c: any) => c.id === id);
+  if (found) selectConversation(found);
+}
 
 function closeWebSocket() {
   wsManuallyClosed = true;
@@ -1668,48 +1704,20 @@ watch(() => route.query.conversationId, async (newId) => {
   router.replace({ query: {} });
 });
 
-// ============ 持续响铃 composable ============
-// 在「新消息提示音」总开关之上提供两层细粒度控制：
-//   1) 持续响铃模式（off / on_blur / always）
-//   2) 停止条件（any_one / all_visitors）
-// 入队是无条件的（仅看 isMyConv + 模式 ≠ off），是否实际播放由 tick 实时判定焦点。
-const ring = useCsContinuousRing({
-  isOnWorkbench: () => route.path === '/cs/workbench',
-  isSoundEnabled: () => soundEnabled.value,
-  isInForeground: () => document.visibilityState === 'visible' && document.hasFocus(),
-  playOnce: () => {
-    try {
-      if (!audioCtx) audioCtx = new AudioContext();
-      if (audioCtx.state === 'suspended') audioCtx.resume();
-      const mult = Math.max(0, Math.min(CS_NOTIFY_MAX_GAIN, soundVolumePercent.value / 100));
-      playCsNotificationSound(audioCtx, mult);
-    } catch { /* 忽略音频播放异常 */ }
-  },
-  hasAnyMyVisitorWaiting: () => {
-    for (const [cid] of visitorLastMsgTime) {
-      const c = conversations.value.find((x: any) => x.id === cid);
-      if (!c) continue;
-      if (!c.ownerAgentId || c.ownerAgentId === agentId.value) return true;
-    }
-    return false;
-  },
-  collectMyWaitingConvIds: () => {
-    const ids: string[] = [];
-    for (const [cid] of visitorLastMsgTime) {
-      const c = conversations.value.find((x: any) => x.id === cid);
-      if (!c) continue;
-      if (!c.ownerAgentId || c.ownerAgentId === agentId.value) ids.push(cid);
-    }
-    return ids;
-  },
-});
+// ============ 持续响铃 ============
+// 持续响铃实例已迁至 CsBackgroundService（路径 A），状态归 csStore.continuousRingMode 等。
+// workbench 仅做：
+//   1. 通过 csWorkbenchSettings 暴露 csStore.* 给设置抽屉读写（v-model 自动绑定到 store）。
+//   2. 业务回执场景（如 handleSendMessage 客服自发回复）调 csStore.dequeueContinuousRing 即时停响。
+//   3. 订阅 csStore.events.on('visitor_waiting_cleared') 同步清除本地 UI 私有状态。
 
 // 初始化
 onMounted(async () => {
-  await loadAgentInfo();          // 获取 agentId（WebSocket 连接依赖此值）
-  connectWebSocket();             // 立即连接 WebSocket，不等其他数据加载
-  startFallbackPoll();
-  // 其余数据加载并行进行，加快初始化速度
+  await loadAgentInfo();          // 获取 agentId（CsBackgroundService 与本组件并行加载，幂等）
+  // WebSocket 连接由 CsBackgroundService 全局接管：
+  //   - 工作台 mount 时不再 connectWebSocket / startFallbackPoll；
+  //   - 通过 csStore.events 订阅 ws 消息与 banner 状态；
+  //   - 多页签关闭时背景服务仍能持续接收消息，触发菜单角标 + 跨菜单通知。
   await Promise.all([
     loadAiAppList(),
     loadAiEnabled(),              // 加载AI开关状态
@@ -1722,12 +1730,16 @@ onMounted(async () => {
   ]);
   startWaitingTimer();             // 启动访客等待时长计时器
   hasMounted.value = true;
-  
+
   document.addEventListener('visibilitychange', handleVisibilityChange);
-  window.addEventListener('online', handleNetworkOnline);
-  window.addEventListener('beforeunload', handleBeforeUnload);
   window.addEventListener('electron-navigate', handleElectronNavigate);
-  window.addEventListener('app-logout', handleAppLogout);
+  // online / beforeunload / app-logout 全部由 CsBackgroundService 接管，工作台不再监听
+
+  // 订阅背景服务的 ws 消息（替代原 workbench 自有 ws.onmessage）
+  csStore.events.on('ws_message', handleWsMessage);
+  csStore.events.on('notification_click', handleNotificationClick);
+  // background 在 csStore.clearVisitorWaiting 时 emit 此事件 → workbench 同步清 UI 私有状态
+  csStore.events.on('visitor_waiting_cleared', clearVisitorWaitingUiState);
 });
 
 // 【S-P0-9】会话切换时按"上一会话"释放视频 blob：
@@ -1753,24 +1765,14 @@ onUnmounted(() => {
   // 释放所有视频 blob URL，避免内存泄漏（图片走 LRU 不需此处）
   releaseAllMedia();
   if (mediaReleaseTimer) { clearTimeout(mediaReleaseTimer); mediaReleaseTimer = null; }
-  // 修复：onUnmounted 只在组件「真正销毁」时触发（keep-alive 缓存被清空后），
-  // 此时 setup 闭包内的 timer 不再有任何代码路径能 stop，必须无条件强制清理，
-  // 否则旧 timer 会持续持有旧 ws/agentId 引用，导致新组件实例的 ws 被「幽灵 ws」抢占踢出。
-  closeWebSocket();
-  stopFallbackPoll();
-  stopWsHeartbeat();
-  stopWsHealthCheck();
+  // ws 与 fallback poll 已迁出至 CsBackgroundService，这里只清理工作台自有 timer
   refreshTimer && clearInterval(refreshTimer);
-  stopWsCountdown();
   if (wsConnectedBannerTimer) { clearTimeout(wsConnectedBannerTimer); wsConnectedBannerTimer = null; }
   stopWaitingTimer();
   if (tokenRafId) { cancelAnimationFrame(tokenRafId); tokenRafId = null; }
   if (scrollRafId) { cancelAnimationFrame(scrollRafId); scrollRafId = null; }
   if (suggestionRafId) { cancelAnimationFrame(suggestionRafId); suggestionRafId = null; }
-  window.removeEventListener('online', handleNetworkOnline);
-  window.removeEventListener('beforeunload', handleBeforeUnload);
   window.removeEventListener('electron-navigate', handleElectronNavigate);
-  window.removeEventListener('app-logout', handleAppLogout);
   document.removeEventListener('visibilitychange', handleVisibilityChange);
   if (messagesEl) {
     messagesEl.removeEventListener('scroll', handleMessageScroll);
@@ -1783,8 +1785,11 @@ onUnmounted(() => {
     audioCtx.close();
     audioCtx = null;
   }
-  // 持续响铃：组件销毁，停 timer / 清队列 / 同步停闪
-  ring.onUnmount();
+  // 取消订阅背景服务事件
+  csStore.events.off('ws_message', handleWsMessage);
+  csStore.events.off('notification_click', handleNotificationClick);
+  csStore.events.off('visitor_waiting_cleared', clearVisitorWaitingUiState);
+  // 持续响铃由 CsBackgroundService 全局维护，workbench 卸载时不再清 ring
 });
 
 onActivated(async () => {
@@ -1796,12 +1801,7 @@ onActivated(async () => {
     isActivating.value = true;
     try {
       await loadAgentInfo();
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        connectWebSocket();
-      }
-      if (!wsFallbackPollTimer) {
-        startFallbackPoll();
-      }
+      // ws / fallback poll 由 CsBackgroundService 全局接管
       await loadConversations();
       const pendingConvId = route.query.conversationId;
       if (pendingConvId && typeof pendingConvId === 'string') {
@@ -1816,15 +1816,12 @@ onActivated(async () => {
     }
     return;
   }
-  // 菜单切换返回时，确保客服在线、会话和WebSocket正常
+  // 菜单切换返回时，刷新会话列表即可（ws 全局常驻）
   if (!hasMounted.value || isActivating.value) return;
   isActivating.value = true;
   try {
     await loadAgentInfo();
     await loadConversations();
-    closeWebSocket();
-    connectWebSocket();
-    startFallbackPoll();
   } finally {
     isActivating.value = false;
   }
@@ -1842,18 +1839,7 @@ onDeactivated(() => {
     saveMessageScroll();
     return;
   }
-  // 离开菜单时断开连接
-  closeWebSocket();
-  stopFallbackPoll();
-  // 持续响铃：真正离开工作台时停响（keepConnectionOnDeactivate 分支由 watch route.path 处理）
-  ring.clearAllRing();
-});
-
-// 路由离开 /cs/workbench 时主动停止持续响铃（keep-alive 缓存场景）
-watch(() => route.path, (newPath) => {
-  if (newPath !== '/cs/workbench') {
-    ring.clearAllRing();
-  }
+  // ws 与持续响铃均由 CsBackgroundService 全局维护，工作台 deactivate 不再清 ring（跨菜单仍需响）
 });
 
 watch(filter, () => {
@@ -1898,19 +1884,15 @@ watch(agentId, () => {
   }
 });
 
-// 修复（兜底）：监听 token 变化，token 切换时主动 close + reconnect ws。
-// 覆盖任何"换号 / token 刷新 / SSO 互踢后重新拿到新 token"场景，
-// 即使 onMounted/onActivated 钩子有遗漏也能兜住，确保新 token 与 ws 鉴权状态一致。
+// 修复（兜底）：监听 token 变化，token 切换时主动通知 background 重连。
+// ws 真正的 close + reconnect 由 CsBackgroundService 用最新 token 重新构造 url 完成。
 watch(
   () => userStore.getToken,
   (newToken, oldToken) => {
     if (!hasMounted.value) return;
     if (!newToken || newToken === oldToken) return;
-    console.log('[CS-WS] token 变化，触发 ws 重连');
-    closeWebSocket();
-    if (agentId.value) {
-      connectWebSocket();
-    }
+    console.log('[CS-WS] token 变化，通知后台服务重连');
+    csStore.events.emit('cs_force_reconnect');
   }
 );
 
@@ -2803,7 +2785,12 @@ async function loadAgentTimeoutConfig() {
   }
 }
 
-/** 启动访客等待时长计时器（每秒刷新） */
+/**
+ * 启动访客等待时长计时器（每秒刷新 UI 私有的 visitorWaitingSeconds）
+ *
+ * 数据源：csStore.visitorLastMsgTime（background 全局维护，workbench 不再持有副本）。
+ * 每秒主动 tick 不依赖响应性，因此 csStore 用普通 Map 即可。
+ */
 function startWaitingTimer() {
   stopWaitingTimer();
   waitingTimerHandle = setInterval(() => {
@@ -2812,7 +2799,7 @@ function startWaitingTimer() {
     const threshold = agentTimeoutConfig.value.seconds;
     const newWaiting: Record<string, number> = {};
     let shouldNotify = false;
-    visitorLastMsgTime.forEach((ts, convId) => {
+    csStore.visitorLastMsgTime.forEach((ts, convId) => {
       const elapsed = Math.floor((now - ts) / 1000);
       if (elapsed >= threshold) {
         newWaiting[convId] = elapsed;
@@ -2845,31 +2832,21 @@ function formatWaitingTime(seconds: number): string {
   return `${h}时${m}分`;
 }
 
-/** 标记会话 - 访客发来消息（开始计时） */
-function markVisitorWaiting(conversationId: string, timestamp?: number) {
-  visitorLastMsgTime.set(conversationId, timestamp || Date.now());
-}
-
-/** 清除会话的等待标记（客服已回复） */
-function clearVisitorWaiting(conversationId: string) {
-  visitorLastMsgTime.delete(conversationId);
+/**
+ * 清除会话本地 UI 私有状态（timeoutNotifiedSet + visitorWaitingSeconds）
+ *
+ * background 在调 csStore.clearVisitorWaiting(id) 后会 emit 'visitor_waiting_cleared'，
+ * 这里订阅事件做 UI 同步；workbench 自身的客服回复入口也调 csStore.clearVisitorWaiting，
+ * 不直接调用本函数（避免双源）。
+ */
+function clearVisitorWaitingUiState(conversationId: string) {
+  if (!conversationId) return;
   timeoutNotifiedSet.delete(conversationId);
-  const w = { ...visitorWaitingSeconds.value };
-  delete w[conversationId];
-  visitorWaitingSeconds.value = w;
-}
-
-/** 初始化已有会话的等待追踪（基于服务端 visitorLastMsgTime 精确判断） */
-function initWaitingTracking() {
-  conversations.value.forEach((conv: any) => {
-    if (conv.status === 1 && conv.visitorLastMsgTime) {
-      // 服务端 visitorLastMsgTime 非空 = 访客在等待客服回复
-      const ts = new Date(conv.visitorLastMsgTime).getTime();
-      if (ts > 0) {
-        visitorLastMsgTime.set(conv.id, ts);
-      }
-    }
-  });
+  if (conversationId in visitorWaitingSeconds.value) {
+    const w = { ...visitorWaitingSeconds.value };
+    delete w[conversationId];
+    visitorWaitingSeconds.value = w;
+  }
 }
 
 // ============ 会话列表增量 merge ============
@@ -3003,17 +2980,8 @@ async function loadConversations() {
     conversationsCache.set(cacheKey, newConversations);
     conversationsCacheTime.set(cacheKey, Date.now());
 
-    // 初始化访客等待追踪
-    initWaitingTracking();
-
-    // 持续响铃：刷新 / 切换会话列表后按当前停止条件重建队列，避免漏响
-    if (ring.continuousRingMode.value !== 'off') {
-      if (ring.ringStopCondition.value === 'all_visitors') {
-        if (visitorLastMsgTime.size > 0) ring.ensureTimerStarted();
-      } else {
-        ring.rebuildPendingFromVisitorWaiting();
-      }
-    }
+    // 访客等待追踪 + 持续响铃 队列初始化由 CsBackgroundService 在 loadConversationsList 完成后接管。
+    // workbench 仅负责自己的本地 conversations.value 副本视图。
 
     // 按星标置顶排序
     sortConversations();
@@ -3628,11 +3596,10 @@ async function sendMessage() {
   const wasUnassigned = currentConversation.value.status === 0; // 记录是否是待接入状态
   let localMsgId = '';
 
-  // 客服发送消息，清除该会话的访客等待标记
-  clearVisitorWaiting(currentConversation.value.id);
-  // 持续响铃：本会话已回复 → dequeue（any_one 模式立即停响整个响铃；
-  // all_visitors 模式仍需所有访客都回复才停）
-  ring.dequeueContinuousRing(currentConversation.value.id);
+  // 客服发送消息（local 立即生效）：清访客等待 + 持续响铃 dequeue（即时停响，避免等 ws 回包的 1-2s 内还响）
+  // background 在收到 ws 回包时也会再做一次幂等清理（双保险）。
+  csStore.clearVisitorWaiting(currentConversation.value.id);
+  csStore.dequeueContinuousRing(currentConversation.value.id);
 
   try {
     if (currentReplyMode.value === 0) {
@@ -4163,12 +4130,12 @@ function dismissSuggestion() {
   aiSuggestion.value = '';
   aiSuggestionLoading.value = false;
   aiSuggestionDismissed.value = true;
-  // 通知后端停止生成
-  if (ws && ws.readyState === WebSocket.OPEN && currentConversation.value?.id) {
-    ws.send(JSON.stringify({
+  // 通过 csStore 事件转发到 CsBackgroundService 的 wsClient.send
+  if (currentConversation.value?.id) {
+    csStore.events.emit('cs_command', {
       type: 'stop_ai_suggestion',
       conversationId: currentConversation.value.id,
-    }));
+    });
   }
 }
 
@@ -4198,6 +4165,12 @@ function getWsBaseUrl() {
 }
 
 function connectWebSocket() {
+  // ws 由 CsBackgroundService 全局接管。"立即重连"按钮仍走此入口，转发命令给 background。
+  csStore.events.emit('cs_force_reconnect');
+}
+
+// 以下保留为兼容旧 onMounted/onActivated 中的"假命中"短路语义；当 hasMounted 为 true 时实际不会被调用
+function _legacyConnectWebSocket() {
   if (!agentId.value) {
     console.warn('[CS-WS] 缺少agentId，无法连接WebSocket');
     return;
@@ -4330,21 +4303,14 @@ async function handleWsMessage(data: any) {
         conv.lastMessageTime = new Date().toISOString();
         if (data.senderType === 0) {
           conv.userOnline = true;
-          // 访客发消息 → 标记开始等待客服回复
-          markVisitorWaiting(data.conversationId);
         }
-        
+
         // ★ 问题2修复：如果是客服消息，更新"对话中"的客服名称
         if (data.senderType === 2 && data.senderName && conv.status === 1) {
           conv.lastTalkingAgent = data.senderName;
         }
-        // 客服回复 → 清除访客等待标记
-        if (data.senderType === 2) {
-          clearVisitorWaiting(data.conversationId);
-          // 持续响铃：任意客服回执（覆盖多标签同步、协作客服替我回复）都让本标签 dequeue
-          ring.dequeueContinuousRing(data.conversationId);
-        }
-        
+        // 访客等待 / 持续响铃由 CsBackgroundService 接管（markVisitorWaiting / dequeueContinuousRing 全在 background）。
+
         // 如果不是当前会话，增加未读数
         if (currentConversation.value?.id !== data.conversationId) {
           conv.unreadCount = (conv.unreadCount || 0) + 1;
@@ -4412,28 +4378,7 @@ async function handleWsMessage(data: any) {
       // 延迟刷新统计数据（防抖）
       loadStatsDebounced();
 
-      // 用户消息：提示音 + 弹窗通知（仅分配给当前客服或未分配的会话）
-      if (data.senderType === 0 && conv) {
-        const isMyConv = !conv.ownerAgentId
-          || conv.ownerAgentId === agentId.value
-          || conv.collaborators?.some((c: any) => c.agentId === agentId.value);
-        if (isMyConv && shouldPlaySound() &&
-            (currentConversation.value?.id !== data.conversationId || !document.hasFocus())) {
-          playNotificationSound();
-        }
-        if (isMyConv) {
-          notifyNewMessage(conv, data);
-          // 持续响铃：访客消息无条件入队（入队仅看 isMyConv + 模式 ≠ off，
-          // 是否实际播放由 tick 内 focusMatchesMode 实时判定）
-          if (ring.continuousRingMode.value !== 'off') {
-            if (ring.ringStopCondition.value === 'all_visitors') {
-              ring.ensureTimerStarted();
-            } else {
-              ring.enqueueContinuousRing(data.conversationId);
-            }
-          }
-        }
-      }
+      // 访客消息单次提示音 / 桌面通知 / 持续响铃 全部由 CsBackgroundService 统一处理。
       break;
     case 'delivery_failed': {
       const failedConversationId = data.conversationId;
@@ -4506,18 +4451,7 @@ async function handleWsMessage(data: any) {
           await loadConversations();
         }
 
-        // 仅当被分配给当前客服时给出"人工接入"强提示（声音 + 桌面通知）
-        // 覆盖三类后端触发：访客转人工 / 客服自点接入 / 系统重分配
-        // 三层防护：owner_only 判定 + shouldPlaySound 路由判定 + notifyNewMessage 内置失焦判定
-        if (assignedAgentId && assignedAgentId === agentId.value) {
-          const targetConv = conversations.value.find(c => c.id === extraData.conversationId);
-          if (shouldPlaySound()) playNotificationSound();
-          notifyNewMessage(targetConv, {
-            ...data,
-            content: '访客已请求人工接入',
-            conversationId: extraData.conversationId,
-          });
-        }
+        // 接入提示：单次声音 + 桌面通知 由 CsBackgroundService 统一处理
 
         // 关键事件：会话归属变化，100ms 微缓冲后立即刷新 my/colleague 徽标
         loadStatsImmediate();
@@ -4609,14 +4543,7 @@ async function handleWsMessage(data: any) {
           loadMonitorAgents();
         }
 
-        // 新会话接入：提示音 + 系统通知（仅分配给当前客服且非重复事件）
-        if (!exists && convOwnerAgentId === agentId.value) {
-          if (shouldPlaySound()) playNotificationSound();
-          const targetConv = conversations.value.find(c => c.id === data.conversationId);
-          if (targetConv) {
-            notifyNewMessage(targetConv, { ...data, content: '新访客接入', conversationId: data.conversationId });
-          }
-        }
+        // 新访客接入提示：单次声音 + 桌面通知 由 CsBackgroundService 统一处理
       }
       break;
     case 'conversation_closed':
@@ -4635,11 +4562,9 @@ async function handleWsMessage(data: any) {
           currentFilter: filter.value,
           rawData: data
         });
-        
-        // 清除超时等待标记
-        clearVisitorWaiting(conversationId);
-        // 持续响铃：会话被关闭，dequeue
-        ring.dequeueContinuousRing(conversationId);
+
+        // 访客等待 / 持续响铃由 CsBackgroundService 接管（在收到 conversation_closed 时已 clearVisitorWaiting + dequeue），
+        // 这里仅同步 workbench 自己的本地 conversations.value 视图。
 
         const closedConv = conversations.value.find(c => c.id === conversationId);
         if (closedConv) {
@@ -4697,21 +4622,8 @@ async function handleWsMessage(data: any) {
         // 如果当前客服是新负责人
         if (extraData.toAgentId === agentId.value) {
           console.log('[Workbench] 我是新负责人');
-          if (shouldPlaySound()) playNotificationSound();
-          
-          if (extraData.fromAgentName) {
-            console.log('[Workbench] 收到转接会话:', extraData.fromAgentName, extraData.conversation?.userName || '访客');
-          } else {
-            console.log('[Workbench] 收到新的转接会话');
-          }
-
-          const fromName = extraData.fromAgentName || '其他客服';
-          loadConversations().then(() => {
-            const targetConv = conversations.value.find(c => c.id === conversationId);
-            if (targetConv) {
-              notifyNewMessage(targetConv, { ...data, content: `${fromName} 转接了一个会话`, conversationId });
-            }
-          });
+          // 转接提示：单次声音 + 桌面通知 由 CsBackgroundService 统一处理
+          loadConversations();
         }
         // 如果当前客服是原负责人
         else if (extraData.fromAgentId === agentId.value) {
@@ -4731,10 +4643,9 @@ async function handleWsMessage(data: any) {
             console.log('[Workbench] 会话已转接给', extraData.toAgentName);
             currentConversation.value = null;
           }
-          
-          // 持续响铃：会话已转出，dequeue 避免幽灵响铃
-          ring.dequeueContinuousRing(conversationId);
-          
+
+          // 持续响铃 dequeue 由 CsBackgroundService 接管（fromAgentId === me 时已 clearVisitorWaiting + dequeue）。
+
           // 关键事件：会话归属变化，100ms 微缓冲后立即刷新 my/colleague 徽标
           loadStatsImmediate();
         }
@@ -4934,14 +4845,7 @@ async function handleWsMessage(data: any) {
       break;
     }
     case 'agent_timeout_reminder':
-      // 客服超时未回复提醒（后端定时任务推送）
-      if (shouldPlaySound()) playNotificationSound();
-      if (data.conversationId) {
-        if (!visitorLastMsgTime.has(data.conversationId)) {
-          const timeoutSec = data.extra?.timeoutSeconds || agentTimeoutConfig.value.seconds;
-          markVisitorWaiting(data.conversationId, Date.now() - timeoutSec * 1000);
-        }
-      }
+      // 提示音 + 访客等待 + 持续响铃 兜底全部由 CsBackgroundService 接管。
       break;
     case 'visitor_updated': {
       const extraData = data.extra || data;
@@ -5005,9 +4909,8 @@ async function handleWsMessage(data: any) {
       break;
     }
     case 'quota_kick': {
+      // CsBackgroundService 已处理 ws.close + logout，这里只展示提示
       message.warning(decryptTransport(data.content) || '客服坐席已满，您已被强制下线');
-      closeWebSocket();
-      userStore.logout(true);
       break;
     }
   }
@@ -5032,61 +4935,7 @@ function shouldPlaySound() {
   return soundEnabled.value && route.path === '/cs/workbench';
 }
 
-function notifyNewMessage(conv: any, data: any) {
-  const isInBackground = !document.hasFocus();
-  if (!isInBackground) return;
-
-  const conversationId = data.conversationId;
-  const now = Date.now();
-  const lastNotify = lastNotifyMap.get(conversationId) || 0;
-  if (now - lastNotify < 2000) return;
-  lastNotifyMap.set(conversationId, now);
-
-  const title = conv ? getDisplayName(conv) : '新消息';
-  const attachments = getMessageAttachments({ extra: data.extra });
-  const body = buildMessagePreview(data.content || '', attachments) || '收到一条新消息';
-
-  if (globSetting.isElectronPlatform && window[ElectronEnum.ELECTRON_API]) {
-    const api = window[ElectronEnum.ELECTRON_API];
-    api.sendNotifyFlash();
-    api.trayFlash();
-    const convId = data.conversationId || conv?.id || '';
-    api.sendNotification(title, body, '/cs/workbench?conversationId=' + convId);
-    return;
-  }
-
-  if (typeof Notification === 'undefined') return;
-  const showNotification = () => {
-    try {
-      const prev = activeNotifications.get(conversationId);
-      if (prev) try { prev.close(); } catch {}
-      const notification = new Notification(title, { body, tag: conversationId });
-      activeNotifications.set(conversationId, notification);
-      notification.onclick = () => {
-        window.focus();
-        const targetId = data.conversationId || conv?.id;
-        if (targetId) {
-          const found = conversations.value.find(c => c.id === targetId);
-          if (found) selectConversation(found);
-        }
-        notification.close();
-      };
-      notification.onclose = () => activeNotifications.delete(conversationId);
-    } catch (e) {
-      // 忽略通知错误
-    }
-  };
-
-  if (Notification.permission === 'granted') {
-    showNotification();
-  } else if (Notification.permission === 'default') {
-    Notification.requestPermission().then(permission => {
-      if (permission === 'granted') {
-        showNotification();
-      }
-    });
-  }
-}
+// notifyNewMessage 已迁至 CsBackgroundService（跨菜单全局通知），workbench 不再维护本地副本。
 
 // 工具函数
 function getDateKey(time: string | Date) {
@@ -5373,6 +5222,9 @@ function restoreMessageScroll() {
 //
 // 仅提供子组件确实需要的最小集合（只读 ref / computed + 必要 callback）；
 // WebSocket 实例、消息缓冲、sendMessage 等核心业务保留在父级。
+//
+// 持续响铃相关字段全部来自 csStore（state owner），抽屉 v-model 自动绑定到 store；
+// setter 走 csStore.setXxx，timer / Electron flash 副作用由 background 内 ring 实例 watch 自动驱动。
 const csWorkbenchSettings: CsWorkbenchSettings = {
   selectedAppId,
   visitorAppId,
@@ -5381,23 +5233,22 @@ const csWorkbenchSettings: CsWorkbenchSettings = {
   soundEnabled,
   soundVolumePercent,
   aiAppList,
-  // 持续响铃配置
-  continuousRingMode: ring.continuousRingMode,
-  ringStopCondition: ring.ringStopCondition,
-  ringIntervalSeconds: ring.ringIntervalSeconds,
-  continuousRingActive: ring.continuousRingActive,
-  isRingPaused: ring.isRingPaused,
-  pauseRemainSeconds: ring.pauseRemainSeconds,
+  continuousRingMode: csContinuousRingMode,
+  ringStopCondition: csRingStopCondition,
+  ringIntervalSeconds: csRingIntervalSeconds,
+  continuousRingActive: csContinuousRingActive,
+  isRingPaused: csIsRingPaused,
+  pauseRemainSeconds: csPauseRemainSeconds,
   onAppChange,
   onVisitorAppChange,
   onAiEnabledChange,
   onAiPrologueEnabledChange,
   onSoundEnabledChange,
-  onContinuousRingModeChange: ring.onContinuousRingModeChange,
-  onRingStopConditionChange: ring.onRingStopConditionChange,
-  onRingIntervalChange: ring.onRingIntervalChange,
-  onPauseRing: ring.onPauseRing,
-  onResumeRing: ring.onResumeRing,
+  onContinuousRingModeChange: csStore.setContinuousRingMode,
+  onRingStopConditionChange: csStore.setRingStopCondition,
+  onRingIntervalChange: csStore.setRingIntervalSeconds,
+  onPauseRing: csStore.pauseRing,
+  onResumeRing: csStore.resumeRing,
 };
 const csWorkbenchContext: CsWorkbenchContext = {
   agentId,

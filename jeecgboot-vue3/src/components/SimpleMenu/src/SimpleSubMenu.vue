@@ -9,6 +9,7 @@
         {{ getI18nName }}
       </span>
       <SimpleMenuTag :item="item" :collapseParent="getIsCollapseParent" />
+      <CsMenuBadge :item="item" :collapseParent="getIsCollapseParent" />
     </template>
   </MenuItem>
   <SubMenu
@@ -29,6 +30,7 @@
         {{ getI18nName }}
       </span>
       <SimpleMenuTag :item="item" :collapseParent="!!collapse && !!parent" />
+      <CsMenuBadge :item="item" :collapseParent="!!collapse && !!parent" />
     </template>
     <template v-for="childrenItem in item.children || []" :key="childrenItem.path">
       <SimpleSubMenu v-bind="$props" :isThemeBright="isThemeBright" :item="childrenItem" :parent="false" />
@@ -45,6 +47,7 @@
   import { checkChildrenHidden } from '/@/utils/common/compUtils';
   import MenuItem from './components/MenuItem.vue';
   import SubMenu from './components/SubMenuItem.vue';
+  import CsMenuBadge from './components/CsMenuBadge.vue';
   import { propTypes } from '/@/utils/propTypes';
   import { useI18n } from '/@/hooks/web/useI18n';
   import { createAsyncComponent } from '/@/utils/factory/createAsyncComponent';
@@ -55,6 +58,7 @@
       SubMenu,
       MenuItem,
       SimpleMenuTag: createAsyncComponent(() => import('./SimpleMenuTag.vue')),
+      CsMenuBadge,
       Icon,
     },
     props: {

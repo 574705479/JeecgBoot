@@ -10,6 +10,8 @@
         <LayoutFooter />
       </Layout>
     </Layout>
+    <!-- 客服后台服务：跨菜单接收 ws 消息、触发桌面通知 / title 闪烁 / 单次响铃 / 维护菜单角标 -->
+    <CsBackgroundService />
   </Layout>
 </template>
 
@@ -22,6 +24,7 @@
   import LayoutContent from './content/index.vue';
   import LayoutSideBar from './sider/index.vue';
   import LayoutMultipleHeader from './header/MultipleHeader.vue';
+  import CsBackgroundService from '/@/views/super/airag/cs/workbench/components/CsBackgroundService.vue';
 
   import { useHeaderSetting } from '/@/hooks/setting/useHeaderSetting';
   import { useMenuSetting } from '/@/hooks/setting/useMenuSetting';
@@ -45,6 +48,7 @@
       LayoutSideBar,
       LayoutMultipleHeader,
       Layout,
+      CsBackgroundService,
     },
     setup() {
       const { prefixCls } = useDesign('default-layout');

@@ -32,6 +32,7 @@
           :key="item.path"
         >
           <SimpleMenuTag :item="item" collapseParent dot />
+          <CsMixSiderBadge :item="item" />
           <Icon :class="`${prefixCls}-module__icon`" :size="getCollapsed ? 16 : 20" :icon="item.icon || (item.meta && item.meta.icon)" />
           <p :class="`${prefixCls}-module__name`">
             {{ t(item.name) }}
@@ -81,6 +82,7 @@
   import { listenerRouteChange } from '/@/logics/mitt/routeChange';
   import LayoutTrigger from '../trigger/index.vue';
   import { useAppStore } from '/@/store/modules/app';
+  import CsMixSiderBadge from './CsMixSiderBadge.vue';
 
   export default defineComponent({
     name: 'LayoutMixSider',
@@ -91,6 +93,7 @@
       Icon,
       LayoutTrigger,
       SimpleMenuTag,
+      CsMixSiderBadge,
     },
     directives: {
       clickOutside,
