@@ -51,6 +51,16 @@ public interface ICsMessageService {
                               String userIp, String userAgent, String deviceId, String userLang);
 
     /**
+     * 用户发送消息（带附件 + 访客上下文 + 客户端对账ID）
+     *
+     * <p>clientMsgId 为访客端生成的乐观消息ID，原样持久化并在 ack / list / 握手 recentMessages 回传，
+     * 用于前端把本地乐观气泡精确对账，避免重复。</p>
+     */
+    CsMessage sendUserMessage(String conversationId, String userId, String userName, String content,
+                              Integer msgType, String extra, String clientMsgId,
+                              String userIp, String userAgent, String deviceId, String userLang);
+
+    /**
      * 用户发送消息（仅保存+推送，不触发AI回复）
      * 用于FAQ等场景，由预设答案代替AI回复
      *

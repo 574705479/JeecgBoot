@@ -77,6 +77,11 @@ public class CsMessage implements Serializable {
     @Schema(description = "AI建议ID(如果是确认AI建议发送的)")
     private String aiSuggestionId;
 
+    // ==================== 客户端对账 ====================
+
+    @Schema(description = "客户端消息ID(访客端乐观消息对账用)")
+    private String clientMsgId;
+
     // ==================== 状态信息 ====================
 
     @Schema(description = "状态: 0-发送中 1-已发送 2-已读 3-撤回 4-发送失败")

@@ -249,6 +249,7 @@ public class CsMessageController {
         String senderName = (String) params.get("senderName");
         Integer msgType = params.get("msgType") instanceof Number ? ((Number) params.get("msgType")).intValue() : null;
         String extra = params.get("extra") != null ? String.valueOf(params.get("extra")) : null;
+        String clientMsgId = params.get("clientMsgId") != null ? String.valueOf(params.get("clientMsgId")) : null;
         
         // 兼容处理 senderType，可能是字符串或数字
         Object senderTypeObj = params.get("senderType");
@@ -314,7 +315,7 @@ public class CsMessageController {
         if ("user".equals(senderType)) {
             String[] ctx = extractVisitorContext(request);
             message = messageService.sendUserMessage(conversationId, senderId, senderName, content, msgType, extra,
-                    ctx[0], ctx[1], ctx[2], ctx[3]);
+                    clientMsgId, ctx[0], ctx[1], ctx[2], ctx[3]);
         } else {
             message = messageService.sendAgentMessage(conversationId, senderId, senderName, content, msgType, extra);
         }
@@ -852,6 +853,7 @@ public class CsMessageController {
         copy.setIsAiGenerated(original.getIsAiGenerated());
         copy.setAiConfirmed(original.getAiConfirmed());
         copy.setAiSuggestionId(original.getAiSuggestionId());
+        copy.setClientMsgId(original.getClientMsgId());
         return copy;
     }
 

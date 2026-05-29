@@ -291,6 +291,7 @@ public class CsWebSocketHandler implements WebSocketHandler {
                 lite.put("createTime", m.getCreateTime());
                 lite.put("extra", m.getExtra());
                 lite.put("isAiGenerated", m.getIsAiGenerated());
+                lite.put("clientMsgId", m.getClientMsgId());
                 recentLite.add(lite);
             }
             extra.put("recentMessages", recentLite);
@@ -465,6 +466,7 @@ public class CsWebSocketHandler implements WebSocketHandler {
         String userName = json.getString("userName");
         Integer msgType = json.getInteger("msgType");
         String extra = json.getString("extra");
+        String clientMsgId = json.getString("clientMsgId");
 
         if (oConvertUtils.isEmpty(conversationId) || (oConvertUtils.isEmpty(content) && oConvertUtils.isEmpty(extra))) {
             return;
@@ -477,6 +479,7 @@ public class CsWebSocketHandler implements WebSocketHandler {
                     CsWebSocketMessage errorMsg = CsWebSocketMessage.builder()
                             .type(CsWebSocketMessage.TYPE_SENSITIVE_WORD_BLOCKED)
                             .conversationId(conversationId)
+                            .clientMsgId(clientMsgId)
                             .content(csCryptoUtil.encryptTransport("消息包含敏感内容，请修改后重试"))
                             .timestamp(new java.util.Date())
                             .build();
@@ -489,8 +492,24 @@ public class CsWebSocketHandler implements WebSocketHandler {
             String userAgent = sessionManager.getUserAgent(session);
             String deviceId = sessionManager.getDeviceId(session);
             String userLang = sessionManager.getUserLang(session);
-            messageService.sendUserMessage(conversationId, userId, userName, content, msgType, extra,
-                    userIp, userAgent, deviceId, userLang);
+            org.jeecg.modules.airag.cs.entity.CsMessage saved = messageService.sendUserMessage(
+                    conversationId, userId, userName, content, msgType, extra,
+                    clientMsgId, userIp, userAgent, deviceId, userLang);
+            // 乐观消息对账：把 server 真实 messageId 回传给发送者本人（仅当前连接），前端据 clientMsgId 标记已送达
+            if (oConvertUtils.isNotEmpty(clientMsgId) && saved != null) {
+                try {
+                    CsWebSocketMessage ack = CsWebSocketMessage.builder()
+                            .type(CsWebSocketMessage.TYPE_MESSAGE_ACK)
+                            .conversationId(conversationId)
+                            .messageId(saved.getId())
+                            .clientMsgId(clientMsgId)
+                            .timestamp(new java.util.Date())
+                            .build();
+                    session.sendMessage(new TextMessage(JSON.toJSONString(ack)));
+                } catch (Exception e) {
+                    log.warn("[CS-WebSocket] 发送 message_ack 失败: clientMsgId={}, err={}", clientMsgId, e.getMessage());
+                }
+            }
         } else {
             // 客服发送消息
             var agent = agentService.getById(userId);

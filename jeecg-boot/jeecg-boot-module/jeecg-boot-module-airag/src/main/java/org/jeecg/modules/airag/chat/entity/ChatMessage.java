@@ -143,6 +143,9 @@ public class ChatMessage implements Serializable {
     /** AI建议ID */
     private String aiSuggestionId;
 
+    /** 客户端消息ID（访客端乐观消息对账用） */
+    private String clientMsgId;
+
     // ==================== 时间字段 ====================
 
     /** 创建时间 */

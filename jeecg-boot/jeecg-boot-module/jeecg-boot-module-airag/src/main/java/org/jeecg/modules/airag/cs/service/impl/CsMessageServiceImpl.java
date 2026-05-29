@@ -258,6 +258,14 @@ public class CsMessageServiceImpl implements ICsMessageService {
     public CsMessage sendUserMessage(String conversationId, String userId, String userName, String content,
                                      Integer msgType, String extra,
                                      String userIp, String userAgent, String deviceId, String userLang) {
+        return sendUserMessage(conversationId, userId, userName, content, msgType, extra,
+                null, userIp, userAgent, deviceId, userLang);
+    }
+
+    @Override
+    public CsMessage sendUserMessage(String conversationId, String userId, String userName, String content,
+                                     Integer msgType, String extra, String clientMsgId,
+                                     String userIp, String userAgent, String deviceId, String userLang) {
         log.debug("[CS-Message] 用户发送消息(含附件): conversationId={}, userId={}, msgType={}", conversationId, userId, msgType);
 
         // 确保会话存在（同步）
@@ -272,6 +280,9 @@ public class CsMessageServiceImpl implements ICsMessageService {
         if (oConvertUtils.isNotEmpty(extra)) {
             // 【S-P0-8】保存前规范化 attachments[].type，避免历史/前端漏传导致前端 cse:// 兜底破图
             userMessage.setExtra(normalizeAttachmentTypes(extra));
+        }
+        if (oConvertUtils.isNotEmpty(clientMsgId)) {
+            userMessage.setClientMsgId(clientMsgId);
         }
 
         // 构造 WS payload（一次加密+序列化），同步立即广播给在线客服
@@ -1364,6 +1375,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
             chatMessage.setAiConfirmed(message.getAiConfirmed());
             chatMessage.setAiSuggestionId(message.getAiSuggestionId());
             chatMessage.setMsgType(message.getMsgType() != null ? message.getMsgType() : ChatMessage.MSG_TYPE_TEXT);
+            chatMessage.setClientMsgId(message.getClientMsgId());
             if (oConvertUtils.isNotEmpty(message.getExtra())) {
                 try {
                     chatMessage.setExtra(JSONObject.parseObject(message.getExtra()));
@@ -1515,6 +1527,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
             csMsg.setIsAiGenerated(msg.getIsAiGenerated());
             csMsg.setAiConfirmed(msg.getAiConfirmed());
             csMsg.setAiSuggestionId(msg.getAiSuggestionId());
+            csMsg.setClientMsgId(msg.getClientMsgId());
             messages.add(csMsg);
         }
         return messages;
@@ -1563,6 +1576,7 @@ public class CsMessageServiceImpl implements ICsMessageService {
                 .senderType(message.getSenderType())
                 .isAiGenerated(message.getIsAiGenerated())
                 .extra(extraMap)
+                .clientMsgId(message.getClientMsgId())
                 .timestamp(message.getCreateTime())
                 .build();
     }

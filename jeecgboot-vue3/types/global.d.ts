@@ -78,6 +78,8 @@ declare global {
     VITE_GLOB_QIANKUN_MICRO_APP_ENTRY?: string;
     // 当前运行在什么平台
     VITE_GLOB_RUN_PLATFORM?: 'web' | 'electron';
+    /** 客服系统版本号（在 .env 中维护，发版时修改） */
+    VITE_GLOB_CS_VERSION: string;
     /** 客服 AES，与后端 jeecg.cs.crypto 一致；不设则走开发默认 */
     VITE_CS_STORAGE_KEY?: string;
     VITE_CS_STORAGE_IV?: string;

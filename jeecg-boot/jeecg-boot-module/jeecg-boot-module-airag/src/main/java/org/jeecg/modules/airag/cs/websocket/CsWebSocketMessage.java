@@ -85,6 +85,11 @@ public class CsWebSocketMessage {
      */
     private String error;
 
+    /**
+     * 客户端消息ID（访客端乐观消息对账用，原样回传）
+     */
+    private String clientMsgId;
+
     // ==================== 消息类型常量 ====================
 
     /** 发送消息 */
@@ -143,6 +148,8 @@ public class CsWebSocketMessage {
     public static final String TYPE_AGENT_TIMEOUT_REMINDER = "agent_timeout_reminder";
     /** 消息投递失败 */
     public static final String TYPE_DELIVERY_FAILED = "delivery_failed";
+    /** 访客消息送达确认（回传 clientMsgId + 服务端 messageId，供乐观消息对账） */
+    public static final String TYPE_MESSAGE_ACK = "message_ack";
 
     // ---------- AI 相关 ----------
     /** AI 流式 */

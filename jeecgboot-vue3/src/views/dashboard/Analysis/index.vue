@@ -261,7 +261,7 @@ async function fetchAgentList() {
 
 // ==================== 授权信息 ====================
 const licenseInfo = reactive({
-  version: 'V1.0.0',
+  version: 'V' + (import.meta.env.VITE_GLOB_CS_VERSION || '1.0.0'),
   maxAgents: '不限' as string | number,
   expireDate: '永久授权',
 });

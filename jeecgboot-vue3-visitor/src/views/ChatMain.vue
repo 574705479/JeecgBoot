@@ -1689,11 +1689,11 @@ async function applyConversationAndMessages(vo: BootstrapResponse, opts: { commi
     }
   } catch {}
 
-  const serverIds = new Set(list.map((m: any) => m.id));
+  const serverClientIds = new Set(list.map((m: any) => m.clientMsgId).filter(Boolean));
   const localAndStreaming = messages.value.filter((m: any) => {
-    if (String(m.id).startsWith('local_')) {
-      if (serverIds.has(m.id)) return false;
-      return !list.some((s: any) => s.senderId === m.senderId && s.id === m.id);
+    if (m._optimistic) {
+      if (m.clientMsgId && serverClientIds.has(m.clientMsgId)) return false;
+      return true;
     }
     if (m.isStreaming) return true;
     if (m.senderType === 3) {
@@ -2711,6 +2711,8 @@ function dismissReply(replyId: string) {
 // 加载历史消息
 async function loadMessages() {
   if (!conversationId.value || conversationId.value.startsWith('temp_')) return;
+  // 防重入：visibilitychange + ws.onopen + fallback poll 可能并发触发，避免"刷新两遍"
+  if (loading.value) return;
 
   loading.value = true;
   try {
@@ -2737,15 +2739,12 @@ async function loadMessages() {
           return;
         }
       }
-      // 智能合并：保留 local_ 消息和正在流式输出的消息（基于id去重）
-      const serverIds = new Set(list.map((m: any) => m.id));
+      // 智能合并：用 _optimistic + clientMsgId 对账本地乐观消息，仅当 server 已收录该 clientMsgId 时才丢弃（规避异步落库窗口闪失）
+      const serverClientIds = new Set(list.map((m: any) => m.clientMsgId).filter(Boolean));
       const localAndStreaming = messages.value.filter((m: any) => {
-        if (String(m.id).startsWith('local_')) {
-          if (serverIds.has(m.id)) return false;
-          return !list.some((s: any) =>
-            s.senderId === m.senderId &&
-            s.id === m.id
-          );
+        if (m._optimistic) {
+          if (m.clientMsgId && serverClientIds.has(m.clientMsgId)) return false;
+          return true;
         }
         if (m.isStreaming) return true;
         if (m.senderType === 3) {
@@ -3180,10 +3179,15 @@ function stopHeartbeat() {
 function mergeWsRecentMessages(raw: any[]) {
   if (!Array.isArray(raw) || raw.length === 0) return;
   const existingIds = new Set(messages.value.map((m: any) => m.id));
+  // 已被本地乐观消息占位的 clientMsgId：握手补齐时跳过，避免与未转正的 local_ 气泡并存重复
+  const localClientIds = new Set(
+    messages.value.filter((m: any) => m._optimistic && m.clientMsgId).map((m: any) => m.clientMsgId)
+  );
   const fresh: any[] = [];
   for (const m of raw) {
     if (!m || !m.id) continue;
     if (existingIds.has(m.id)) continue;
+    if (m.clientMsgId && localClientIds.has(m.clientMsgId)) continue;
     fresh.push({
       id: m.id,
       conversationId: m.conversationId,
@@ -3196,6 +3200,7 @@ function mergeWsRecentMessages(raw: any[]) {
       createTime: m.createTime,
       extra: m.extra,
       isAiGenerated: m.isAiGenerated,
+      clientMsgId: m.clientMsgId,
     });
   }
   if (fresh.length === 0) return;
@@ -3228,6 +3233,21 @@ function handleWsMessage(data: any) {
       }
       break;
 
+    case 'message_ack': {
+      // 乐观消息送达确认：按 clientMsgId 命中本地乐观气泡，更新状态/转正 id。
+      // saveToMongo 异步、ack 可能先于落库，故此处只标记，真正去重交给 loadMessages 按 clientMsgId 合并
+      const cmid = data.clientMsgId;
+      const sid = data.messageId;
+      if (cmid) {
+        const idx = messages.value.findIndex((m: any) => m._optimistic && m.clientMsgId === cmid);
+        if (idx !== -1) {
+          if (sid) messages.value[idx].id = sid;
+          messages.value[idx].status = 1;
+        }
+      }
+      break;
+    }
+
     case 'message':
       // 收到新消息（来自客服或AI）
       const msgSenderType = Number(data.senderType);
@@ -3247,8 +3267,13 @@ function handleWsMessage(data: any) {
         isAiGenerated: data.isAiGenerated,
         createTime: data.timestamp || new Date().toISOString(),
       };
-      // 避免重复添加
-      if (!messages.value.find(m => m.id === newMsg.id)) {
+      // 端到端对账：带 clientMsgId 且命中本地乐观气泡 → 原地转正，不重复追加（前向兼容 echo / FAQ 回显路径）
+      const ackCmid = data.clientMsgId;
+      const optIdx = ackCmid ? messages.value.findIndex((m: any) => m._optimistic && m.clientMsgId === ackCmid) : -1;
+      if (optIdx !== -1) {
+        messages.value[optIdx] = { ...newMsg, _optimistic: true, clientMsgId: ackCmid };
+      } else if (!messages.value.find(m => m.id === newMsg.id)) {
+        // 避免重复添加
         messages.value.push(newMsg);
         scrollToBottom();
         if (msgSenderType !== 0) {
@@ -3461,8 +3486,13 @@ async function sendMessage() {
   const msgType = attachments.length > 0 ? 5 : 0;
   const extra = attachments.length > 0 ? JSON.stringify({ attachments: attachments.map(a => ({ name: a.name, url: a.url, size: a.size, type: a.type })) }) : undefined;
 
+  // 端到端对账：生成唯一 clientMsgId 随上行带给后端，后端持久化并在 ack/list/握手 recentMessages 原样回传
+  const clientMsgId = 'cmid_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+
   const localMsg: any = {
     id: 'local_' + Date.now(),
+    clientMsgId,
+    _optimistic: true,
     conversationId: conversationId.value,
     content: content,
     senderType: 0,
@@ -3491,9 +3521,10 @@ async function sendMessage() {
         userName: userName.value,
         msgType,
         extra,
+        clientMsgId,
       }));
     } else {
-      await httpPost({
+      const httpRes = await httpPost({
         url: '/cs/message/send',
         data: {
           conversationId: conversationId.value,
@@ -3503,8 +3534,14 @@ async function sendMessage() {
           senderType: 'user',
           msgType,
           extra,
+          clientMsgId,
         },
       });
+      // HTTP 分支无 WS ack，用响应里的 server id 提前转正（仍保留 _optimistic，最终去重交给 loadMessages 合并）
+      try {
+        const serverId = (httpRes as any)?.id || (httpRes as any)?.result?.id;
+        if (serverId) localMsg.id = serverId;
+      } catch {}
     }
     // 发送成功后才展示消息气泡并清空输入
     messages.value.push(localMsg);
