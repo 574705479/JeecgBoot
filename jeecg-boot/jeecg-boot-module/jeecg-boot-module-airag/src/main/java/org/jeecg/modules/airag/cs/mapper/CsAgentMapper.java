@@ -23,7 +23,7 @@ public interface CsAgentMapper extends BaseMapper<CsAgent> {
      * 
      * @return 客服列表
      */
-    @Select("SELECT * FROM cs_agent WHERE status = 1 AND current_sessions < max_sessions ORDER BY current_sessions ASC, RAND()")
+    @Select("SELECT * FROM cs_agent WHERE status = 1 AND current_sessions < COALESCE(NULLIF(max_sessions, 0), 10) ORDER BY current_sessions ASC, RAND()")
     List<CsAgent> selectAvailableAgents();
 
     /**
@@ -31,7 +31,7 @@ public interface CsAgentMapper extends BaseMapper<CsAgent> {
      * 
      * @return 客服列表
      */
-    @Select("SELECT * FROM cs_agent WHERE status = 1 AND current_sessions < max_sessions ORDER BY create_time ASC")
+    @Select("SELECT * FROM cs_agent WHERE status = 1 AND current_sessions < COALESCE(NULLIF(max_sessions, 0), 10) ORDER BY create_time ASC")
     List<CsAgent> selectAvailableAgentsForRoundRobin();
 
     /**
@@ -42,7 +42,7 @@ public interface CsAgentMapper extends BaseMapper<CsAgent> {
      */
     @Update({
         "<script>",
-        "UPDATE cs_agent SET current_sessions = current_sessions + 1 WHERE id = #{agentId} AND current_sessions &lt; max_sessions",
+        "UPDATE cs_agent SET current_sessions = current_sessions + 1 WHERE id = #{agentId} AND current_sessions &lt; COALESCE(NULLIF(max_sessions, 0), 10)",
         "</script>"
     })
     int incrementCurrentSessions(@Param("agentId") String agentId);
@@ -64,4 +64,31 @@ public interface CsAgentMapper extends BaseMapper<CsAgent> {
      */
     @Update("UPDATE cs_agent SET total_served = COALESCE(total_served, 0) + 1 WHERE id = #{agentId}")
     int incrementTotalServed(@Param("agentId") String agentId);
+
+    /**
+     * 以 cs_conversation 为准，将指定客服的 current_sessions 重算为其实际进行中(已分配)的会话数。
+     *
+     * <p>current_sessions 原本是手工 +1/-1 维护的计数，任何一次"加了没减"都会永久向上漂移，
+     * 漂移到 &gt;= max_sessions 后该客服虽在线却被分配 SQL（current_sessions &lt; max_sessions）静默排除，
+     * 导致访客一直堆在"未分配"。此方法用真实会话数对账，消除漂移。</p>
+     *
+     * @param agentId        客服ID
+     * @param assignedStatus 进行中会话状态值（{@code CsConversation.STATUS_ASSIGNED}）
+     * @return 影响行数
+     */
+    @Update("UPDATE cs_agent SET current_sessions = " +
+            "(SELECT COUNT(*) FROM cs_conversation c WHERE c.agent_id = cs_agent.id AND c.status = #{assignedStatus}) " +
+            "WHERE id = #{agentId}")
+    int recalcCurrentSessions(@Param("agentId") String agentId, @Param("assignedStatus") int assignedStatus);
+
+    /**
+     * 批量把所有"非离线"客服的 current_sessions 重算为真实进行中会话数（对账兜底，定时任务调用）。
+     *
+     * @param assignedStatus 进行中会话状态值（{@code CsConversation.STATUS_ASSIGNED}）
+     * @return 影响行数
+     */
+    @Update("UPDATE cs_agent SET current_sessions = " +
+            "(SELECT COUNT(*) FROM cs_conversation c WHERE c.agent_id = cs_agent.id AND c.status = #{assignedStatus}) " +
+            "WHERE status <> 0")
+    int recalcAllActiveAgents(@Param("assignedStatus") int assignedStatus);
 }

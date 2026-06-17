@@ -125,12 +125,26 @@ public class CsAgent implements Serializable {
     /** 管理者（可监控所有会话） */
     public static final int ROLE_SUPERVISOR = 1;
 
+    // ==================== 容量常量 ====================
+
+    /** 未配置(null)或非法(&lt;=0)时使用的默认最大同时接待数，与 DB 默认值、前端默认值保持一致 */
+    public static final int DEFAULT_MAX_SESSIONS = 10;
+
+    /**
+     * 有效最大同时接待数：max_sessions 为 null 或 &lt;=0（未配置/非法）时回退到 {@link #DEFAULT_MAX_SESSIONS}。
+     * 与分配 SQL 中的 {@code COALESCE(NULLIF(max_sessions,0),10)} 语义保持一致，
+     * 避免某客服因 max_sessions 配成 0/NULL 而"在线却永远分不到访客"。
+     */
+    public int effectiveMaxSessions() {
+        return (maxSessions == null || maxSessions <= 0) ? DEFAULT_MAX_SESSIONS : maxSessions;
+    }
+
     /**
      * 判断客服是否可以接待新会话
      */
     public boolean canAcceptSession() {
-        return status == STATUS_ONLINE && 
-               (maxSessions == null || currentSessions == null || currentSessions < maxSessions);
+        int cur = currentSessions == null ? 0 : currentSessions;
+        return status != null && status == STATUS_ONLINE && cur < effectiveMaxSessions();
     }
 
     /**

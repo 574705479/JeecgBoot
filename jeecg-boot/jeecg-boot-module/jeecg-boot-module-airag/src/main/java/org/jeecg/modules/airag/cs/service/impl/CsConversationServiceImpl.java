@@ -426,6 +426,11 @@ public class CsConversationServiceImpl extends ServiceImpl<CsConversationMapper,
             save(conversation);
             log.info("[CS-Conversation] 创建会话(无在线客服): id={}, userId={}", conversation.getId(), userId);
 
+            // ★ 实时自愈：落到"未分配"，但若当前有客服在线 → 极可能是 current_sessions 计数漂移误判已满。
+            // 事务提交后异步对账+补派（独立事务，避免长事务持锁/快照不可见），让本访客亚秒级被补派，
+            // 不必等 5 分钟定时对账。无客服在线时该调用为空操作。
+            agentService.triggerOnlineDriftHealAsync();
+
             if (faqEnabled) {
                 try {
                     messageService.sendInitialFaqMessage(conversation.getId());

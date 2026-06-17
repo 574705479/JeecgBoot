@@ -10,6 +10,7 @@ import org.jeecg.common.system.vo.LoginUser;
 import org.jeecg.common.util.oConvertUtils;
 import org.jeecg.modules.airag.cs.constant.CsRedisKeys;
 import org.jeecg.modules.airag.cs.entity.CsAgent;
+import org.jeecg.modules.airag.cs.entity.CsConversation;
 import org.jeecg.modules.airag.cs.entity.CsGlobalConfig;
 import org.jeecg.modules.airag.cs.mapper.CsAgentMapper;
 import org.jeecg.modules.airag.cs.mapper.CsGlobalConfigMapper;
@@ -23,6 +24,8 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import jakarta.annotation.PostConstruct;
 
@@ -33,6 +36,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 客服管理服务实现
@@ -80,6 +84,16 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
      */
     private final ConcurrentMap<String, Long> lastSweepTrigger = new ConcurrentHashMap<>();
     private static final long SWEEP_DEDUP_MS = 5000L;
+
+    /**
+     * 在线漂移实时自愈：单飞 + 尾沿合并调度。每个落到"未分配"的访客在其事务提交后登记一次请求，
+     * 保证"任何一次请求之后，都至少有一次在该请求之后启动的 reconcile"，从而不漏掉任何刚提交的未分配会话；
+     * 同时限频（最快每秒一次）合并突发，避免空转风暴。
+     */
+    private final AtomicBoolean healPending = new AtomicBoolean(false);
+    private final AtomicBoolean healRunning = new AtomicBoolean(false);
+    private volatile long lastHealStartMs = 0L;
+    private static final long DRIFT_HEAL_MIN_INTERVAL_MS = 1000L;
 
     @PostConstruct
     public void resetAllAgentsOnStartup() {
@@ -179,7 +193,25 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
                 .set(CsAgent::getLastOnlineTime, new Date()));
         log.info("[CS-Agent] 客服上线: agentId={}", agentId);
 
+        // 关键修复：上线即以"实际进行中会话数"重算 current_sessions，消除历史计数漂移。
+        // 否则若计数曾漂移到 >= max_sessions，客服虽在线也会被分配 SQL 静默跳过，访客一直堆在未分配。
+        // 必须在下面的 sweep 补派之前完成，sweep 才能基于真实容量派单。
+        try {
+            baseMapper.recalcCurrentSessions(agentId, CsConversation.STATUS_ASSIGNED);
+        } catch (Exception e) {
+            log.warn("[CS-Agent] 上线重算 current_sessions 失败（不阻断上线）: agentId={}, err={}", agentId, e.getMessage());
+        }
+
         addToOnlineZset(agentId);
+
+        // 重算后若该客服实际已满（current_sessions >= 有效上限），置忙碌而非在线，与 incrementSessions 行为一致，
+        // 避免"在线却已满"造成状态/角标不一致；已满也无需 sweep 派单。
+        CsAgent online = getById(agentId);
+        int cur = (online == null || online.getCurrentSessions() == null) ? 0 : online.getCurrentSessions();
+        if (online != null && cur >= online.effectiveMaxSessions()) {
+            setBusy(agentId);  // setBusy 内含 ZSET + 状态广播 + 日志
+            return;
+        }
 
         // ★ 广播客服状态变化
         broadcastAgentStatusChanged(agentId, CsAgent.STATUS_ONLINE, "在线");
@@ -396,6 +428,8 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
         } else {
             return assignBySaturation(agents);
         }
+        // 注：实时自愈不在此处做（会落在 createConversation 长事务内、且 REPEATABLE READ 下重算对并发访客不可见、
+        // 还会锁住全部在线客服行）。改由 createConversation 落到「未分配」后，事务提交后异步触发 reconcileActiveAgents。
     }
 
     /**
@@ -481,10 +515,13 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
         }
         int rows = baseMapper.incrementCurrentSessions(agentId);
         if (rows > 0) {
-            // 检查是否需要设置为忙碌
+            // 检查是否需要设置为忙碌（effectiveMaxSessions 兜底 null/0，避免 NPE 且与分配 SQL 阈值一致）
             CsAgent agent = getById(agentId);
-            if (agent != null && agent.getCurrentSessions() >= agent.getMaxSessions()) {
-                setBusy(agentId);
+            if (agent != null) {
+                int cur = agent.getCurrentSessions() == null ? 0 : agent.getCurrentSessions();
+                if (cur >= agent.effectiveMaxSessions()) {
+                    setBusy(agentId);
+                }
             }
             return true;
         }
@@ -498,12 +535,14 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
             return;
         }
         baseMapper.decrementCurrentSessions(agentId);
-        
-        // 检查是否需要恢复在线状态
+
+        // 检查是否需要恢复在线状态（effectiveMaxSessions 兜底 null/0，避免 NPE）
         CsAgent agent = getById(agentId);
-        if (agent != null && agent.getStatus() == CsAgent.STATUS_BUSY 
-                && agent.getCurrentSessions() < agent.getMaxSessions()) {
-            goOnline(agentId);
+        if (agent != null && agent.getStatus() != null && agent.getStatus() == CsAgent.STATUS_BUSY) {
+            int cur = agent.getCurrentSessions() == null ? 0 : agent.getCurrentSessions();
+            if (cur < agent.effectiveMaxSessions()) {
+                goOnline(agentId);
+            }
         }
     }
 
@@ -513,6 +552,107 @@ public class CsAgentServiceImpl extends ServiceImpl<CsAgentMapper, CsAgent> impl
             return;
         }
         baseMapper.incrementTotalServed(agentId);
+    }
+
+    @Override
+    public void reconcileActiveAgents() {
+        // 1) 以 cs_conversation 为准，批量重算所有非离线客服的 current_sessions（自愈计数漂移的兜底）。
+        int n = baseMapper.recalcAllActiveAgents(CsConversation.STATUS_ASSIGNED);
+        log.debug("[CS-Reconcile] 批量重算 current_sessions 完成: affected={}", n);
+
+        // 2) 重算后仍标记 BUSY 但已腾出空位的客服 → 恢复 ONLINE。
+        // 这里只做"状态更新 + 广播"，不逐个调用 goOnline（否则每个被恢复的客服都会各自触发一次 sweep，
+        // 形成 N+1 个并发 sweep 重复扫描未分配队列）；统一交给下方一次性 sweep。
+        List<CsAgent> busyAgents = list(new LambdaQueryWrapper<CsAgent>()
+                .eq(CsAgent::getStatus, CsAgent.STATUS_BUSY));
+        for (CsAgent a : busyAgents) {
+            int cur = a.getCurrentSessions() == null ? 0 : a.getCurrentSessions();
+            if (cur < a.effectiveMaxSessions()) {
+                update(new LambdaUpdateWrapper<CsAgent>()
+                        .eq(CsAgent::getId, a.getId())
+                        .set(CsAgent::getStatus, CsAgent.STATUS_ONLINE)
+                        .set(CsAgent::getLastOnlineTime, new Date()));
+                addToOnlineZset(a.getId());
+                broadcastAgentStatusChanged(a.getId(), CsAgent.STATUS_ONLINE, "在线");
+                agentStatusLogService.logStatusChange(a.getId(), CsAgentStatusLog.STATUS_ONLINE, CsAgentStatusLog.TRIGGER_SYSTEM);
+            }
+        }
+
+        // 3) 计数/状态已校准 → 异步补派一次未分配会话（全局一次，不阻塞、避免长事务持锁）。
+        asyncTaskExecutor.submitConversation(() -> {
+            try {
+                int assigned = conversationService.sweepUnassignedToOnlineAgents("reconcile");
+                if (assigned > 0) {
+                    log.info("[CS-Reconcile] 对账后补派未分配会话: assigned={}", assigned);
+                }
+            } catch (Exception e) {
+                log.error("[CS-Reconcile] 对账后补派失败", e);
+            }
+        });
+    }
+
+    @Override
+    public void triggerOnlineDriftHealAsync() {
+        try {
+            // 直接查库判断是否有非离线客服（不依赖 Redis ZSET 心跳新鲜度）；没有客服在线时未分配是正确结果。
+            long activeAgents = count(new LambdaQueryWrapper<CsAgent>().ne(CsAgent::getStatus, CsAgent.STATUS_OFFLINE));
+            if (activeAgents <= 0) {
+                return;
+            }
+            // 每个落到未分配的访客都登记一次请求；必须等创建会话的事务提交后再触发，否则刚落库的未分配会话尚不可见。
+            if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override
+                    public void afterCommit() {
+                        requestDriftHeal();
+                    }
+                });
+            } else {
+                requestDriftHeal();
+            }
+        } catch (Exception e) {
+            log.warn("[CS-Agent] 触发在线漂移自愈异常（忽略）: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 登记一次"需要在线漂移自愈"。单飞：同一时刻只有一个 drain 在跑；尾沿合并保证：
+     * 任何一次登记之后都至少有一次在其之后启动的 reconcile，故不会漏掉刚提交的未分配会话。
+     */
+    private void requestDriftHeal() {
+        healPending.set(true);
+        if (healRunning.compareAndSet(false, true)) {
+            asyncTaskExecutor.submitConversation(this::drainDriftHeal);
+        }
+    }
+
+    private void drainDriftHeal() {
+        try {
+            while (healPending.getAndSet(false)) {
+                // 限频：与上次 reconcile 起始至少间隔 DRIFT_HEAL_MIN_INTERVAL_MS，合并突发、避免空转风暴。
+                long since = System.currentTimeMillis() - lastHealStartMs;
+                if (since < DRIFT_HEAL_MIN_INTERVAL_MS) {
+                    try {
+                        Thread.sleep(DRIFT_HEAL_MIN_INTERVAL_MS - since);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                }
+                lastHealStartMs = System.currentTimeMillis();
+                try {
+                    reconcileActiveAgents();
+                } catch (Exception e) {
+                    log.error("[CS-Agent] 在线漂移实时自愈失败", e);
+                }
+            }
+        } finally {
+            healRunning.set(false);
+        }
+        // 收尾竞态：while 读到 false 与 healRunning 置 false 之间可能又来了请求 → 重新拉起一次。
+        if (healPending.get() && healRunning.compareAndSet(false, true)) {
+            asyncTaskExecutor.submitConversation(this::drainDriftHeal);
+        }
     }
 
     @Override

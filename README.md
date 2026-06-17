@@ -46,7 +46,7 @@
 - **FAQ 知识库**：支持无限层级嵌套问答、关键词触发、点击导航、富文本答案，可作为入口引导减轻人工压力。
 - **快捷回复**：支持文本、图片、文件、富文本四类，按客服私有 / 团队公共两类管理，支持快捷键秒发。
 - **客户管理（CRM 轻量版）**：访客画像、星标客户、自定义字段、留言管理、历史对话回溯、IP 归属地与设备识别。
-- **数据安全**：消息端到端混合加密（RSA-2048 密钥交换 + AES-256 数据加密 + HMAC-SHA256 完整性校验）、敏感词拦截、访客/IP 黑名单、客服 IP 白名单、登录日志审计。
+- **数据安全**：消息传输层 / 存储层双层 AES-256 对称加密（密钥与后端 `jeecg.cs.crypto` 配置一致）；图片 / 文件端到端加密（CSE：按文件 HKDF-SHA256 派生密钥 + AES-256-GCM，浏览器 WebCrypto，`@noble` 兜底）、敏感词拦截、访客 / IP 黑名单、客服 IP 白名单、登录日志审计。
 - **统计分析**：客服对话量、平均响应时长、首响时长、及时回复率、出勤记录、访客地域分布、对话效率排行等多维度报表。
 - **品牌定制**：聊天窗口主题、Logo、欢迎语、FAQ 引导文案、问候语、自动消息均可在线配置；支持多品牌/多租户。
 - **授权与配额**：内置授权客户端（License Client），与独立 License Server 联动，支持坐席、知识库、应用等多维配额校验，适合 SaaS 化销售。
@@ -195,7 +195,7 @@
 
 聊天消息存储在 **MongoDB** 集合 `chat_messages` 中（实体 `ChatMessage`）。
 
-数据库初始化脚本：`jeecg-boot/db/jeecgboot.sql`，增量脚本通过 **Flyway** 自动执行（位于 `jeecg-boot/jeecg-module-system/jeecg-system-start/src/main/resources/flyway/sql/mysql/`）。
+数据库结构由 **Flyway** 在应用启动时自动创建并升级，无需手动导入 SQL。迁移脚本位于 `jeecg-boot/jeecg-module-system/jeecg-system-start/src/main/resources/flyway/sql/mysql/`（基线 `V1_0_0__init_schema.sql` + `V1_0_1`～`V1_1_7` 客服功能增量脚本）。
 
 
 快速启动

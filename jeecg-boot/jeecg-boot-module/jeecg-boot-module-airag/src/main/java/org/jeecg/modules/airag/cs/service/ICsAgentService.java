@@ -96,10 +96,25 @@ public interface ICsAgentService extends IService<CsAgent> {
 
     /**
      * 增加客服累计服务数（会话结束时调用）
-     * 
+     *
      * @param agentId 客服ID
      */
     void incrementTotalServed(String agentId);
+
+    /**
+     * 客服会话数对账（定时任务调用）。
+     * <p>以 cs_conversation 进行中会话数为准，批量重算所有非离线客服的 current_sessions，
+     * 自愈"加了没减"造成的计数漂移；并把因漂移误标 BUSY、重算后已有空位的客服恢复 ONLINE，
+     * 最后异步补派一次未分配会话。根治"客服在线却因计数卡死分不到访客"。</p>
+     */
+    void reconcileActiveAgents();
+
+    /**
+     * 实时自愈触发：访客落到"未分配"但当前有客服在线时调用。
+     * <p>在调用方事务提交后异步执行一次 {@link #reconcileActiveAgents()}（带 3s 去抖），
+     * 让本访客在亚秒级被补派，而不必等 5 分钟定时对账。无客服在线时不触发。</p>
+     */
+    void triggerOnlineDriftHealAsync();
 
     /**
      * 查找任意一个在线且设置了AI应用的客服
